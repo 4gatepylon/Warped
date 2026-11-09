@@ -50,7 +50,7 @@ use shot_noise::ShotNoise;
 use exit_prompt::{ExitOutcome, ExitPrompt};
 use game::audio::Audio;
 use game::console_bot::BotWalker;
-use game::guns::{Gun, GunInput, Guns};
+use game::guns::{Gun, GunInput, make_weapons};
 use game::player::{Player, PlayerInput};
 use game::session::{Controls, FrameData, RobotHold, Session};
 use game::world::Arena;
@@ -984,10 +984,10 @@ fn main() {
         session.is_console_objective = args.bot_objective.is_some();
     }
     if args.photo.is_some() || args.video_frames.is_some() {
-        session.guns = Guns::New(ShotNoise::FromSeed(RECORDING_SHOT_NOISE_SEED));
+        session.weapons = make_weapons(ShotNoise::FromSeed(RECORDING_SHOT_NOISE_SEED));
     }
     if args.rifle {
-        session.guns.switch_gun(Gun::Rifle);
+        session.weapons.switch_gun(Gun::Rifle);
     }
     if !session.arena.warps.mouths.is_empty() && !args.bot {
         let capture_start: Instant = Instant::now();

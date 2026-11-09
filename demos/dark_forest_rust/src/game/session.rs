@@ -22,8 +22,8 @@ use super::collision::{Aabb, cast_ray};
 use super::console_bot::{BotWalker, WalkStep};
 use super::dust::{DustBurst, DustParticle, DustShape, MAX_DUST_BURST_COUNT};
 use super::guns::{
-    Gun, GunInput, GunStep, Guns, HALF_FOV_RAD, LASER_MAX_LENGTH_M, MUZZLE_M, Tracer,
-    take_hit_weight,
+    Gun, GunInput, GunStep, HALF_FOV_RAD, LASER_MAX_LENGTH_M, MUZZLE_M, Tracer, Weapons,
+    get_camera_from_muzzle, get_muzzle_m, make_weapons, update_weapons,
 };
 use super::hud::{HudState, build_hud, build_overlay_rects};
 use super::nav::NavGraph;
@@ -38,6 +38,7 @@ use crate::settings::{HIT_EFFECTS, ServerSettings};
 use crate::shot_noise::ShotNoise;
 use warped_shared::health::fade_effect_frac;
 use warped_shared::hud::{AmmoBar, HudBars, HudPulses, make_hit_effect};
+use warped_shared::weapons::take_hit_weight;
 
 /// `MAX_DECAL_COUNT` is how many impact marks stay in the world.
 const MAX_DECAL_COUNT: usize = 160;
@@ -208,7 +209,7 @@ pub struct Session {
     pub arena: Arena,
     pub nav: NavGraph,
     pub player: Player,
-    pub guns: Guns,
+    pub weapons: Weapons,
     pub settings: ServerSettings,
     pub movement: Movement,
     since_movement_key_s: f32,
@@ -316,7 +317,7 @@ impl Session {
             player: Player::new(spawn_m, yaw_rad),
             arena,
             nav,
-            guns: Guns::New(ShotNoise::FromClock()),
+            weapons: make_weapons(ShotNoise::FromClock()),
             movement,
             since_movement_key_s: 0.0,
             settings: ServerSettings::Builtin(),
@@ -444,12 +445,12 @@ impl Session {
     }
 
     /// `muzzle_world_m` gives where the tip of the gun in hand shows in the world
-    /// (`Guns::get_muzzle_m`), where this player's beams start.
+    /// (`guns::get_muzzle_m`), where this player's beams start.
     fn muzzle_world_m(&self) -> Vec3 {
-        let zoom: f64 = self.guns.get_zoom(&self.settings);
+        let zoom: f64 = self.weapons.get_zoom(&self.settings.aim);
         self.player
             .camera_world()
-            .transform_point3(self.guns.get_muzzle_m(zoom))
+            .transform_point3(get_muzzle_m(&self.weapons, zoom))
     }
 
     /// `get_beam_rgb` is the linear colour of `team`'s lasers: the map's, or Lunar Surface's team
@@ -587,7 +588,7 @@ impl Session {
             Remote(u32, bool, Vec3),
         }
         let aim: Mat4 = self
-            .guns
+            .weapons
             .shot_offset
             .aim(self.player.camera_world().as_dmat4())
             .as_mat4();
@@ -635,7 +636,7 @@ impl Session {
             },
         );
         let end_m: Vec3 = path.end_m;
-        let gun: Gun = self.guns.gun;
+        let gun: Gun = self.weapons.gun;
         let is_head_hit: bool = matches!(
             shot_hit,
             Some(ShotHit::Bot(_, true, _) | ShotHit::Remote(_, true, _))
@@ -644,9 +645,10 @@ impl Session {
             matches!(shot_hit, Some(ShotHit::Bot(..) | ShotHit::Remote(..)))
                 .then(|| {
                     take_hit_weight(
-                        &self.settings,
+                        &self.settings.sniper,
+                        &self.settings.rifle,
                         gun,
-                        &mut self.guns.has_rifle_shot_hit,
+                        &mut self.weapons.has_rifle_shot_hit,
                         is_head_hit,
                     )
                 })
@@ -702,7 +704,7 @@ impl Session {
             landing,
             muzzle_m,
             gun == Gun::Rifle,
-            self.guns.beam_speckle_frac,
+            self.weapons.beam_speckle_frac,
             self.team,
             true,
         );
@@ -945,7 +947,7 @@ impl Session {
             .update(f64::from(dt_s), &bars, &self.settings.rifle);
         let mut player_input: PlayerInput = controls.player;
         if !self.is_autopilot {
-            player_input.look_delta_rad /= self.guns.get_zoom(&self.settings) as f32;
+            player_input.look_delta_rad /= self.weapons.get_zoom(&self.settings.aim) as f32;
         }
         self.player.update(
             &player_input,
@@ -988,7 +990,8 @@ impl Session {
         };
         let mut gun_input: GunInput = controls.gun;
         gun_input.is_aim_held &= self.player.is_alive();
-        let kick_rad: Vec2 = self.guns.update(
+        let kick_rad: Vec2 = update_weapons(
+            &mut self.weapons,
             &gun_input,
             &self.settings,
             can_shoot,
@@ -996,7 +999,7 @@ impl Session {
             f64::from(dt_s),
         );
         self.player.kick_view(kick_rad);
-        let is_firing: bool = self.guns.is_firing();
+        let is_firing: bool = self.weapons.is_firing(true);
         if is_firing {
             self.shoot_player_laser(scene, audio);
         }
@@ -1249,16 +1252,16 @@ impl Session {
     /// `get_ammo_bar` is what the HUD's ammo bar shows now: the sniper's one block while it is
     /// loaded, or the rifle's heat in segments of one shot (red once overheated).
     fn get_ammo_bar(&self) -> AmmoBar {
-        match self.guns.gun {
+        match self.weapons.gun {
             Gun::Laser => AmmoBar {
-                frac: f64::from(u8::from(self.guns.sniper_reload_s <= 0.0)),
+                frac: f64::from(u8::from(self.weapons.sniper_reload_s <= 0.0)),
                 segment_count: 1,
                 is_overheated: false,
             },
             Gun::Rifle => AmmoBar {
-                frac: f64::from(1.0 - self.guns.rifle_heat_frac.min(1.0) as f32),
+                frac: f64::from(1.0 - self.weapons.rifle_heat_frac.min(1.0) as f32),
                 segment_count: self.settings.rifle.shots_until_overheat,
-                is_overheated: self.guns.is_overheated,
+                is_overheated: self.weapons.is_overheated,
             },
         }
     }
@@ -1314,7 +1317,7 @@ impl Session {
     /// `frame_data` turns the match into one frame for the renderer.
     pub fn frame_data(&self, scene: &Scene, width_px: f32, height_px: f32) -> FrameData {
         let camera_world: Mat4 = self.player.camera_world();
-        let zoom: f32 = self.guns.get_zoom(&self.settings) as f32;
+        let zoom: f32 = self.weapons.get_zoom(&self.settings.aim) as f32;
         let camera: Camera = Camera {
             view: camera_world.inverse(),
             position_m: self.player.eye_position_m(),
@@ -1524,13 +1527,13 @@ impl Session {
         let mut viewmodel_draws: Vec<DrawItem> = Vec::new();
         let viewmodel_particles: Vec<Particle> = Vec::new();
         if self.player.is_alive() {
-            let viewmodel: &GunViewmodel = match self.guns.gun {
+            let viewmodel: &GunViewmodel = match self.weapons.gun {
                 Gun::Laser => &scene.bolt_action_rifle,
                 Gun::Rifle => &scene.revolver,
             };
             viewmodel_draws.extend(draw_items_for(
                 &viewmodel.model,
-                camera_world * self.guns.get_camera_from_muzzle() * viewmodel.muzzle_from_gltf,
+                camera_world * get_camera_from_muzzle(&self.weapons) * viewmodel.muzzle_from_gltf,
                 false,
             ));
         }

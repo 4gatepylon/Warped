@@ -62,7 +62,8 @@ is in [`AGENTS.md`](AGENTS.md).
     "YOU DIED" lines, the hit feedback and the server's damage count shared, `claude/shared-hud-health`, open),
     #461 (City Sphere moves by the shared movement rules and gains Lunar's crouch, `claude/city-crouch`,
     merged), #466 (Dark Forest on the shared crate: its HUD, hit effect, shot noise and settings sections,
-    glam 0.34; `claude/dark-forest-shared-hud`, open).
+    glam 0.34; `claude/dark-forest-shared-hud`, merged), #DF3B_PR (Dark Forest's guns on the shared `Weapons`,
+    `claude/dark-forest-shared-guns`, open).
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
