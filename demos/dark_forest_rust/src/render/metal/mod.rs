@@ -50,7 +50,7 @@ use self::resources::{
     upload_texture_2d,
 };
 use crate::render::culling::{CASCADE_COUNT, CascadeCamera, Cascades, Frustum, fit_cascades};
-use crate::render::frame_clock::{MIN_GPU_SAMPLE_COUNT, choose_refreshes_per_frame};
+use crate::render::frame_clock::{MIN_CADENCE_SAMPLE_COUNT, choose_refreshes_per_frame};
 use crate::render::frame_trace::CompletedFrame;
 use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
@@ -85,6 +85,9 @@ const FULLSCREEN_VERTEX_COUNT: usize = 3;
 const SECONDS_TO_MS: f64 = 1000.0;
 /// `MATRIX_BYTES` is the size of one joint matrix.
 const MATRIX_BYTES: usize = 64;
+/// `PRESENT_STALE_S` is how long after the last frame reached the display the frames count as not
+/// shown (a sleeping display, a hidden window), which turns the even cadence off.
+const PRESENT_STALE_S: f64 = 0.25;
 /// `MAX_LENS_MOVER_COUNT` is how many robots' bounding spheres the lens pass looks for robots in;
 /// `post.metal`'s `LensUniforms` agrees.
 const MAX_LENS_MOVER_COUNT: usize = 16;
@@ -278,6 +281,7 @@ pub struct MetalRenderer {
     refresh_interval_s: Option<f64>,
     refreshes_per_frame: u32,
     gpu_ms_since_cadence: Vec<f64>,
+    shown_s_since_cadence: Arc<Mutex<Vec<f64>>>,
     gpu_times: Vec<CompletedFrame>,
     presented_times: Arc<Mutex<Vec<(usize, f64)>>>,
     drawable_size_px: (u32, u32),
@@ -460,6 +464,7 @@ impl MetalRenderer {
             refresh_interval_s: None,
             refreshes_per_frame: 1,
             gpu_ms_since_cadence: Vec::new(),
+            shown_s_since_cadence: Arc::new(Mutex::new(Vec::new())),
             gpu_times: Vec::new(),
             presented_times: Arc::new(Mutex::new(Vec::new())),
             drawable_size_px: (0, 0),
@@ -490,6 +495,44 @@ impl MetalRenderer {
     pub fn get_frame_interval_s(&self) -> Option<f32> {
         self.refresh_interval_s
             .map(|interval_s| (interval_s * f64::from(self.refreshes_per_frame)) as f32)
+    }
+
+    /// `update_cadence` picks how many refreshes each frame stays on screen, from the intervals
+    /// at which the last frames were shown and their GPU times; while frames don't reach a display
+    /// (it sleeps, or vsync is off), or `PRESENT_STALE_S` has passed since one did, it shows every
+    /// frame as soon as it can.
+    fn update_cadence(&mut self) {
+        let mut shown_s = self
+            .shown_s_since_cadence
+            .lock()
+            .expect("the cadence's lock is poisoned");
+        let is_showing: bool = shown_s.last().is_some_and(|&last_s| {
+            objc2_quartz_core::CACurrentMediaTime() - last_s < PRESENT_STALE_S
+        });
+        let Some(refresh_s) = self.refresh_interval_s.filter(|_| is_showing) else {
+            self.refreshes_per_frame = 1;
+            return;
+        };
+        if shown_s.len() <= MIN_CADENCE_SAMPLE_COUNT
+            || self.gpu_ms_since_cadence.len() < MIN_CADENCE_SAMPLE_COUNT
+        {
+            return;
+        }
+        let shown_intervals_ms: Vec<f64> = shown_s
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]) * SECONDS_TO_MS)
+            .collect();
+        let refreshes_per_frame: u32 = choose_refreshes_per_frame(
+            self.refreshes_per_frame,
+            &shown_intervals_ms,
+            &self.gpu_ms_since_cadence,
+            refresh_s * SECONDS_TO_MS,
+        );
+        if refreshes_per_frame != self.refreshes_per_frame {
+            self.refreshes_per_frame = refreshes_per_frame;
+            self.gpu_ms_since_cadence.clear();
+            shown_s.clear();
+        }
     }
 
     /// `set_is_tracing_frames` starts or stops keeping every frame's GPU times and the time it
@@ -537,7 +580,7 @@ impl MetalRenderer {
         if gpu_s > 0.0 {
             self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
             self.gpu_ms_since_cadence.push(self.last_gpu_ms);
-            if self.gpu_ms_since_cadence.len() > MIN_GPU_SAMPLE_COUNT {
+            if self.gpu_ms_since_cadence.len() > MIN_CADENCE_SAMPLE_COUNT {
                 self.gpu_ms_since_cadence.remove(0);
             }
         }
@@ -1775,38 +1818,37 @@ impl MetalRenderer {
             if let Some(drawable) = &drawable {
                 let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
                     ProtocolObject::from_ref(&**drawable);
-                if self.is_tracing_frames {
-                    let presented_times: Arc<Mutex<Vec<(usize, f64)>>> =
-                        Arc::clone(&self.presented_times);
-                    let handler =
-                        RcBlock::new(move |shown: NonNull<ProtocolObject<dyn MTLDrawable>>| {
-                            let presented_s: f64 = unsafe { shown.as_ref() }.presentedTime();
-                            presented_times
+                let presented_times: Option<Arc<Mutex<Vec<(usize, f64)>>>> = self
+                    .is_tracing_frames
+                    .then(|| Arc::clone(&self.presented_times));
+                let shown_s: Arc<Mutex<Vec<f64>>> = Arc::clone(&self.shown_s_since_cadence);
+                let handler =
+                    RcBlock::new(move |shown: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+                        let presented_s: f64 = unsafe { shown.as_ref() }.presentedTime();
+                        if let Some(times) = &presented_times {
+                            times
                                 .lock()
                                 .expect("the frame trace's lock is poisoned")
                                 .push((frame_index, presented_s));
-                        });
-                    unsafe { metal_drawable.addPresentedHandler(RcBlock::as_ptr(&handler)) };
-                }
-                match self.refresh_interval_s {
-                    Some(refresh_s) => {
-                        if self.gpu_ms_since_cadence.len() >= MIN_GPU_SAMPLE_COUNT {
-                            let refreshes_per_frame: u32 = choose_refreshes_per_frame(
-                                self.refreshes_per_frame,
-                                &self.gpu_ms_since_cadence,
-                                refresh_s * SECONDS_TO_MS,
-                            );
-                            if refreshes_per_frame != self.refreshes_per_frame {
-                                self.refreshes_per_frame = refreshes_per_frame;
-                                self.gpu_ms_since_cadence.clear();
+                        }
+                        if presented_s > 0.0 {
+                            let mut recent_s =
+                                shown_s.lock().expect("the cadence's lock is poisoned");
+                            recent_s.push(presented_s);
+                            if recent_s.len() > MIN_CADENCE_SAMPLE_COUNT + 1 {
+                                recent_s.remove(0);
                             }
                         }
-                        command_buffer.presentDrawable_afterMinimumDuration(
+                    });
+                unsafe { metal_drawable.addPresentedHandler(RcBlock::as_ptr(&handler)) };
+                self.update_cadence();
+                match self.get_frame_interval_s() {
+                    Some(frame_interval_s) if self.refreshes_per_frame > 1 => command_buffer
+                        .presentDrawable_afterMinimumDuration(
                             metal_drawable,
-                            refresh_s * f64::from(self.refreshes_per_frame),
-                        );
-                    }
-                    None => command_buffer.presentDrawable(metal_drawable),
+                            f64::from(frame_interval_s),
+                        ),
+                    _ => command_buffer.presentDrawable(metal_drawable),
                 }
             }
         }
