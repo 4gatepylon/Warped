@@ -14,13 +14,13 @@ use glam::{DMat4, Mat4, Vec3};
 
 use crate::console_reach::ConsolePlace;
 use crate::game::bots::Bot;
-use warped_shared::movement::get_crouched_height_frac;
 use crate::game::guns::Gun;
 use crate::game::session::{RemoteBot, Session};
 use crate::net::{Client, NetEvent};
 use crate::scene::Scene;
 use crate::settings::ServerSettings;
 use crate::thrown_wormholes::PlayerWormholes;
+use warped_shared::movement::get_crouched_height_frac;
 
 /// `STATE_PERIOD_S` is how often this player's state goes to the server.
 const STATE_PERIOD_S: f64 = 1.0 / 30.0;

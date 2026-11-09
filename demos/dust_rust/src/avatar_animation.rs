@@ -187,8 +187,8 @@ mod tests {
     //! | Corpse | of a player never seen (none), lying (with its team), older than its time (gone) | `corpses_lie_until_respawn` |
 
     use super::*;
-    use warped_shared::gait::{MAX_STRIDES_PER_S, MIN_AIR_S, STALE_SNAPSHOT_S};
     use crate::map::{Map, get_map_folder};
+    use warped_shared::gait::{MAX_STRIDES_PER_S, MIN_AIR_S, STALE_SNAPSHOT_S};
 
     const FRAME_S: f64 = 1.0 / 60.0;
     const START_M: [f64; 2] = [-27.0, 0.0];

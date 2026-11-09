@@ -157,28 +157,44 @@ mod tests {
     #[test]
     fn the_gait_follows_the_speed() {
         let mut gait: Gait = Gait::New(0.0);
-        assert_eq!(gait.get_pose(RUN_FROM_M_PER_S, 0.0, |_| DURATION_S).0, AvatarClip::Idle);
+        assert_eq!(
+            gait.get_pose(RUN_FROM_M_PER_S, 0.0, |_| DURATION_S).0,
+            AvatarClip::Idle
+        );
         let now_s: f64 = run_at(&mut gait, 5.0, 0.0, 1.0);
         let (clip, time_s) = gait.get_pose(RUN_FROM_M_PER_S, now_s, |_| DURATION_S);
         assert_eq!(clip, AvatarClip::Walk);
         assert!((0.0..DURATION_S).contains(&time_s));
         let now_s: f64 = run_at(&mut gait, 20.0, now_s, 1.0);
-        assert_eq!(gait.get_pose(RUN_FROM_M_PER_S, now_s, |_| DURATION_S).0, AvatarClip::Run);
+        assert_eq!(
+            gait.get_pose(RUN_FROM_M_PER_S, now_s, |_| DURATION_S).0,
+            AvatarClip::Run
+        );
         let now_s: f64 = run_at(&mut gait, 0.0, now_s, 2.0 * STALE_SNAPSHOT_S);
-        assert_eq!(gait.get_pose(RUN_FROM_M_PER_S, now_s, |_| DURATION_S).0, AvatarClip::Idle);
+        assert_eq!(
+            gait.get_pose(RUN_FROM_M_PER_S, now_s, |_| DURATION_S).0,
+            AvatarClip::Idle
+        );
     }
 
     #[test]
     fn jumping_starts_in_the_air() {
         let mut gait: Gait = Gait::New(0.0);
         gait.follow(None, false, RUN_FROM_M_PER_S, FRAME_S, FRAME_S);
-        assert_eq!(gait.get_pose(RUN_FROM_M_PER_S, FRAME_S, |_| DURATION_S).0, AvatarClip::Idle);
+        assert_eq!(
+            gait.get_pose(RUN_FROM_M_PER_S, FRAME_S, |_| DURATION_S).0,
+            AvatarClip::Idle
+        );
         let later_s: f64 = FRAME_S + MIN_AIR_S + 0.1;
         gait.follow(None, false, RUN_FROM_M_PER_S, later_s, FRAME_S);
         let (clip, time_s) = gait.get_pose(RUN_FROM_M_PER_S, later_s, |_| DURATION_S);
         assert_eq!(clip, AvatarClip::Jump);
         assert!((time_s - 0.1).abs() < 1e-9);
         gait.follow(None, true, RUN_FROM_M_PER_S, later_s + FRAME_S, FRAME_S);
-        assert_ne!(gait.get_pose(RUN_FROM_M_PER_S, later_s + FRAME_S, |_| DURATION_S).0, AvatarClip::Jump);
+        assert_ne!(
+            gait.get_pose(RUN_FROM_M_PER_S, later_s + FRAME_S, |_| DURATION_S)
+                .0,
+            AvatarClip::Jump
+        );
     }
 }

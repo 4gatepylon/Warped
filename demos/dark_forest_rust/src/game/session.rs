@@ -15,9 +15,7 @@ use std::ops::Range;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::audio::{Audio, Sound};
-use super::bots::{
-    BOT_HEIGHT_M, BOT_MAX_HEALTH, Bot, BotContext, BotShot, RESPAWN_DELAY_S,
-};
+use super::bots::{BOT_HEIGHT_M, BOT_MAX_HEALTH, Bot, BotContext, BotShot, RESPAWN_DELAY_S};
 use super::collision::{Aabb, cast_ray};
 use super::console_bot::{BotWalker, WalkStep};
 use super::dust::{DustBurst, DustParticle, DustShape, MAX_DUST_BURST_COUNT};
@@ -30,13 +28,13 @@ use super::nav::NavGraph;
 use super::player::{MAX_HEALTH, Movement, Player, PlayerInput};
 use super::world::{Arena, Surface};
 use crate::assets::gltf_model::Trs;
-use warped_shared::avatar_model::AvatarClip;
 use crate::console_reach::ConsolePlace;
 use crate::render::overlay::{HitEffect, OverlayRect};
 use crate::render::{Beam, Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
 use crate::scene::{GunViewmodel, Scene, draw_items_for};
 use crate::settings::{HIT_EFFECTS, ServerSettings};
 use crate::shot_noise::ShotNoise;
+use warped_shared::avatar_model::AvatarClip;
 use warped_shared::health::fade_effect_frac;
 use warped_shared::hud::{AmmoBar, HudBars, HudPulses, make_hit_effect};
 use warped_shared::weapons::take_hit_weight;
@@ -1135,7 +1133,9 @@ impl Session {
             .chain(self.remote_bots.iter_mut().map(|remote| &mut remote.bot))
         {
             let is_on_ground: bool = bot.is_climbing()
-                || ladders.iter().any(|ladder| ladder.aabb.overlaps(&bot.body()))
+                || ladders
+                    .iter()
+                    .any(|ladder| ladder.aabb.overlaps(&bot.body()))
                 || cast_ray(
                     &scene.solids,
                     bot.feet_m + Vec3::Y * GROUND_PROBE_START_M,

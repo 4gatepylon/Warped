@@ -49,8 +49,8 @@ use sha2::Sha256;
 use crate::console_reach::ConsolePlace;
 use crate::settings::ServerSettings;
 use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
-use warped_shared::movement::{decode_crouch_level, encode_crouch_level};
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
+use warped_shared::movement::{decode_crouch_level, encode_crouch_level};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -2205,7 +2205,10 @@ mod tests {
                 position: 1,
             };
             let player: RemotePlayer = reader.player().expect("a complete player");
-            assert_eq!((player.crouch_frac, player.wormholes), (crouch_frac, wormholes));
+            assert_eq!(
+                (player.crouch_frac, player.wormholes),
+                (crouch_frac, wormholes)
+            );
         }
     }
 

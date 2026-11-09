@@ -296,7 +296,13 @@ impl Bot {
     /// (`is_on_ground`), and the speed from which it runs (`run_from_m_per_s`).
     ///
     /// Example: `bot.follow_gait(true, 9.0, session.time_s, dt_s);`
-    pub fn follow_gait(&mut self, is_on_ground: bool, run_from_m_per_s: f32, now_s: f64, dt_s: f64) {
+    pub fn follow_gait(
+        &mut self,
+        is_on_ground: bool,
+        run_from_m_per_s: f32,
+        now_s: f64,
+        dt_s: f64,
+    ) {
         let moved_m: Option<f64> = (self.feet_m != self.gait_feet_m)
             .then(|| f64::from((self.feet_m - self.gait_feet_m).with_y(0.0).length()));
         self.gait_feet_m = self.feet_m;
