@@ -8,6 +8,7 @@ use crate::game::nav::{NavGraph, NavStep};
 use crate::game::warps::Warps;
 use crate::game::world::LadderVolume;
 use glam::{Quat, Vec3};
+use warped_shared::gait::Gait;
 
 use super::collision::{Aabb, MoveResult, cast_ray, move_body};
 
@@ -15,8 +16,9 @@ use super::collision::{Aabb, MoveResult, cast_ray, move_body};
 pub const BOT_MAX_HEALTH: f32 = 100.0;
 /// `BOT_RADIUS_M` is half a bot's width.
 const BOT_RADIUS_M: f32 = 0.4;
-/// `BOT_HEIGHT_M` is a bot's height.
-pub const BOT_HEIGHT_M: f32 = 1.85;
+/// `BOT_HEIGHT_M` is a bot's height standing, as its teal robot is drawn (Lunar Surface's
+/// `AVATAR_HEIGHT_M`).
+pub const BOT_HEIGHT_M: f32 = 2.0;
 /// `RUN_SPEED_M_S` is a bot's running speed.
 const RUN_SPEED_M_S: f32 = 4.6;
 /// `WALK_SPEED_M_S` is a bot's strafing speed.
@@ -33,8 +35,6 @@ const RETREAT_DISTANCE_M: f32 = 6.0;
 const REACTION_DELAY_S: f32 = 0.7;
 /// `RESPAWN_DELAY_S` is how long a dead bot lies before respawning.
 pub const RESPAWN_DELAY_S: f32 = 6.0;
-/// `ANIMATION_BLEND_S` is the cross-fade time between clips.
-const ANIMATION_BLEND_S: f32 = 0.25;
 /// `GRAVITY_M_S2` is the downward acceleration.
 const GRAVITY_M_S2: f32 = 16.0;
 /// `CLIMB_SPEED_M_S` is how fast a robot climbs a ladder (a player's speed).
@@ -55,46 +55,6 @@ const PLAYER_EYE_ABOVE_FEET_M: f32 = 1.6;
 const LADDER_HOLD_BACK_M: f32 = 0.25;
 const LADDER_HOLD_GAIN_PER_S: f32 = 4.0;
 const LADDER_HOLD_MAX_M_S: f32 = 1.5;
-
-/// `BotClip` is which animation a bot plays.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum BotClip {
-    Idle,
-    Walk,
-    Run,
-    Death,
-}
-
-/// `AnimationState` is a bot's current clip, and the clip it is fading out of.
-#[derive(Clone, Copy, Debug)]
-pub struct AnimationState {
-    pub clip: BotClip,
-    pub time_s: f32,
-    pub previous_clip: BotClip,
-    pub previous_time_s: f32,
-    pub blend_frac: f32,
-}
-
-impl AnimationState {
-    /// `play` switches to a clip, cross-fading from the current one.
-    pub fn play(&mut self, clip: BotClip) {
-        if clip == self.clip {
-            return;
-        }
-        self.previous_clip = self.clip;
-        self.previous_time_s = self.time_s;
-        self.clip = clip;
-        self.time_s = 0.0;
-        self.blend_frac = 0.0;
-    }
-
-    /// `advance` moves time forward.
-    pub fn advance(&mut self, dt_s: f32, speed_frac: f32) {
-        self.time_s += dt_s * speed_frac;
-        self.previous_time_s += dt_s * speed_frac;
-        self.blend_frac = (self.blend_frac + dt_s / ANIMATION_BLEND_S).min(1.0);
-    }
-}
 
 /// `BotShot` is one bolt a bot fired.
 #[derive(Clone, Copy, Debug)]
@@ -119,13 +79,18 @@ pub struct BotContext<'a> {
 /// `BODY_CENTRE_HEIGHT_M` is the middle of a body above its feet, where warps act on it.
 pub const BODY_CENTRE_HEIGHT_M: f32 = 0.9;
 
-/// `Bot` is one enemy robot.
+/// `Bot` is one robot, an enemy or another player: where it stands and faces, its health and how
+/// long it has been dead, its gait (`warped_shared::gait`, which clip it shows and where in it)
+/// and where its feet were when the gait last followed them, its height as a share of standing
+/// (less while another player crouches, W-137 (crouched robots sink)), and its flashes.
 pub struct Bot {
     pub feet_m: Vec3,
     pub yaw_rad: f32,
     pub health: f32,
     pub dead_time_s: Option<f32>,
-    pub animation: AnimationState,
+    pub gait: Gait,
+    gait_feet_m: Vec3,
+    pub height_frac: f32,
     pub hit_flash_frac: f32,
     pub muzzle_flash_frac: f32,
     velocity_m_s: Vec3,
@@ -220,13 +185,9 @@ impl Bot {
             yaw_rad: 0.0,
             health: BOT_MAX_HEALTH,
             dead_time_s: None,
-            animation: AnimationState {
-                clip: BotClip::Idle,
-                time_s: 0.0,
-                previous_clip: BotClip::Idle,
-                previous_time_s: 0.0,
-                blend_frac: 1.0,
-            },
+            gait: Gait::New(0.0),
+            gait_feet_m: feet_m,
+            height_frac: 1.0,
             hit_flash_frac: 0.0,
             muzzle_flash_frac: 0.0,
             velocity_m_s: Vec3::ZERO,
@@ -272,14 +233,19 @@ impl Bot {
     pub fn body(&self) -> Aabb {
         Aabb {
             min_m: self.feet_m - Vec3::new(BOT_RADIUS_M, 0.0, BOT_RADIUS_M),
-            max_m: self.feet_m + Vec3::new(BOT_RADIUS_M, BOT_HEIGHT_M * 0.78, BOT_RADIUS_M),
+            max_m: self.feet_m
+                + Vec3::new(
+                    BOT_RADIUS_M,
+                    BOT_HEIGHT_M * 0.78 * self.height_frac,
+                    BOT_RADIUS_M,
+                ),
         }
     }
 
     /// `head` is the bot's head hit box (headshots do double damage).
     pub fn head(&self) -> Aabb {
         Aabb::from_center(
-            self.feet_m + Vec3::Y * (BOT_HEIGHT_M * 0.86) + self.facing() * 0.05,
+            self.feet_m + Vec3::Y * (BOT_HEIGHT_M * 0.86 * self.height_frac) + self.facing() * 0.05,
             Vec3::splat(0.27),
         )
     }
@@ -294,7 +260,6 @@ impl Bot {
         self.seen_time_s = self.seen_time_s.max(REACTION_DELAY_S * 0.5);
         if self.health <= 0.0 {
             self.dead_time_s = Some(0.0);
-            self.animation.play(BotClip::Death);
             return true;
         }
         false
@@ -323,14 +288,36 @@ impl Bot {
     pub fn walk_ahead(&mut self, speed_m_s: f32, dt_s: f32) {
         self.velocity_m_s = self.facing() * speed_m_s;
         self.feet_m += self.velocity_m_s * dt_s;
-        let is_walking: bool = speed_m_s > 0.0;
-        self.animation.play(if is_walking {
-            BotClip::Walk
-        } else {
-            BotClip::Idle
-        });
-        self.animation
-            .advance(dt_s, (speed_m_s / WALK_SPEED_M_S).max(0.6));
+    }
+
+    /// `follow_gait` moves the bot's gait on to `now_s`, `dt_s` after the last frame, by the
+    /// shared rules (`Gait::follow`): the distance its feet went over the ground since the gait
+    /// last followed them (none while they stood still), whether it stands on something
+    /// (`is_on_ground`), and the speed from which it runs (`run_from_m_per_s`).
+    ///
+    /// Example: `bot.follow_gait(true, 9.0, session.time_s, dt_s);`
+    pub fn follow_gait(
+        &mut self,
+        is_on_ground: bool,
+        run_from_m_per_s: f32,
+        now_s: f64,
+        dt_s: f64,
+    ) {
+        let moved_m: Option<f64> = (self.feet_m != self.gait_feet_m)
+            .then(|| f64::from((self.feet_m - self.gait_feet_m).with_y(0.0).length()));
+        self.gait_feet_m = self.feet_m;
+        self.gait.follow(
+            moved_m,
+            is_on_ground,
+            f64::from(run_from_m_per_s),
+            now_s,
+            dt_s,
+        );
+    }
+
+    /// `is_climbing` says whether the bot is on a ladder.
+    pub fn is_climbing(&self) -> bool {
+        self.is_climbing
     }
 
     /// `update` runs one frame of behavior and returns a bolt if the bot fired.
@@ -339,7 +326,6 @@ impl Bot {
         self.muzzle_flash_frac = (self.muzzle_flash_frac - dt_s * 8.0).max(0.0);
         if let Some(time_s) = &mut self.dead_time_s {
             *time_s += dt_s;
-            self.animation.advance(dt_s, 1.0);
             return None;
         }
         let sees_player: bool =
@@ -446,21 +432,6 @@ impl Bot {
                 - std::f32::consts::PI;
             self.yaw_rad += delta_rad.clamp(-TURN_RATE_RAD_S * dt_s, TURN_RATE_RAD_S * dt_s);
         }
-        let speed_m_s: f32 = self.velocity_m_s.with_y(0.0).length();
-        let clip: BotClip = if speed_m_s > 3.0 {
-            BotClip::Run
-        } else if speed_m_s > 0.4 {
-            BotClip::Walk
-        } else {
-            BotClip::Idle
-        };
-        self.animation.play(clip);
-        let playback_frac: f32 = match clip {
-            BotClip::Run => speed_m_s / RUN_SPEED_M_S,
-            BotClip::Walk => (speed_m_s / WALK_SPEED_M_S).max(0.6),
-            _ => 1.0,
-        };
-        self.animation.advance(dt_s, playback_frac);
 
         self.fire_cooldown_s -= dt_s;
         let is_facing: bool = self.facing().dot(toward) > 0.9;
