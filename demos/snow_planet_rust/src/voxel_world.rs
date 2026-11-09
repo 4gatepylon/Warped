@@ -1223,19 +1223,25 @@ impl VoxelWorld {
 
     /// `can_place_mouth` says whether a thrown mouth may hover at `place`: inside the map, with its
     /// reach clear of every map warp's and of those of the thrown mouths at `others` (reaches that
-    /// taper may not overlap).
+    /// taper may not overlap) and, on a looping world, of the seams (a thrown mouth has no ghost
+    /// past them, so its lens would be cut there; the other mouths are measured the short way round).
     ///
     /// Example: `if world.can_place_mouth(&place, &others) { ... }`
     pub fn can_place_mouth(&self, place: &MouthPlace, others: &[MouthPlace]) -> bool {
         let centre: DVec4 = place.get_centre(self.r);
         let (_, reach) = self.get_thrown_size();
+        let is_clear_of_seams: bool = self.torus.is_none_or(|torus| {
+            let spot_m: [f64; 2] = torus.get_spot_m(centre);
+            get_ghost_offsets_m(spot_m, reach * self.r, torus.periods_m).is_empty()
+        });
         !self.is_outside_boundary(centre)
+            && is_clear_of_seams
             && self.warps[..self.static_warp_count]
                 .iter()
                 .all(|w| get_distance(centre, w.centre) >= reach + w.reach)
-            && others
-                .iter()
-                .all(|other| get_distance(centre, other.get_centre(self.r)) >= 2.0 * reach)
+            && others.iter().all(|other| {
+                self.get_torus_distance_m(centre, other.get_centre(self.r)) >= 2.0 * reach * self.r
+            })
     }
 
     /// `find_hit_s` gives how far along a straight chord from x along unit v (at most `s_max`, in
@@ -1983,6 +1989,7 @@ impl VoxelWorld {
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
         let mut pieces: Vec<Vec<DVec4>> = vec![vec![x]];
+        let mut throats_before: Vec<usize> = vec![0];
         let mut hit: Option<Hit> = None;
         let mut through: Vec<String> = Vec::new();
         let mut through_warps: Vec<usize> = Vec::new();
@@ -1991,7 +1998,14 @@ impl VoxelWorld {
                 break;
             }
             let Some(w) = inside else {
-                let (s_end, entering) = self.find_warp_entry(x, v, max_s - travelled);
+                let (mut s_end, mut entering) = self.find_warp_entry(x, v, max_s - travelled);
+                let seam: Option<(f64, usize)> = self
+                    .torus
+                    .and_then(|torus| torus.find_seam_s(x, v))
+                    .filter(|&(s, _)| s < s_end);
+                if let Some((s, _)) = seam {
+                    (s_end, entering) = (s, None);
+                }
                 if let Some(found) = self.trace_scene(x, v, s_end, None) {
                     pieces
                         .last_mut()
@@ -2006,6 +2020,12 @@ impl VoxelWorld {
                 x = xn;
                 travelled += s_end;
                 pieces.last_mut().expect("a piece").push(x);
+                if let (Some(torus), Some((_, axis))) = (self.torus, seam) {
+                    (x, v) = torus.cross_seam(x, v, axis);
+                    pieces.push(vec![x]);
+                    throats_before.push(through.len());
+                    continue;
+                }
                 if entering.is_none() {
                     break;
                 }
@@ -2035,17 +2055,26 @@ impl VoxelWorld {
                 through.push(warp.name.clone());
                 through_warps.push(w);
                 pieces.push(vec![x]);
+                throats_before.push(through.len());
                 inside = Some(warp.partner);
                 continue;
             }
             if rho > warp.reach {
                 inside = None;
+                if let Some(torus) = self.torus {
+                    let (xw, vw) = torus.wrap_ray(x, v);
+                    if xw != x {
+                        (x, v) = (xw, vw);
+                        pieces.push(vec![x]);
+                        throats_before.push(through.len());
+                    }
+                }
             }
         }
         if self.stop_in_blizzards(&mut pieces) {
             hit = None;
-            through.truncate(pieces.len() - 1);
-            through_warps.truncate(pieces.len() - 1);
+            through.truncate(throats_before[pieces.len() - 1]);
+            through_warps.truncate(throats_before[pieces.len() - 1]);
             travelled = pieces
                 .iter()
                 .flat_map(|piece| piece.windows(2))
@@ -4043,6 +4072,8 @@ mod play_tests {
     //! | Past the edge of a bounded copy, walking | inward (moves), outward (stays) | `a_player_past_the_edge_walks_back_in_only` |
     //! | Seam walked across | +u, −u, +v, −v, both at once (the corner) | `walking_across_each_seam_carries_on` |
     //! | Way to an enemy pylon | the short way, across the u seam | `red_pylons_can_be_reached_the_short_way_round` |
+    //! | Laser across a seam | u, v; at a pylon, at a player | `lasers_cross_each_seam`, `players_are_hit_across_a_seam` |
+    //! | Thrown mouth by a seam | clear of it (placed), within its reach of the u or the v seam (refused) | `thrown_mouths_keep_clear_of_the_seams` |
 
     use super::*;
     use crate::map::{FLAT_CURVATURE_RADIUS_M, Map, get_map_folder};
@@ -4062,6 +4093,7 @@ mod play_tests {
     const WALK_ON_STEP_COUNT: usize = 30;
     const SEAM_WALK_STEP_COUNT: usize = 120;
     const SEAM_TOLERANCE_M: f64 = 0.5;
+    const SHOT_LENGTH_TOLERANCE_M: f64 = 2.0;
     const GAP_TO_PYLON_M: f64 = 1.0;
     const MAX_ROUND_STEP_COUNT: usize = 1200;
     const TURN_BEFORE_PYLON_M: f64 = 5.0;
@@ -4196,6 +4228,53 @@ mod play_tests {
                 "toward {target_m:?}: {v_m}"
             );
         }
+    }
+
+    #[test]
+    fn lasers_cross_each_seam() {
+        let world: VoxelWorld = load_snow_planet();
+        for (from_m, toward_m, target, length_m) in [
+            ([-48.0, -8.0], [-60.0, -8.0], "red pylon", 32.65),
+            ([-30.0, 30.0], [-30.0, 40.0], "blue pylon", 32.65),
+        ] {
+            let shooter: VoxelPlayer = VoxelPlayer::AtView(&world, from_m, toward_m, None, 0.0);
+            let shot: Shot = world.trace_laser(shooter.get_camera_frame(&world));
+            let k: usize = shot
+                .hit_structure
+                .expect("the laser hits a pylon across the seam");
+            assert_eq!(world.structures[k].name, target, "from {from_m:?}");
+            assert!(
+                (shot.length_m - length_m).abs() < SHOT_LENGTH_TOLERANCE_M,
+                "{} m",
+                shot.length_m
+            );
+        }
+    }
+
+    #[test]
+    fn thrown_mouths_keep_clear_of_the_seams() {
+        let world: VoxelWorld = load_snow_planet();
+        let place = |u_m: f64, v_m: f64| MouthPlace {
+            u_m,
+            v_m,
+            h_m: world.player.eye_height_m,
+            yaw_rad: 0.0,
+        };
+        assert!(world.can_place_mouth(&place(PURPLE_M[0], PURPLE_M[1]), &[]));
+        assert!(!world.can_place_mouth(&place(-55.0, 0.0), &[]));
+        assert!(!world.can_place_mouth(&place(-20.0, 35.5), &[]));
+    }
+
+    #[test]
+    fn players_are_hit_across_a_seam() {
+        let world: VoxelWorld = load_snow_planet();
+        let target: VoxelPlayer = VoxelPlayer::AtView(&world, [50.0, 0.0], [0.0, 0.0], None, 0.0);
+        let shared: VoxelWorld =
+            world.with_avatars(&[(target.get_feet_frame(&world), 0)], &[[0.3, 0.6, 1.0]]);
+        let shooter: VoxelPlayer =
+            VoxelPlayer::AtView(&shared, [-50.0, 0.0], [-60.0, 0.0], None, 0.0);
+        let shot: Shot = shared.trace_laser(shooter.get_camera_frame(&shared));
+        assert_eq!(shot.hit_structure, Some(shared.static_structure_count));
     }
 
     #[test]
