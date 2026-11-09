@@ -1,6 +1,7 @@
 //! `match_play` runs the forest's objective and, in a network game, keeps the session in step
-//! with the game server: other players become robots in their team's colour, hits and console
-//! holds go to the server, and the server's eliminations, consoles and winner come back.
+//! with the game server: other players become robots in their team's colour, hits, console holds,
+//! thrown wormholes and hits on them go to the server, and the server's eliminations, consoles,
+//! winner and wormhole damage come back.
 //! Without a server it plays the same objective locally against the AI robots.
 //!
 //! Example: `play.update(&mut session, &scene, is_e_held, dt_s)?;`
@@ -234,6 +235,10 @@ impl MatchPlay {
         for (victim_id, hits_to_kill) in std::mem::take(&mut session.pending_hits) {
             client.send_hit(victim_id, hits_to_kill)?;
         }
+        for (owner_id, hits_to_destroy) in std::mem::take(&mut session.pending_wormhole_hits) {
+            client.send_wormhole_hit(owner_id, hits_to_destroy)?;
+        }
+        session.own_wormhole_damage_frac = client.wormhole_damage_frac;
         if self.last_state.elapsed().as_secs_f64() >= STATE_PERIOD_S && client.id.is_some() {
             self.last_state = Instant::now();
             let is_firing: bool = session.is_trigger_down && !is_dead;
@@ -249,7 +254,7 @@ impl MatchPlay {
                 session.weapons.gun == Gun::Rifle,
                 self.held_console.map(|i| i as u8),
                 session.weapons.beam_speckle_frac,
-                PlayerWormholes::default(),
+                session.thrown.placed,
                 session.player.moves.crouch_frac,
             )?;
         }
@@ -289,6 +294,7 @@ impl MatchPlay {
                         was_firing: false,
                         is_rifle: false,
                         beam_speckle_frac: 0.0,
+                        wormholes: PlayerWormholes::default(),
                     }
                 }
             };
@@ -300,6 +306,7 @@ impl MatchPlay {
             remote.is_firing = player.is_laser_on;
             remote.is_rifle = player.is_rifle;
             remote.beam_speckle_frac = player.beam_speckle_frac;
+            remote.wormholes = player.wormholes;
             remotes.push(remote);
         }
         session.remote_bots = remotes;

@@ -307,6 +307,80 @@ struct Args {
     /// to the arena and save it to this PNG for the menu's map page, then quit.
     #[arg(long)]
     map_picture: Option<PathBuf>,
+    /// Throw both wormhole mouths by script (for tests and pictures): the purple one turned to the
+    /// first yaw (radians), the green one turned to the second, at the times of `THROW_SCRIPT_S`.
+    #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
+    throw_yaws_rad: Option<Vec<f32>>,
+    /// From this simulated time on, stop holding the player at --camera-pose and walk them into
+    /// their purple thrown mouth.
+    #[arg(long)]
+    walk_into_thrown_at_s: Option<f32>,
+    /// From this simulated time on, aim at the nearest thrown mouth (another player's, else this
+    /// player's own) and hold the trigger.
+    #[arg(long)]
+    shoot_thrown_at_s: Option<f32>,
+}
+
+/// `THROW_SCRIPT_S` are the simulated times at which `--throw-yaws-rad` throws the purple and the
+/// green mouth.
+const THROW_SCRIPT_S: [f32; 2] = [0.5, 1.5];
+/// `MESSAGE_PICTURE_PX` is the size of the picture of a message (a wormhole placed or destroyed),
+/// `MESSAGE_HEIGHT_FRAC` the most of the window's height it takes, and `MESSAGE_TOP_FRAC` how far
+/// down the window its top is.
+const MESSAGE_PICTURE_PX: (u32, u32) = (480, 16);
+const MESSAGE_HEIGHT_FRAC: f32 = 0.035;
+const MESSAGE_TOP_FRAC: f32 = 0.62;
+
+/// `script_wormholes` plays the wormhole flags of `args` into this frame's `controls`: the scripted
+/// throws (`--throw-yaws-rad`), walking into the purple mouth (`--walk-into-thrown-at-s`), and
+/// shooting at the nearest thrown mouth (`--shoot-thrown-at-s`); it turns the player as each needs.
+///
+/// Example: `let controls: Controls = script_wormholes(&args, &mut session, controls, dt_s);`
+fn script_wormholes(args: &Args, session: &mut Session, controls: Controls, dt_s: f32) -> Controls {
+    let mut controls: Controls = controls;
+    let (now_s, next_s) = (session.time_s, session.time_s + dt_s);
+    if let Some(yaws_rad) = &args.throw_yaws_rad {
+        assert_eq!(yaws_rad.len(), 2, "--throw-yaws-rad takes two yaws");
+        for (yaw_rad, at_s) in yaws_rad.iter().zip(THROW_SCRIPT_S) {
+            if now_s <= at_s && at_s < next_s {
+                session.player.yaw_rad = *yaw_rad;
+                controls.is_throw_pressed = true;
+            }
+        }
+    }
+    let is_due = |at_s: Option<f32>| at_s.is_some_and(|at_s| now_s >= at_s);
+    if is_due(args.walk_into_thrown_at_s)
+        && let Some(purple) = session.thrown.placed.purple
+    {
+        let to_m: Vec3 = purple.get_centre_m() - session.player.feet_m;
+        session.player.yaw_rad = (-to_m.x).atan2(-to_m.z);
+        controls.player.move_axes = Vec2::Y;
+    }
+    let eye_m: Vec3 = session.player.eye_position_m();
+    let remote_places: Vec<Vec3> = session
+        .remote_bots
+        .iter()
+        .flat_map(|remote| remote.wormholes.get_places())
+        .map(|place| place.get_centre_m())
+        .collect();
+    let targets_m: Vec<Vec3> = if remote_places.is_empty() {
+        let own = session.thrown.placed.get_places();
+        own.iter().map(|place| place.get_centre_m()).collect()
+    } else {
+        remote_places
+    };
+    if is_due(args.shoot_thrown_at_s)
+        && let Some(target_m) = targets_m
+            .into_iter()
+            .min_by(|a, b| a.distance(eye_m).total_cmp(&b.distance(eye_m)))
+    {
+        let to_m: Vec3 = target_m - eye_m;
+        session.player.yaw_rad = (-to_m.x).atan2(-to_m.z);
+        session.player.pitch_rad = (to_m.y / to_m.length()).asin();
+        controls.gun.is_trigger_held = true;
+        controls.gun.is_shoot_pressed = true;
+    }
+    controls
 }
 
 /// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle, in simulated
@@ -414,6 +488,7 @@ fn capture_wormhole_lens(
                     hit_effect: HitEffect::default(),
                     lens_draws: &[],
                     lens_particles: &[],
+                    thrown_lens_mouths: &[],
                     beams: &[],
                     beam_speckle_shares: glam::Vec2::ZERO,
                     overlay_rects: &[],
@@ -747,6 +822,7 @@ fn run_title_screen(
                 hit_effect: HitEffect::default(),
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
+                thrown_lens_mouths: &frame.thrown_lens_mouths,
                 beams: &frame.beams,
                 beam_speckle_shares: frame.beam_speckle_shares,
                 overlay_rects: &[],
@@ -1036,6 +1112,8 @@ fn main() {
     }
     let mut death_picture: TextPicture =
         TextPicture::Banner(DEATH_PICTURE_PX.0, DEATH_PICTURE_PX.1);
+    let mut message_picture: TextPicture =
+        TextPicture::New(MESSAGE_PICTURE_PX.0, MESSAGE_PICTURE_PX.1);
     let mut menu_picture: TextPicture =
         TextPicture::New(menu::MENU_PICTURE_PX.0, menu::MENU_PICTURE_PX.1);
     let mut menu_settings: MenuSettings = MenuSettings {
@@ -1077,6 +1155,7 @@ fn main() {
     'running: loop {
         let mut look_delta_pt: Vec2 = Vec2::ZERO;
         let mut is_jump_pressed: bool = false;
+        let mut is_throw_pressed: bool = false;
         let mut is_shoot_pressed: bool = false;
         let mut is_swap_pressed: bool = false;
         let mut picked_gun: Option<Gun> = None;
@@ -1120,6 +1199,7 @@ fn main() {
                         menu_settings.render_scale_frac = settings.render_scale_frac;
                     }
                     Scancode::Space => is_jump_pressed = true,
+                    Scancode::Q => is_throw_pressed = is_mouse_captured,
                     Scancode::V => session.view_switch.toggle(),
                     Scancode::_1 => picked_gun = Some(Gun::Laser),
                     Scancode::_2 => picked_gun = Some(Gun::Rifle),
@@ -1228,6 +1308,7 @@ fn main() {
             },
             is_flashlight_held: args.hold_flashlight
                 || (is_mouse_captured && keys.is_scancode_pressed(Scancode::F)),
+            is_throw_pressed,
         };
         menu_and_map.set_map_held(keys.is_scancode_pressed(Scancode::Tab));
         let controls: Controls = if menu_and_map.is_menu_open() {
@@ -1244,7 +1325,12 @@ fn main() {
         let camera_view: Option<CameraView> = bench_view
             .map(|index| CameraView::ALL[index])
             .or(args.camera_view);
-        if let Some(pose) = &args.camera_pose {
+        let is_walking_by_script: bool = args
+            .walk_into_thrown_at_s
+            .is_some_and(|at_s| session.time_s >= at_s);
+        if let Some(pose) = &args.camera_pose
+            && !is_walking_by_script
+        {
             assert_eq!(pose.len(), 5, "--camera-pose takes x,y,z,yaw,pitch");
             hold_player(&mut session, Vec3::new(pose[0], pose[1], pose[2]), pose[3]);
             session.player.pitch_rad = pose[4];
@@ -1293,6 +1379,7 @@ fn main() {
         } else {
             controls
         };
+        let controls: Controls = script_wormholes(&args, &mut session, controls, dt_s);
         let sim_start: Instant = Instant::now();
         let waypoint_before: usize = session.autopilot_waypoint;
         if let Some(period_s) = args.hurt_player_every_s
@@ -1431,6 +1518,15 @@ fn main() {
                 BANNER_HEIGHT_FRAC,
             ));
         }
+        if menu_and_map.get_cover() == Cover::Nothing
+            && let Some((text, _)) = &session.message
+        {
+            message_picture.draw(&[(text.clone(), false)], true);
+            let mut image: HudImage =
+                message_picture.get_image(window_width_px, window_height_px, MESSAGE_HEIGHT_FRAC);
+            image.y_px = (window_height_px * MESSAGE_TOP_FRAC).floor();
+            hud_images.push(image);
+        }
         let build_ms: f32 = build_start.elapsed().as_secs_f32() * 1000.0;
         timing = renderer.render_frame(
             &FrameDescription {
@@ -1449,6 +1545,7 @@ fn main() {
                 hit_effect: frame.hit_effect,
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
+                thrown_lens_mouths: &frame.thrown_lens_mouths,
                 beams: &frame.beams,
                 beam_speckle_shares: frame.beam_speckle_shares,
                 overlay_rects: &frame.overlay_rects,
