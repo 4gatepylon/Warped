@@ -49,6 +49,8 @@ is in [`AGENTS.md`](AGENTS.md).
     only in reach and aimed at, 10 s; console bots walk to every pylon by the ladders; both guns with Lunar's hits;
     Lunar's jump; hidden bot windows; `claude/dark-forest-playable`, open); still missing there: Lunar's beam looks and
     speckle, the Tab pages, the minimap, flashlight, third person, thrown wormholes, exit prompt, movement speeds.
+    Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
+    and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
@@ -95,13 +97,13 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-129 Dark Forest lasers off in the lens.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lasers seen through a wormhole lens are drawn in the lens atlas's direction: exact for shots through the throat, slightly off their true place otherwise (#426).
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
 - [ ] **W-131 Lunar wormhole_exit slow at full size.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lunar Surface's `wormhole_exit` bench view takes about 109 ms of GPU time at full 2560x1440 (the reference and the match's copy alike); in play the window's render scale drops to keep frames fast, but the view itself is far over 16.7 ms.
-- [ ] **W-133 Match winning round wording.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): The match's progression page calls the round that wins the match "attacker advances" (e.g. round 5, Dust); changing it changes visible text.
-- [ ] **W-135 e2e-match ports and logs.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): `make e2e-match` (the older match test) uses the game's own ports 47850/47852 and writes its logs into `.build/`, not `.artifacts/`.
 
 ## Pending user review
 
 - [?] **W-127 Dark Forest canopy flicker.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): In about one fixed-step capture in three or four, a few thousand canopy pixels differ, also on the base build before any of the 2026-11-08 work; it looks like a GPU race in the FPS-demo renderer.
   #444: the forest is drawn in 8 m tiles, and repeat captures no longer differ in thousands of canopy pixels (8 of 20 differ in at most 28 pixels by 1-2/255, against 4 of 20 by up to 4,173 pixels and 23/255 before).
+- [?] **W-133 Match winning round wording.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): The match's progression page calls the round that wins the match "attacker advances" (e.g. round 5, Dust); changing it changes visible text. Fixed in #443 (pending user review).
+- [?] **W-135 e2e-match ports and logs.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): `make e2e-match` (the older match test) uses the game's own ports 47850/47852 and writes its logs into `.build/`, not `.artifacts/`. Fixed in #443 (pending user review).
 - [?] **W-132 City Sphere stairs hole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): The stairs' hole in the glass (#429) is wider than a lift hole: shots pass through it, and players on the glass level can fall in onto the steps.
   #437: the hole opens only as wide as the stairs (a visible change to the hole's outline, awaiting the user's OK).
 - [?] **W-124 Four map demos.** "Have a team of sub-agents each try to make a demo analogous to the Rust wormholes

@@ -14,7 +14,7 @@
 //!   scales them to fit.
 
 use crate::match_flow::{MatchView, Phase, describe_outcome};
-use crate::match_state::{MatchState, Ownership, Round, Team};
+use crate::match_state::{MatchState, Outcome, Ownership, Round, Team};
 
 pub const MAX_LINE_COUNT: usize = 34;
 const SHOWN_ROUND_COUNT: usize = 9;
@@ -70,6 +70,22 @@ fn format_status(ownership: &Ownership, state: &MatchState, level: usize) -> Str
     }
 }
 
+/// `describe_round_effect` says what a round in `view`'s history did to the match: the purple
+/// round's winner becomes the attacker, an attacker that wins advances (or, in the round that ends
+/// the match, wins the match), and a defender that wins holds and the roles swap.
+///
+/// Example: `let effect = describe_round_effect(&view, &round);`
+fn describe_round_effect(view: &MatchView, round: &Round) -> &'static str {
+    let is_match_won: bool = view.state.outcome() == Some(Outcome::Won(round.winner))
+        && view.state.rounds().last() == Some(round);
+    match round.attacker {
+        None => "becomes the attacker",
+        Some(team) if team == round.winner && is_match_won => "attacker wins the match",
+        Some(team) if team == round.winner => "attacker advances",
+        Some(_) => "defender holds, roles swap",
+    }
+}
+
 /// `format_round` gives one line of the round history.
 ///
 /// Example: `let line = format_round(&view, &round);`
@@ -78,11 +94,7 @@ fn format_round(view: &MatchView, round: &Round) -> String {
         None => "no attacker".to_string(),
         Some(team) => format!("{} attacks", team.get_name()),
     };
-    let effect: &str = match round.attacker {
-        None => "becomes the attacker",
-        Some(team) if team == round.winner => "attacker advances",
-        Some(_) => "defender holds, roles swap",
-    };
+    let effect: &str = describe_round_effect(view, round);
     format!(
         " #{:<2} {:<14} {:<12} won by {:<4} ({effect})",
         round.number,
@@ -508,11 +520,7 @@ fn push_history(shapes: &mut Vec<Shape>, view: &MatchView) {
             format!("{} won", round.winner.get_name()),
             TEAM_RGB[round.winner.get_index()],
         );
-        let effect: &str = match round.attacker {
-            None => "becomes the attacker",
-            Some(team) if team == round.winner => "attacker advances",
-            Some(_) => "defender holds, roles swap",
-        };
+        let effect: &str = describe_round_effect(view, round);
         push_text(shapes, [chip_left + CHIP_WIDTH + 8.0, y], effect, DIM_RGB);
     }
 }
@@ -618,13 +626,13 @@ mod tests {
     //! | --- | --- | --- |
     //! | Start | waiting, no rounds | `the_page_before_the_first_round` |
     //! | Worked example | every row's ownership and history after it, the result | `the_page_after_the_design_docs_example` |
+    //! | Round effect | purple round, attacker advances, defender holds, the round that wins the match | `the_page_after_the_design_docs_example` |
     //! | Long matches | 40 rounds fit `MAX_LINE_COUNT` | `a_long_match_fits_the_page` |
     //! | Window page | five panels, a picture box inside each, next level outlined, wavefront markers, chips, result | `the_window_page_shows_levels_wavefronts_and_history` |
     //! | Window page bounds | every shape inside `PAGE_SIZE` after a long match | `the_window_page_stays_on_the_page` |
 
     use super::*;
     use crate::match_flow::LevelEntry;
-    use crate::match_state::Outcome;
 
     /// `make_view` gives a view of `state` on five levels named as in DESIGN.md.
     ///
@@ -709,6 +717,16 @@ mod tests {
         ] {
             assert!(text.contains(expected), "missing {expected:?} in\n{text}");
         }
+        let effect_of = |number: &str| -> &str {
+            let line: &str = text
+                .lines()
+                .find(|line| line.starts_with(number))
+                .expect("a history line");
+            line.rsplit('(').next().expect("an effect")
+        };
+        assert_eq!(effect_of(" #1 "), "becomes the attacker)", "{text}");
+        assert_eq!(effect_of(" #2 "), "attacker advances)", "{text}");
+        assert_eq!(effect_of(" #5 "), "attacker wins the match)", "{text}");
         let highlighted: Vec<String> = get_progression_lines(&view, None)
             .into_iter()
             .filter(|(_, is_highlighted)| *is_highlighted)
