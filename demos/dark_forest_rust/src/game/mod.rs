@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod bots;
 pub mod collision;
+pub mod console_bot;
 pub mod hud;
 pub mod nav;
 pub mod player;

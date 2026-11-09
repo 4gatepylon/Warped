@@ -19,12 +19,14 @@ use super::bots::{
     BOT_HEIGHT_M, BOT_MAX_HEALTH, Bot, BotClip, BotContext, BotShot, RESPAWN_DELAY_S,
 };
 use super::collision::{Aabb, cast_ray};
+use super::console_bot::{BotWalker, WalkStep};
 use super::hud::{BarPulsePair, HudState, OverlayHudState, build_hud, build_overlay_rects};
 use super::nav::NavGraph;
 use super::player::{MAX_HEALTH, Player, PlayerInput};
 use super::weapon::{MAGAZINE_SIZE, Weapon, WeaponEvent, WeaponInput};
 use super::world::Arena;
 use crate::assets::gltf_model::Trs;
+use crate::console_reach::ConsolePlace;
 use crate::render::overlay::{HitEffect, OverlayRect};
 use crate::render::{Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
 use crate::scene::{Scene, draw_items_for};
@@ -192,6 +194,10 @@ pub struct Session {
     pub laps_done: u32,
     pub is_trigger_down: bool,
     pub is_view_covered: bool,
+    pub console_places: Vec<ConsolePlace>,
+    pub walker: Option<BotWalker>,
+    pub is_console_objective: bool,
+    pub bot_console: Option<usize>,
     bar_pulses: BarPulsePair,
     robot_hold: Option<RobotHold>,
     robot_hold_s: f32,
@@ -283,6 +289,10 @@ impl Session {
             laps_done: 0,
             is_trigger_down: false,
             is_view_covered: false,
+            console_places: Vec::new(),
+            walker: None,
+            is_console_objective: false,
+            bot_console: None,
             bar_pulses: BarPulsePair::New(),
             robot_hold: None,
             robot_hold_s: 0.0,
@@ -587,8 +597,30 @@ impl Session {
         ranked[counter % ranked.len().min(2)].1
     }
 
-    /// `autopilot_controls` plays the game: walk the waypoint loop, aim at visible bots, fire.
+    /// `autopilot_controls` plays the game: walk to the other team's consoles and hold `E` on each
+    /// (`is_console_objective`, with `walker`); or aim at visible robots and fire, walk toward the
+    /// nearest enemy player when none is visible (with `walker`), and else walk the waypoint loop.
     fn autopilot_controls(&mut self, scene: &Scene, dt_s: f32) -> Controls {
+        if self.is_console_objective
+            && let Some(walker) = &mut self.walker
+        {
+            let walk: WalkStep = walker.step_consoles(
+                &self.player,
+                &self.nav,
+                &self.arena.ladders,
+                &self.console_places,
+                &self.console_off,
+                self.team,
+                self.settings.consoles.reach_m,
+                self.time_s,
+                dt_s,
+            );
+            self.bot_console = walk.console;
+            return Controls {
+                player: walk.input,
+                weapon: WeaponInput::default(),
+            };
+        }
         let eye_m: Vec3 = self.player.eye_position_m();
         let waypoint: Vec3 = self.route[self.autopilot_waypoint % self.route.len()];
         let target: Vec2 = Vec2::new(waypoint.x, waypoint.z);
@@ -618,6 +650,34 @@ impl Session {
                     && cast_ray(&scene.solids, eye_m, to_bot.normalize(), to_bot.length()).is_none()
             })
             .min_by(|a, b| a.distance(eye_m).total_cmp(&b.distance(eye_m)));
+        let feet_m: Vec3 = self.player.feet_m;
+        let hunted_m: Option<Vec3> = self
+            .remote_bots
+            .iter()
+            .filter(|remote| remote.team != my_team && remote.bot.is_alive())
+            .map(|remote| remote.bot.feet_m)
+            .min_by(|a, b| a.distance(feet_m).total_cmp(&b.distance(feet_m)));
+        if visible_bot.is_none()
+            && let (Some(goal_m), Some(walker)) = (hunted_m, &mut self.walker)
+        {
+            let player: PlayerInput = walker.walk_to(
+                &self.player,
+                &self.nav,
+                &self.arena.ladders,
+                goal_m,
+                0.0,
+                self.time_s,
+                dt_s,
+            );
+            self.autopilot_trigger_s = 0.0;
+            return Controls {
+                player,
+                weapon: WeaponInput {
+                    is_reload_pressed: self.weapon.ammo == 0,
+                    ..WeaponInput::default()
+                },
+            };
+        }
         let look_direction: Vec3 = match visible_bot {
             Some(aim_m) => (aim_m - eye_m).normalize(),
             None => Vec3::new(walk_direction.x, -0.04, walk_direction.y).normalize_or(Vec3::NEG_Z),

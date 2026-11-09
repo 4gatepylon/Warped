@@ -45,6 +45,7 @@ use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
 
 use game::audio::Audio;
+use game::console_bot::BotWalker;
 use game::player::{Player, PlayerInput};
 use game::session::{Controls, FrameData, RobotHold, Session};
 use game::weapon::WeaponInput;
@@ -215,10 +216,12 @@ struct Args {
     /// Join this team at once (`blue` or `red`); otherwise the server picks.
     #[arg(long, value_parser = ["blue", "red"])]
     team: Option<String>,
-    /// Let the autopilot play this window (a bot for tests).
+    /// Let a bot play this window, hidden and drawing nothing (for tests and matches): it hunts the
+    /// other team's players, or turns off their consoles with --bot-objective consoles.
     #[arg(long)]
     bot: bool,
-    /// What the bot does: `consoles` holds E on the other team's consoles until its team wins.
+    /// What the bot does: `consoles` walks to the other team's consoles and holds E on each, in
+    /// reach, until its team wins (logging `bot reached console <i> on foot in <t> s`).
     #[arg(long, value_parser = ["consoles"])]
     bot_objective: Option<String>,
     /// Quit after this many seconds.
@@ -297,6 +300,8 @@ const PHOTO_SETTLE_S: f32 = 3.0;
 /// `HURT_PLAYER_DAMAGE` is how much --hurt-player-every-s takes each time: one rifle hit to the
 /// body (of the server settings' 12).
 const HURT_PLAYER_DAMAGE: f32 = game::player::MAX_HEALTH / 12.0;
+/// `BOT_STEP_S` is how often a `--bot` (hidden, drawing nothing) steps its game.
+const BOT_STEP_S: f32 = 1.0 / 60.0;
 /// `RECORDING_DT_S` is the fixed step of --photo and --video-frames, so the same command gives the
 /// same picture.
 const RECORDING_DT_S: f32 = 1.0 / 30.0;
@@ -834,6 +839,7 @@ fn main() {
         args.width_pt,
         args.height_pt,
         args.fullscreen,
+        args.bot,
     );
     let mut renderer: MetalRenderer = MetalRenderer::new(platform.metal_layer());
     println!("GPU: {}", renderer.device_name());
@@ -953,7 +959,12 @@ fn main() {
     if args.play_route {
         session.route = VERTICAL_ROUTE.to_vec();
     }
-    if !session.arena.warps.mouths.is_empty() {
+    session.console_places = console_reach::find_console_places(&map_file);
+    if args.bot {
+        session.walker = Some(BotWalker::New());
+        session.is_console_objective = args.bot_objective.is_some();
+    }
+    if !session.arena.warps.mouths.is_empty() && !args.bot {
         let capture_start: Instant = Instant::now();
         let lens: render::WormholeLens = capture_wormhole_lens(
             &mut renderer,
@@ -1239,6 +1250,18 @@ fn main() {
             .is_showing_frame_time
             .then_some(smoothed_frame_ms);
         let sim_ms: f32 = sim_start.elapsed().as_secs_f32() * 1000.0;
+        if args.bot {
+            if args
+                .exit_after_s
+                .is_some_and(|seconds| start.elapsed().as_secs_f32() > seconds)
+            {
+                break 'running;
+            }
+            std::thread::sleep(Duration::from_secs_f32(
+                (BOT_STEP_S - now.elapsed().as_secs_f32()).max(0.0),
+            ));
+            continue;
+        }
         let build_start: Instant = Instant::now();
         session.is_view_covered = menu.is_some() || !session.player.is_alive();
         let mut frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);

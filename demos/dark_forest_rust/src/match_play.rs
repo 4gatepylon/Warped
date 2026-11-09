@@ -13,8 +13,8 @@ use std::time::Instant;
 
 use glam::{DMat4, Mat4, Vec3};
 
+use crate::console_reach::ConsolePlace;
 use crate::game::bots::{Bot, BotClip};
-use crate::game::collision::cast_ray;
 use crate::game::session::{RemoteBot, Session};
 use crate::net::{Client, NetEvent};
 use crate::scene::Scene;
@@ -23,8 +23,6 @@ use crate::thrown_wormholes::PlayerWormholes;
 
 /// `STATE_PERIOD_S` is how often this player's state goes to the server.
 const STATE_PERIOD_S: f64 = 1.0 / 30.0;
-/// `CONSOLE_REACH_M` is how far from a console's centre a player's eye may be to hold `E` on it.
-const CONSOLE_REACH_M: f32 = 3.0;
 /// `EYE_HEIGHT_M` is how far a player's eye is above their feet, to place remote robots.
 const EYE_HEIGHT_M: f32 = 1.6;
 
@@ -114,7 +112,7 @@ impl MatchPlay {
         if session.console_off.len() != session.arena.consoles.len() {
             session.console_off = vec![false; session.arena.consoles.len()];
         }
-        let target: Option<usize> = self.console_target(session, scene, is_e_held);
+        let target: Option<usize> = self.console_target(session, is_e_held);
         if target != self.held_console {
             self.hold_s = 0.0;
         }
@@ -135,39 +133,34 @@ impl MatchPlay {
         Ok(())
     }
 
-    /// `console_target` is the other team's console this player holds `E` on (the console bot
-    /// claims the first one still on, from anywhere: the server takes its word).
-    fn console_target(&self, session: &Session, scene: &Scene, is_e_held: bool) -> Option<usize> {
+    /// `console_target` is the other team's console this player holds `E` on: for the console bot,
+    /// the one it holds once in reach (`console_bot.rs`); for a player holding `E`, the nearest one
+    /// still on that their view meets within the settings' `consoles.reach_m`
+    /// (`ConsolePlace::is_held_from`, the server's own test).
+    fn console_target(&self, session: &Session, is_e_held: bool) -> Option<usize> {
         if !session.player.is_alive() || session.winner.is_some() {
             return None;
         }
-        let consoles = session.arena.consoles.iter().enumerate();
-        let mut enemy =
-            consoles.filter(|(i, c)| c.team != session.team && !session.console_off[*i]);
         if self.options.is_console_bot {
-            return enemy.next().map(|(i, _)| i);
+            return session.bot_console;
         }
         if !is_e_held {
             return None;
         }
-        let eye_m: Vec3 = session.player.camera_world().w_axis.truncate();
-        enemy
-            .filter(|(_, c)| {
-                let to_console: Vec3 = c.centre_m - eye_m;
-                let distance_m: f32 = to_console.length();
-                distance_m < CONSOLE_REACH_M
-                    && cast_ray(
-                        &scene.solids,
-                        eye_m,
-                        to_console / distance_m,
-                        distance_m - 0.5,
-                    )
-                    .is_none()
+        let eye: DMat4 = session.player.camera_world().as_dmat4();
+        session
+            .console_places
+            .iter()
+            .enumerate()
+            .filter(|(i, place)| {
+                place.team != session.team
+                    && !session.console_off[*i]
+                    && place.is_held_from(eye, self.settings.consoles.reach_m)
             })
             .min_by(|(_, a), (_, b)| {
-                a.centre_m
-                    .distance(eye_m)
-                    .total_cmp(&b.centre_m.distance(eye_m))
+                let distance =
+                    |place: &ConsolePlace| place.get_centre_m().distance(eye.w_axis.truncate());
+                distance(a).total_cmp(&distance(b))
             })
             .map(|(i, _)| i)
     }
