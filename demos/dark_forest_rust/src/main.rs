@@ -58,6 +58,8 @@ use match_play::{MatchOptions, MatchPlay};
 use menu::{Menu, MenuOutcome, MenuSettings, Scoreboard};
 use minimap::{Mark, Minimap};
 use platform::Platform;
+use render::frame_clock::FrameClock;
+use render::frame_trace::{CpuFrameRow, FrameTrace};
 use render::metal::MetalRenderer;
 use render::overlay::HitEffect;
 use render::{FrameDescription, FrameTiming, HudImage, HudRect, RenderSettings, Renderer};
@@ -177,6 +179,9 @@ struct Args {
     /// Show the frame time in the top-left corner.
     #[arg(long)]
     show_frame_time: bool,
+    /// Write every frame's timing (CPU phases, GPU, when it was shown) to this CSV on exit.
+    #[arg(long)]
+    frame_times_file: Option<PathBuf>,
     /// Start with gun 2, the rifle (the energy revolver), in hand instead of gun 1, the sniper.
     #[arg(long)]
     rifle: bool,
@@ -1041,6 +1046,9 @@ fn main() {
     let mut last_report_s: f32 = 0.0;
     let mut smoothed_frame_ms: f32 = 8.3;
     let mut timing: FrameTiming = FrameTiming::default();
+    let mut frame_trace: FrameTrace = FrameTrace::default();
+    let mut frame_clock: FrameClock = FrameClock::default();
+    renderer.set_is_tracing_frames(args.frame_times_file.is_some());
     if args.photo_map_page {
         let mut opened: Menu = Menu::New();
         for _ in 0..menu::PAGE_COUNT {
@@ -1168,13 +1176,26 @@ fn main() {
         }
 
         let now: Instant = Instant::now();
+        let loop_start_s: f64 = objc2_quartz_core::CACurrentMediaTime();
         let frame_s: f32 = (now - last_frame).as_secs_f32();
         last_frame = now;
         let is_recording: bool = args.photo.is_some() || args.video_frames.is_some();
+        let refresh_interval_s: Option<f32> = settings
+            .is_vsync_enabled
+            .then(|| {
+                platform
+                    .window
+                    .get_display()
+                    .and_then(|display| display.get_mode())
+            })
+            .and_then(Result::ok)
+            .filter(|mode| mode.refresh_rate > 0.0)
+            .map(|mode| mode.refresh_rate.recip());
         let dt_s: f32 = if is_recording {
             RECORDING_DT_S
         } else {
-            frame_s.min(MAX_FRAME_S)
+            renderer.set_refresh_interval_s(refresh_interval_s);
+            frame_clock.step_s(frame_s.min(MAX_FRAME_S), renderer.get_frame_interval_s())
         };
         let keys = event_pump.keyboard_state();
         let mouse_state = event_pump.mouse_state();
@@ -1427,6 +1448,17 @@ fn main() {
             timing.drawable_wait_ms as f32,
             timing.cpu_render_ms as f32,
         ];
+        frame_trace.push(CpuFrameRow {
+            frame_index: timing.frame_index,
+            loop_start_s,
+            frame_ms: frame_s * 1000.0,
+            dt_ms: dt_s * 1000.0,
+            sim_ms,
+            build_ms,
+            slot_wait_ms: phase_ms[2],
+            drawable_wait_ms: phase_ms[3],
+            render_ms: phase_ms[4],
+        });
         let elapsed_s: f32 = start.elapsed().as_secs_f32();
         if let Some(directory) = &args.video_frames {
             if session.time_s > args.video_seconds {
@@ -1488,6 +1520,13 @@ fn main() {
         }
     }
     let _ = timing;
+    if let Some(path) = &args.frame_times_file {
+        let completed = renderer.take_completed_frames();
+        match frame_trace.write(path, &completed) {
+            Ok(summary) => println!("frame trace: {summary}; wrote {}", path.display()),
+            Err(error) => eprintln!("error: can't write {}: {error}", path.display()),
+        }
+    }
     if args.bench_views.is_some() {
         for (view, view_stat) in CameraView::ALL.iter().zip(&view_stats) {
             println!(

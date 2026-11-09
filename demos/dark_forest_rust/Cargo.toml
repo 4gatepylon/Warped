@@ -11,6 +11,7 @@ half = "2"
 gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_materials_transmission", "KHR_texture_transform"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "hdr"] }
 objc2 = "0.6"
+block2 = "0.6"
 objc2-core-foundation = "0.3"
 objc2-foundation = "0.3"
 objc2-metal = "0.3"

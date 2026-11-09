@@ -52,7 +52,7 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | `Tab` | menu (scores, settings, map, credits) |
 | `F1`-`F8`, `[` / `]` | effects and render scale, as in `../fps_demo/` |
 
-The guns, hits, console holds and movement are the Lunar Surface demo's too (W-126; DECISIONS.md D17 to D25): one
+The guns, hits, console holds and movement are the Lunar Surface demo's too (W-126; DECISIONS.md D17 to D22 and D26 to D28): one
 sniper hit eliminates a player, the rifle takes 12 hits to the body or 2 to the head; you walk at 10 m/s and sprint at
 18 m/s (no run-up, the same in the air), crouch to half speed with the eye at 0.6 of its height, a jump rises 1.25 m
 and lasts 0.58 s, a hit slows you to half speed for 1 s, and a shot fires only 0.25 s after your last step upright or
@@ -130,6 +130,9 @@ binary. The wire protocol is the hyperbolic demo's, with its wormhole fields alw
 - `--map-picture <png>` (`make map-picture`): renders the map page's picture.
 - `--camera-view <view>`, `--autopilot`, `--show-frame-time`, `--benchmark-seconds <s>`: as in `../fps_demo/`.
 - `--export-map <path>`: writes the map and quits.
+- `--frame-times-file <csv>`: on exit, writes every frame's timing (the loop's interval and simulated step, the CPU's
+  phases, the GPU's time, and when the frame reached the display) and prints how evenly frames were shown, for
+  chasing stutter.
 
 ## Performance
 
@@ -157,6 +160,17 @@ robots (60 frames each, vsync on, median at the 60 Hz interval in every run) giv
 | No mouth in view | 11.8 ms | 7.3 ms |
 | One mouth in view | 14.5-15.9 ms | not measured |
 | A mouth filling the screen | 16.6 ms | 9.8 ms |
+
+### Frame pacing
+
+With vsync on, each frame stays on screen a whole number of display refreshes, the same for every frame: one while
+frames are shown on time, two (or three) once more than a tenth of the last 30 were shown late, and one again when
+the GPU's recent frames fit well inside one refresh (`render::frame_clock::choose_refreshes_per_frame`, fed by Metal's
+presented times); the game simulates exactly that long a step per frame. So on a 100 Hz display a frame the GPU can't
+finish in 10 ms is shown for a steady 20 ms (50 fps) instead of a mix of 10 and 20 ms, which looked like constant
+jitter. While no frame reaches a display (it sleeps, or the window is hidden), frames are shown as soon as they are
+ready. The forest is cut into 8 m tiles so that each pass (four shadow
+cascades, the depth prepass and the lit pass) draws only the tiles it sees.
 
 ## Code
 

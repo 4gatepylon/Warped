@@ -34,6 +34,7 @@
 //!   the same team. Scores go back to 0 when a new game starts.
 
 use std::cell::Cell;
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
@@ -41,7 +42,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use glam::{DMat4, DVec4};
+use glam::{DMat4, DQuat, DVec4};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
@@ -71,6 +72,14 @@ const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
 const JOIN_RETRY_S: f64 = 0.5;
 const PLAYER_TIMEOUT_S: f64 = 3.0;
+/// `REMOTE_DELAY_S` is how far in the past other players are shown: about two of their state sends
+/// (30 a second) and a snapshot, so a newer pose has nearly always arrived to blend toward.
+const REMOTE_DELAY_S: f64 = 0.07;
+/// `REMOTE_HISTORY_S` is how long the poses received for a player are kept.
+const REMOTE_HISTORY_S: f64 = 1.0;
+/// `MAX_BLENDED_STEP_M` is the longest move between two received poses that is blended; a longer
+/// one (a wormhole, a respawn) is a jump, shown as one.
+const MAX_BLENDED_STEP_M: f64 = 3.0;
 const BEACON_GATHER_S: f64 = 1.0;
 const OTHER_VERSION_WINDOW_S: f64 = 1.0;
 const SERVER_POLL_MS: u64 = 2;
@@ -1235,9 +1244,97 @@ fn make_lobby_query() -> Message {
     query
 }
 
+/// `get_pose_at` is a player's pose at `shown_at` from the poses received for them (oldest first,
+/// with when each arrived): blended between the two around it, the first before them all, the
+/// last after them all, and the earlier one across a jump longer than `MAX_BLENDED_STEP_M`.
+///
+/// Example: `let frame: DMat4 = get_pose_at(&poses, Instant::now() - delay);`
+fn get_pose_at(poses: &VecDeque<(Instant, DMat4)>, shown_at: Instant) -> DMat4 {
+    let after: usize = poses.partition_point(|&(arrived_at, _)| arrived_at <= shown_at);
+    if after == 0 {
+        return poses.front().expect("a player has at least one pose").1;
+    }
+    let (from_at, from) = poses[after - 1];
+    let Some(&(to_at, to)) = poses.get(after) else {
+        return from;
+    };
+    if from.w_axis.distance(to.w_axis) > MAX_BLENDED_STEP_M {
+        return from;
+    }
+    let frac: f64 = (shown_at - from_at).as_secs_f64() / (to_at - from_at).as_secs_f64();
+    let rotation: DQuat = DQuat::from_mat4(&from).slerp(DQuat::from_mat4(&to), frac);
+    DMat4::from_rotation_translation(
+        rotation,
+        from.w_axis.truncate().lerp(to.w_axis.truncate(), frac),
+    )
+}
+
+/// `remote_pose_tests` checks how other players' poses are blended over time.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | time shown | before every pose, between two, after every pose | `test_poses_blend_between_arrivals` |
+/// | step between poses | a walk (blended), a jump through a wormhole (not blended) | `test_poses_blend_between_arrivals`, `test_jumps_are_not_blended` |
+/// | turn between poses | none, a quarter turn (half way at the middle) | `test_poses_blend_between_arrivals` |
+#[cfg(test)]
+mod remote_pose_tests {
+    use super::*;
+
+    /// `STEP_S` is the time between the test poses' arrivals.
+    const STEP_S: f64 = 0.04;
+
+    /// `make_poses` is a history of `frames` arriving `STEP_S` apart from `start`.
+    fn make_poses(start: Instant, frames: &[DMat4]) -> VecDeque<(Instant, DMat4)> {
+        frames
+            .iter()
+            .enumerate()
+            .map(|(i, &frame)| (start + Duration::from_secs_f64(STEP_S * i as f64), frame))
+            .collect()
+    }
+
+    /// `test_poses_blend_between_arrivals` checks a 1 m walk with a quarter turn: the first pose
+    /// before it arrives, half of both half way, the last pose after the last arrival.
+    #[test]
+    fn test_poses_blend_between_arrivals() {
+        let start: Instant = Instant::now();
+        let from: DMat4 = DMat4::from_translation(glam::DVec3::new(0.0, 1.7, 0.0));
+        let to: DMat4 = DMat4::from_rotation_translation(
+            DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2),
+            glam::DVec3::new(1.0, 1.7, 0.0),
+        );
+        let poses: VecDeque<(Instant, DMat4)> =
+            make_poses(start + Duration::from_secs(1), &[from, to]);
+        assert_eq!(get_pose_at(&poses, start), from);
+        let middle: DMat4 =
+            get_pose_at(&poses, start + Duration::from_secs_f64(1.0 + STEP_S * 0.5));
+        assert!((middle.w_axis.x - 0.5).abs() < 1e-9, "{middle:?}");
+        let middle_yaw_rad: f64 = DQuat::from_mat4(&middle).to_euler(glam::EulerRot::YXZ).0;
+        assert!((middle_yaw_rad - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+        assert_eq!(get_pose_at(&poses, start + Duration::from_secs(2)), to);
+    }
+
+    /// `test_jumps_are_not_blended` checks that a 20 m jump keeps the earlier pose until the later
+    /// one arrives.
+    #[test]
+    fn test_jumps_are_not_blended() {
+        let start: Instant = Instant::now();
+        let from: DMat4 = DMat4::from_translation(glam::DVec3::new(0.0, 1.7, 24.0));
+        let to: DMat4 = DMat4::from_translation(glam::DVec3::new(0.0, 1.7, 4.0));
+        let poses: VecDeque<(Instant, DMat4)> = make_poses(start, &[from, to]);
+        assert_eq!(
+            get_pose_at(&poses, start + Duration::from_secs_f64(STEP_S * 0.9)),
+            from
+        );
+        assert_eq!(
+            get_pose_at(&poses, start + Duration::from_secs_f64(STEP_S * 1.1)),
+            to
+        );
+    }
+}
+
 /// `Client` is this player's connection: its map's name, its id and the server's game settings
-/// once welcomed, the id of the latest welcome (kept while waiting to respawn), the other players,
-/// the game, this player's health (1 full, from the server), the damage enemy shots did to this
+/// once welcomed, the id of the latest welcome (kept while waiting to respawn), the other players
+/// (shown `REMOTE_DELAY_S` in the past, blended between the poses received), the game, this player's health (1 full, from the server), the damage enemy shots did to this
 /// player's wormholes (1 destroys them, from the server), and the latest scores of every player in
 /// the game (`None` until the server sends them).
 pub struct Client {
@@ -1264,6 +1361,7 @@ pub struct Client {
     first_unanswered: Cell<Option<Instant>>,
     last_bad_snapshot: Option<Instant>,
     last_good_snapshot: Option<Instant>,
+    poses_by_player: HashMap<u32, VecDeque<(Instant, DMat4)>>,
 }
 
 impl Client {
@@ -1301,6 +1399,7 @@ impl Client {
             first_unanswered: Cell::new(Some(Instant::now())),
             last_bad_snapshot: None,
             last_good_snapshot: None,
+            poses_by_player: HashMap::new(),
         })
     }
 
@@ -1411,6 +1510,7 @@ impl Client {
                         .into_iter()
                         .filter(|player| Some(player.id) != self.id)
                         .collect();
+                    self.keep_poses();
                 }
                 Some(Kind::Eliminated) => {
                     if let (Some(victim_id), Some(shooter_id)) = (reader.id(), reader.id()) {
@@ -1421,6 +1521,7 @@ impl Client {
                             self.players.clear();
                         }
                         self.players.retain(|player| player.id != victim_id);
+                        self.poses_by_player.remove(&victim_id);
                         events.push(NetEvent::Eliminated {
                             victim_id,
                             shooter_id,
@@ -1431,7 +1532,30 @@ impl Client {
                 _ => {}
             }
         }
+        let shown_at: Instant = Instant::now() - Duration::from_secs_f64(REMOTE_DELAY_S);
+        for player in &mut self.players {
+            player.frame = get_pose_at(&self.poses_by_player[&player.id], shown_at);
+        }
         Ok(events)
+    }
+
+    /// `keep_poses` adds each player's pose from the snapshot just read to their history when it
+    /// changed, forgets players no longer in the game and poses older than `REMOTE_HISTORY_S`.
+    fn keep_poses(&mut self) {
+        let now: Instant = Instant::now();
+        let players: &[RemotePlayer] = &self.players;
+        self.poses_by_player
+            .retain(|id, _| players.iter().any(|player| player.id == *id));
+        for player in players {
+            let poses: &mut VecDeque<(Instant, DMat4)> =
+                self.poses_by_player.entry(player.id).or_default();
+            if poses.back().is_none_or(|&(_, frame)| frame != player.frame) {
+                poses.push_back((now, player.frame));
+            }
+            while poses.len() > 2 && (now - poses[0].0).as_secs_f64() > REMOTE_HISTORY_S {
+                poses.pop_front();
+            }
+        }
     }
 
     /// `send_state` sends this player's eye frame, laser switch, whether the gun is the rifle, the
