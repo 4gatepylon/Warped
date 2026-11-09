@@ -36,6 +36,8 @@ included.
 | `viewmodel` (+ `viewmodel.metal`) | the gun held in hand, drawn over the scene | no (Metal) |
 | `overlay` | what is drawn over a frame: HUD rectangles, the wand, the minimap, the text mask, a hit's effect | no (Metal) |
 | `hud_bars` | the HUD's bars: health, ammo, sprint energy, the console bar, and their glows | no (Metal) |
+| `hud` | the crosshair | no (Metal) |
+| `weapons` | the two guns' state (`Weapons`: fire, reload, heat and overheat, recoil, aim, each shot's noise), `Gun`, how much a hit weighs, the gun in hand's place and sway (`make_wand`, `get_sway`), `MUZZLE_M` | no (Metal) |
 
 `overlay` and `texture_arrays` are parts of files that differ per level, taken out verbatim: the overlay types of
 each level's `render_metal.rs` (which re-exports them, so `render_metal::OverlayRect` still works) and `make_mips` and
@@ -54,6 +56,10 @@ Everything else differs between levels, or needs a module that does:
   `voxel_clearance`, `minimap` and `third_person` need `voxel_world`; `menu` needs `net`, `settings` and `credits`;
   the house demo's engine (`world`, `scene_data`, `physics`, `render_cpu`,
   `map_export`) needs `map` and `thrown_wormholes`.
+- In each `main.rs`, the `Session` keeps its guns in `weapons: Weapons` and calls it; what stays is what needs
+  the level's world: `Tracer` (a shot's beam, `voxel_world`'s segments), tracing shots, the view's recoil,
+  `update_gun` (the step phase from the level's walking), the HUD's bars and lines. City Sphere's own
+  `CitySession` (`city.rs`) still has its own guns, written apart from Lunar Surface's.
 - Files identical in all but City Sphere: `render_metal.*` (City adds its own frame kind), `thrown_wormholes`
   (City adds `update_placing`, which Lunar's `update` could call), `third_person` (City makes four constants
   `pub(crate)`), and `console_reach` and `picture_saver` (City has none). `zone_walls` differs in Snow Planet only
@@ -74,6 +80,8 @@ warped_shared = { path = "../warped_shared_rust" }
 // src/main.rs, beside the level's own `mod` lines
 use warped_shared::{app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, hud_bars, key_bindings, mesh,
     overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel};
+use warped_shared::hud::get_crosshair_rects;
+use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 ```
 
 A level's game server alone (`src/bin/*_server.rs`, built for Linux by `make build-server-bundle`) uses only the
