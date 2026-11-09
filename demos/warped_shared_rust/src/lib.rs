@@ -9,14 +9,15 @@
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
 //! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
+//! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
 //! - `mesh`, `avatar_model`: glTF models of the maps' structures and the players' robot body.
 //! - `spaceships`: the spaceships in the sky.
 //! - `key_bindings`, `exit_prompt`: a player's controls, and the "leave the game?" prompt.
 //! - `texture_arrays`, `render_mesh`, `viewmodel`: Metal textures, models and the gun held in hand.
-//! - `overlay`, `hud_bars`, `hud`: what is drawn over a frame, the HUD's bars and its
-//!   crosshair.
+//! - `overlay`, `hud_bars`, `hud`: what is drawn over a frame, the HUD's bars, its pulses, its
+//!   crosshair, the hit effect and the banner's lobby and "YOU DIED" lines.
 //! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
 //!
 //! Example: `use warped_shared::geometry::{AXIS_W, make_boost};`
@@ -31,6 +32,7 @@ pub mod avatar_model;
 pub mod exit_prompt;
 pub mod fps_demo_assets;
 pub mod geometry;
+pub mod health;
 #[cfg(target_os = "macos")]
 pub mod hud;
 #[cfg(target_os = "macos")]

@@ -55,11 +55,16 @@ mod voxel_world;
 mod world;
 mod zone_walls;
 
-use warped_shared::hud::get_crosshair_rects;
+use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
+use warped_shared::hud::{
+    DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, HudBars, HudPulses, describe_gun,
+    get_crosshair_rects, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
+};
 use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 use warped_shared::{
-    app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, hud_bars, key_bindings, mesh,
-    overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel,
+    app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, health, hud_bars,
+    key_bindings, mesh, overlay, play_settings, render_mesh, shapes, shot_noise, spaceships,
+    texture_arrays, viewmodel,
 };
 
 use std::error::Error;
@@ -137,14 +142,7 @@ const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
 const MAX_BLUESHIFT_FRAC: f64 = 1.25;
-const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
-const HEAT_BAR_RGB: [f32; 3] = [1.0, 0.6, 0.2];
-const HEALTH_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.87];
-const HEALTH_BAR_RGB: [f32; 3] = [0.35, 0.95, 0.45];
-const HEALTH_PULSE_RGB: [f32; 3] = [1.0, 0.45, 0.2];
-const ENERGY_SEGMENT_COUNT: u32 = 10;
 const SKY_TRACER_M: f64 = 80.0;
-const HEAT_BAR_OVERHEATED_RGB: [f32; 3] = [1.0, 0.15, 0.1];
 const DEATH_MASK_PX: (u32, u32) = (240, 24);
 const MENU_MASK_PX: (u32, u32) = (512, 312);
 const BANNER_HEIGHT_FRAC: f32 = 0.2;
@@ -170,12 +168,6 @@ const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
 const PICTURE_PX_PER_MASK_PX: i32 = 2;
 const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
-const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
-const ENERGY_BAR_RGB: [f32; 3] = [0.5, 0.82, 1.0];
-const ENERGY_PULSE_RGB: [f32; 3] = [0.8, 0.94, 1.0];
-const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
-const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
-const DISABLE_BAR_RGB: [f32; 3] = [1.0, 0.85, 0.3];
 const LOADING_DIM_FRAC: f32 = 1.0;
 const LOADING_TITLE: &str = "LOADING";
 const LOADING_DONE_LABEL: &str = "ready";
@@ -2046,9 +2038,8 @@ struct Session {
     motion_blur_frac: f32,
     hit_effect_frac: f64,
     blueshift_frac: f32,
-    last_health_frac: f64,
-    health_pulses: hud_bars::BarPulses,
-    energy_pulses: hud_bars::BarPulses,
+    hit_feedback: HitFeedback,
+    hud_pulses: HudPulses,
     is_captured: bool,
     message: String,
     message_time_s: f64,
@@ -2377,9 +2368,8 @@ impl Session {
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
             blueshift_frac: 0.0,
-            last_health_frac: 1.0,
-            health_pulses: hud_bars::BarPulses::New(1.0),
-            energy_pulses: hud_bars::BarPulses::New(1.0),
+            hit_feedback: HitFeedback::New(),
+            hud_pulses: HudPulses::New(),
             is_captured: false,
             message: String::new(),
             message_time_s: 0.0,
@@ -2575,8 +2565,11 @@ impl Session {
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
         let own_dt_s: f64 = dt_s * self.get_time_rate_frac();
         let blur_s: f64 = self.player_settings.view.motion_blur_s;
-        self.hit_effect_frac =
-            (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
+        self.hit_effect_frac = fade_effect_frac(
+            self.hit_effect_frac,
+            dt_s,
+            self.player_settings.hit_effects.effect_s,
+        );
         self.update_bar_pulses(dt_s);
         self.view_switch.update(dt_s);
         self.blueshift_frac = 0.0;
@@ -2687,28 +2680,31 @@ impl Session {
         Ok(())
     }
 
+    /// `get_hud_bars` gives what the HUD's bars show now: this player's health in a game on a
+    /// server, the sprint energy on a voxel map, and how far turning off a console has gone while
+    /// holding `E` on one.
+    ///
+    /// Example: `let bars: HudBars = self.get_hud_bars();`
+    fn get_hud_bars(&self) -> HudBars {
+        HudBars {
+            health_frac: self.multiplayer.as_ref().map(|m| m.client.health_frac),
+            energy_frac: self.voxel.as_ref().map(|voxel| voxel.player.energy_frac),
+            console_hold_frac: self
+                .multiplayer
+                .as_ref()
+                .and_then(|m| m.disabling)
+                .map(|(_, held_s)| held_s / self.settings.consoles.hold_to_disable_s),
+        }
+    }
+
     /// `update_bar_pulses` moves the pulses running along the HUD's bars on by `dt_s`
     /// (`hud_bars.rs`), driven by how fast each bar's value changes: this player's health in a
     /// game on a server, and the sprint energy on a voxel map.
     ///
     /// Example: `self.update_bar_pulses(dt_s);`
     fn update_bar_pulses(&mut self, dt_s: f64) {
-        if let Some(multiplayer) = &self.multiplayer {
-            self.health_pulses.update(
-                dt_s,
-                multiplayer.client.health_frac,
-                u32::from(self.settings.rifle.body_hits_to_eliminate),
-                &hud_bars::PULSE_TUNING,
-            );
-        }
-        if let Some(voxel) = &self.voxel {
-            self.energy_pulses.update(
-                dt_s,
-                voxel.player.energy_frac,
-                ENERGY_SEGMENT_COUNT,
-                &hud_bars::PULSE_TUNING,
-            );
-        }
+        let bars: HudBars = self.get_hud_bars();
+        self.hud_pulses.update(dt_s, &bars, &self.settings.rifle);
     }
 
     /// `can_throw` says whether this player may throw a wormhole mouth now: playing, with the
@@ -3155,15 +3151,11 @@ impl Session {
     ///
     /// Example: `let hit = self.get_hit_effect();`
     fn get_hit_effect(&self) -> render_metal::HitEffect {
-        let when_hit = &self.player_settings.hit_effects;
-        let shake_rad: f64 = self.total_frame_count as f64 * voxel_world::SPAWN_TURN_RAD;
-        let shake_px: f64 = when_hit.shake_px * self.hit_effect_frac;
-        render_metal::HitEffect {
-            strength_frac: self.hit_effect_frac as f32,
-            red_frac: when_hit.red_frac as f32,
-            blur_px: when_hit.blur_px as f32,
-            shake_px: [shake_rad.cos(), shake_rad.sin()].map(|c| (c * shake_px) as f32),
-        }
+        make_hit_effect(
+            self.hit_effect_frac,
+            self.total_frame_count,
+            &self.player_settings.hit_effects,
+        )
     }
 
     /// `get_team` gives this player's team (an index into `net::TEAM_NAMES`): the one the server
@@ -3316,13 +3308,18 @@ impl Session {
                 }
             }
         }
-        if multiplayer.client.health_frac < self.last_health_frac {
+        let hit_frac: f64 = 1.0 / f64::from(self.settings.rifle.body_hits_to_eliminate);
+        let response: HitResponse = self
+            .hit_feedback
+            .take_health(multiplayer.client.health_frac, hit_frac);
+        if response.should_show {
             self.hit_effect_frac = 1.0;
-            if let Some(voxel) = &mut self.voxel {
-                voxel.player.slowed_s = self.settings.when_hit.slow_s;
-            }
         }
-        self.last_health_frac = multiplayer.client.health_frac;
+        if response.should_slow
+            && let Some(voxel) = &mut self.voxel
+        {
+            voxel.player.slowed_s = self.settings.when_hit.slow_s;
+        }
         if multiplayer.client.game.number != multiplayer.game_number {
             multiplayer.game_number = multiplayer.client.game.number;
             if let (Some(voxel), Some(id), Some(team)) = (
@@ -3738,13 +3735,7 @@ impl Session {
         if !multiplayer.is_eliminated {
             return None;
         }
-        Some([
-            "YOU DIED".to_string(),
-            format!(
-                "Respawning in {:.0}",
-                multiplayer.respawn_in_s.ceil().max(1.0)
-            ),
-        ])
+        Some(get_death_lines(multiplayer.respawn_in_s))
     }
 
     /// `get_zoom` gives how much closer the world looks now: the gun in hand's full zoom
@@ -3966,73 +3957,11 @@ impl Session {
         if !self.is_view_covered() {
             rects.extend(get_crosshair_rects(self.last_output_px));
         }
-        if let Some(multiplayer) = &self.multiplayer {
-            let segment_count: u32 = u32::from(self.settings.rifle.body_hits_to_eliminate);
-            let health_frac: f64 = multiplayer.client.health_frac;
-            rects.extend(hud_bars::make_segmented_bar(
-                HEALTH_BAR_MIN_FRAC,
-                segment_count,
-                health_frac,
-                HEALTH_BAR_RGB,
-                self.health_pulses.make_rect_pulse(
-                    HEALTH_BAR_MIN_FRAC,
-                    segment_count,
-                    health_frac,
-                    HEALTH_PULSE_RGB,
-                    HEALTH_BAR_RGB,
-                    &hud_bars::PULSE_TUNING,
-                ),
-            ));
-        }
-        if self.weapons.gun == Gun::Laser {
-            let is_loaded: bool = self.weapons.sniper_reload_s <= 0.0;
-            rects.extend(hud_bars::make_segmented_bar(
-                HEAT_BAR_MIN_FRAC,
-                1,
-                if is_loaded { 1.0 } else { 0.0 },
-                HEAT_BAR_RGB,
-                render_metal::NO_RECT_PULSE,
-            ));
-        }
-        if self.weapons.gun == Gun::Rifle {
-            rects.extend(hud_bars::make_segmented_bar(
-                HEAT_BAR_MIN_FRAC,
-                self.settings.rifle.shots_until_overheat,
-                1.0 - self.weapons.rifle_heat_frac.min(1.0),
-                if self.weapons.is_overheated {
-                    HEAT_BAR_OVERHEATED_RGB
-                } else {
-                    HEAT_BAR_RGB
-                },
-                render_metal::NO_RECT_PULSE,
-            ));
-        }
-        if let Some((_, held_s)) = self.multiplayer.as_ref().and_then(|m| m.disabling) {
-            let fill_frac: f32 =
-                (held_s / self.settings.consoles.hold_to_disable_s).min(1.0) as f32;
-            rects.extend(hud_bars::make_progress_bar(
-                DISABLE_BAR_MIN_FRAC,
-                DISABLE_BAR_SIZE_FRAC,
-                fill_frac,
-                DISABLE_BAR_RGB,
-            ));
-        }
-        let Some(voxel) = &self.voxel else {
-            return rects;
-        };
-        rects.extend(hud_bars::make_segmented_bar(
-            ENERGY_BAR_MIN_FRAC,
-            ENERGY_SEGMENT_COUNT,
-            voxel.player.energy_frac,
-            ENERGY_BAR_RGB,
-            self.energy_pulses.make_rect_pulse(
-                ENERGY_BAR_MIN_FRAC,
-                ENERGY_SEGMENT_COUNT,
-                voxel.player.energy_frac,
-                ENERGY_PULSE_RGB,
-                ENERGY_BAR_RGB,
-                &hud_bars::PULSE_TUNING,
-            ),
+        rects.extend(make_bar_rects(
+            &self.get_hud_bars(),
+            &self.weapons,
+            &self.settings.rifle,
+            &self.hud_pulses,
         ));
         rects
     }
@@ -4058,14 +3987,7 @@ impl Session {
                 voxel.player.energy_frac * PERCENT_PER_FRAC
             )
         });
-        let gun: String = match (self.weapons.gun, self.weapons.is_overheated) {
-            (Gun::Laser, _) => ", gun 1 (laser)".to_string(),
-            (Gun::Rifle, true) => ", gun 2 (rifle) overheated".to_string(),
-            (Gun::Rifle, false) => format!(
-                ", gun 2 (rifle) heat {:.0}%",
-                self.weapons.rifle_heat_frac * PERCENT_PER_FRAC
-            ),
-        };
+        let gun: String = describe_gun(&self.weapons);
         let (is_flying, is_on_ground, height_m) = match &self.voxel {
             Some(voxel) => (
                 voxel.player.is_flying,
@@ -4268,22 +4190,6 @@ fn get_map_picture_max_px() -> (u32, u32) {
         ((MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a]) * PICTURE_PX_PER_MASK_PX) as u32
     });
     (width, height)
-}
-
-/// `get_lobby_lines` gives the lobby banner's two lines: until the server at `server` first
-/// answers, that this window is connecting to it; once it has (`lobby_counts`, each team's head
-/// count), that it is connected, the counts and `join_keys_line`.
-///
-/// Example: `let lines = get_lobby_lines(Some([1, 2]), server, "1 joins blue, 2 joins red".to_string());`
-fn get_lobby_lines(
-    lobby_counts: Option<[u32; net::TEAM_NAMES.len()]>,
-    server: SocketAddr,
-    join_keys_line: String,
-) -> [String; 2] {
-    match lobby_counts {
-        Some([blue, red]) => [format!("CONNECTED  BLUE {blue}  RED {red}"), join_keys_line],
-        None => ["CONNECTING".to_string(), format!("server {server}")],
-    }
 }
 
 /// `get_text_positions` places each of `text`'s lines in its mask: the line cut to the mask's

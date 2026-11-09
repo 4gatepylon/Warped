@@ -41,7 +41,7 @@ use std::time::Duration;
 use clap::Parser;
 #[cfg(target_os = "macos")]
 use warped_shared::key_bindings;
-use warped_shared::{geometry, play_settings, shapes, shot_noise};
+use warped_shared::{geometry, health, play_settings, shapes, shot_noise};
 
 use map::{Map, MapName};
 use settings::ServerSettings;

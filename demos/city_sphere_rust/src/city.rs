@@ -22,15 +22,16 @@ use sdl3::event::Event;
 use serde_json::json;
 
 use super::{
-    Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX,
-    DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, ENERGY_BAR_MIN_FRAC,
-    ENERGY_BAR_RGB, ENERGY_PULSE_RGB, ENERGY_SEGMENT_COUNT, GUN_POSE_PER_S, Gun,
-    HEALTH_BAR_MIN_FRAC, HEALTH_BAR_RGB, HEALTH_PULSE_RGB, HEAT_BAR_MIN_FRAC,
-    HEAT_BAR_OVERHEATED_RGB, HEAT_BAR_RGB, MAP_AREA_MAX_EXCL_MASK_PX, MAP_AREA_MIN_MASK_PX,
-    MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX, MS_PER_S, OverlayText, PICTURE_PX_PER_MASK_PX,
-    PLAYER_SETTINGS_HOME_PATH, Picture, Renderer, RendererKind, Result, RouteKind, WINDOW_TITLE,
-    find_lan_address, get_crosshair_rects, get_lobby_lines, get_server_address, get_sway,
-    load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
+    Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, GUN_POSE_PER_S,
+    Gun, MAP_AREA_MAX_EXCL_MASK_PX, MAP_AREA_MIN_MASK_PX, MENU_DIM_FRAC, MENU_HEIGHT_FRAC,
+    MENU_MASK_PX, MS_PER_S, OverlayText, PICTURE_PX_PER_MASK_PX, PLAYER_SETTINGS_HOME_PATH,
+    Picture, Renderer, RendererKind, Result, RouteKind, WINDOW_TITLE, find_lan_address,
+    get_crosshair_rects, get_server_address, get_sway, load_settings, make_renderer,
+    make_run_folder, make_text_mask, make_wand, save_png,
+};
+use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
+use warped_shared::hud::{
+    HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
 };
 use warped_shared::shot_noise::ShotNoise;
 use warped_shared::weapons::{Weapons, take_hit_weight};
@@ -46,7 +47,6 @@ use crate::city_wormholes::{
 };
 use crate::dust::{DustBurst, MAX_DUST_BURST_COUNT};
 use crate::exit_prompt;
-use crate::hud_bars;
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
@@ -59,7 +59,7 @@ use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
 use crate::third_person;
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor};
 use crate::viewmodel;
-use crate::voxel_world::{MUZZLE_M, SPAWN_TURN_RAD};
+use crate::voxel_world::MUZZLE_M;
 
 const MAP_NAME: &str = "city_sphere";
 const TAN_HALF_FOV: f32 = 0.62;
@@ -1051,14 +1051,13 @@ struct CitySession {
     hud: (f64, u32, f64),
     exit_prompt: exit_prompt::ExitPrompt,
     phase_ms: Vec<[f64; PHASE_COUNT]>,
-    health_pulses: hud_bars::BarPulses,
-    energy_pulses: hud_bars::BarPulses,
+    hud_pulses: HudPulses,
     is_flashlight_on: bool,
     view_switch: third_person::ViewSwitch,
     dust: Vec<DustBurst>,
     thrown: ThrownWormholes,
     hit_effect_frac: f64,
-    last_health_frac: f64,
+    hit_feedback: HitFeedback,
     slowed_s: f64,
     frame_count: u64,
 }
@@ -1155,14 +1154,13 @@ impl CitySession {
             phase_ms: Vec::new(),
             player_settings_path,
             menu: None,
-            health_pulses: hud_bars::BarPulses::New(1.0),
-            energy_pulses: hud_bars::BarPulses::New(1.0),
+            hud_pulses: HudPulses::New(),
             is_flashlight_on: false,
             view_switch: third_person::ViewSwitch::FirstPerson(),
             dust: Vec::new(),
             thrown: ThrownWormholes::New(),
             hit_effect_frac: 0.0,
-            last_health_frac: 1.0,
+            hit_feedback: HitFeedback::New(),
             slowed_s: 0.0,
             frame_count: 0,
         })
@@ -1486,18 +1484,8 @@ impl CitySession {
             self.pass_through_wormholes(before);
             self.update_gun_motion(&input, dt_s);
         }
-        self.health_pulses.update(
-            dt_s,
-            self.client.health_frac,
-            u32::from(self.settings.rifle.body_hits_to_eliminate),
-            &hud_bars::PULSE_TUNING,
-        );
-        self.energy_pulses.update(
-            dt_s,
-            self.player.energy_frac,
-            ENERGY_SEGMENT_COUNT,
-            &hud_bars::PULSE_TUNING,
-        );
+        let bars: HudBars = self.get_hud_bars();
+        self.hud_pulses.update(dt_s, &bars, &self.settings.rifle);
         match console.filter(|_| is_playing) {
             Some(index) if self.disabling == Some(index) => self.disabling_s += dt_s,
             Some(index) => (self.disabling, self.disabling_s) = (Some(index), 0.0),
@@ -1649,13 +1637,21 @@ impl CitySession {
     /// `update_hit` starts Lunar Surface's hit effect and slows this player
     /// (`when_hit.slow_s`) when their health drops, whatever hurt them, and fades both over `dt_s`.
     fn update_hit(&mut self, dt_s: f64) {
-        if self.client.health_frac < self.last_health_frac {
+        self.hit_effect_frac = fade_effect_frac(
+            self.hit_effect_frac,
+            dt_s,
+            self.player_settings.hit_effects.effect_s,
+        );
+        let hit_frac: f64 = 1.0 / f64::from(self.settings.rifle.body_hits_to_eliminate);
+        let response: HitResponse = self
+            .hit_feedback
+            .take_health(self.client.health_frac, hit_frac);
+        if response.should_show {
             self.hit_effect_frac = 1.0;
+        }
+        if response.should_slow {
             self.slowed_s = self.settings.when_hit.slow_s;
         }
-        self.last_health_frac = self.client.health_frac;
-        self.hit_effect_frac =
-            (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
         self.slowed_s = (self.slowed_s - dt_s).max(0.0);
     }
 
@@ -1673,14 +1669,22 @@ impl CitySession {
     /// Lunar Surface: red edges, a blur from the edges inward, and a shake in a new direction each
     /// frame (the golden angle apart), fading over the player settings' `hit_effects.effect_s`.
     fn get_hit_effect(&self) -> render_metal::HitEffect {
-        let when_hit = &self.player_settings.hit_effects;
-        let shake_rad: f64 = self.frame_count as f64 * SPAWN_TURN_RAD;
-        let shake_px: f64 = when_hit.shake_px * self.hit_effect_frac;
-        render_metal::HitEffect {
-            strength_frac: self.hit_effect_frac as f32,
-            red_frac: when_hit.red_frac as f32,
-            blur_px: when_hit.blur_px as f32,
-            shake_px: [shake_rad.cos(), shake_rad.sin()].map(|c| (c * shake_px) as f32),
+        make_hit_effect(
+            self.hit_effect_frac,
+            self.frame_count,
+            &self.player_settings.hit_effects,
+        )
+    }
+
+    /// `get_hud_bars` gives what the HUD's bars show now: this player's health, the sprint energy,
+    /// and how far turning off a console has gone while holding `E` on one.
+    fn get_hud_bars(&self) -> HudBars {
+        HudBars {
+            health_frac: Some(self.client.health_frac),
+            energy_frac: Some(self.player.energy_frac),
+            console_hold_frac: self
+                .disabling
+                .map(|_| self.disabling_s / self.settings.consoles.hold_to_disable_s),
         }
     }
 
@@ -1690,69 +1694,12 @@ impl CitySession {
     /// overheats) and the sprint energy, health and energy with pulses while they change; and below
     /// the middle, the progress of turning off a console while holding `E` on one.
     fn get_bar_rects(&self) -> Vec<render_metal::OverlayRect> {
-        let mut rects: Vec<render_metal::OverlayRect> = Vec::new();
-        let health_segment_count: u32 = u32::from(self.settings.rifle.body_hits_to_eliminate);
-        rects.extend(hud_bars::make_segmented_bar(
-            HEALTH_BAR_MIN_FRAC,
-            health_segment_count,
-            self.client.health_frac,
-            HEALTH_BAR_RGB,
-            self.health_pulses.make_rect_pulse(
-                HEALTH_BAR_MIN_FRAC,
-                health_segment_count,
-                self.client.health_frac,
-                HEALTH_PULSE_RGB,
-                HEALTH_BAR_RGB,
-                &hud_bars::PULSE_TUNING,
-            ),
-        ));
-        rects.extend(match self.weapons.gun {
-            Gun::Laser => hud_bars::make_segmented_bar(
-                HEAT_BAR_MIN_FRAC,
-                1,
-                if self.weapons.sniper_reload_s <= 0.0 {
-                    1.0
-                } else {
-                    0.0
-                },
-                HEAT_BAR_RGB,
-                render_metal::NO_RECT_PULSE,
-            ),
-            Gun::Rifle => hud_bars::make_segmented_bar(
-                HEAT_BAR_MIN_FRAC,
-                self.settings.rifle.shots_until_overheat,
-                1.0 - self.weapons.rifle_heat_frac.min(1.0),
-                if self.weapons.is_overheated {
-                    HEAT_BAR_OVERHEATED_RGB
-                } else {
-                    HEAT_BAR_RGB
-                },
-                render_metal::NO_RECT_PULSE,
-            ),
-        });
-        rects.extend(hud_bars::make_segmented_bar(
-            ENERGY_BAR_MIN_FRAC,
-            ENERGY_SEGMENT_COUNT,
-            self.player.energy_frac,
-            ENERGY_BAR_RGB,
-            self.energy_pulses.make_rect_pulse(
-                ENERGY_BAR_MIN_FRAC,
-                ENERGY_SEGMENT_COUNT,
-                self.player.energy_frac,
-                ENERGY_PULSE_RGB,
-                ENERGY_BAR_RGB,
-                &hud_bars::PULSE_TUNING,
-            ),
-        ));
-        if self.disabling.is_some() {
-            rects.extend(hud_bars::make_progress_bar(
-                DISABLE_BAR_MIN_FRAC,
-                DISABLE_BAR_SIZE_FRAC,
-                (self.disabling_s / self.settings.consoles.hold_to_disable_s).min(1.0) as f32,
-                DISABLE_BAR_RGB,
-            ));
-        }
-        rects
+        make_bar_rects(
+            &self.get_hud_bars(),
+            &self.weapons,
+            &self.settings.rifle,
+            &self.hud_pulses,
+        )
     }
 
     /// `get_mouth_pairs` gives every linked pair of wormhole mouths in the game, this player's and
@@ -2184,10 +2131,7 @@ impl CitySession {
             ]);
         }
         if let Some(left_s) = self.respawn_in_s {
-            return Some([
-                "YOU DIED".to_string(),
-                format!("Respawning in {:.0}", left_s.ceil().max(1.0)),
-            ]);
+            return Some(get_death_lines(left_s));
         }
         if !self.is_spawned {
             return Some([

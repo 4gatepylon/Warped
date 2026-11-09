@@ -58,7 +58,8 @@ is in [`AGENTS.md`](AGENTS.md).
     for all five levels: #449 (the settings sections and `shot_noise` shared, `claude/shared-play-settings`,
     merged), #452 (the guns' state and helpers shared, `claude/shared-weapons`, merged), #456 (the movement rules
     shared, with a play trace per level, `claude/shared-movement`, open), #457 (City Sphere's guns on the shared
-    `Weapons`, Lunar's rules, `claude/city-shared-guns`, open).
+    `Weapons`, Lunar's rules, `claude/city-shared-guns`, merged), #459 (the HUD's bars, pulses, hit effect, lobby and
+    "YOU DIED" lines, the hit feedback and the server's damage count shared, `claude/shared-hud-health`, open).
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
