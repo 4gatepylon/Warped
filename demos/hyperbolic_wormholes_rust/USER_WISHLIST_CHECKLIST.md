@@ -49,8 +49,9 @@ is in [`AGENTS.md`](AGENTS.md).
     only in reach and aimed at, 10 s; console bots walk to every pylon by the ladders; both guns with Lunar's hits;
     Lunar's jump; hidden bot windows; `claude/dark-forest-playable`, merged) and #445 (Lunar's movement: speeds,
     sprint energy, crouch, jump, air control, step, a hit's slowing, the shot delay after moving, the settings'
-    respawn delay; Lunar's flashlight and exit prompt; `claude/dark-forest-movement`, open, 2026-11-09); still
-    missing there: Lunar's beam looks and speckle, the Tab pages, the minimap, third person, thrown wormholes.
+    respawn delay; Lunar's flashlight and exit prompt; `claude/dark-forest-movement`, open, 2026-11-09) and #455
+    (Lunar's beam looks and speckle, in gold; `claude/dark-forest-beams`, open, 2026-11-08); still missing there: the
+    Tab pages, the minimap, third person, thrown wormholes.
     Shared code: #447 (`demos/warped_shared_rust/`, the files identical in Lunar Surface, Dust, Snow Planet, City
     Sphere and the match, moved into one library they all use, no change in play or pictures;
     `claude/shared-level-code`, merged); its `PLAN.md` is the next step, one movement, guns, health, HUD and robots

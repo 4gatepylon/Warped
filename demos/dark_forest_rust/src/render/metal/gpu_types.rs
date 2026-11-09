@@ -130,6 +130,31 @@ pub struct GpuParticle {
     pub seed: Vec4,
 }
 
+/// `GpuBeam` is one beam piece: (start, radius), (end, speckle share), (colour, 1 for the
+/// rifle's) and (1 if the laser goes on before the start, 1 if it goes on past the end, unused,
+/// unused); `beam_vertex` and `beam_fragment` in `post.metal` read it.
+///
+/// Example:
+///     let beam: GpuBeam = GpuBeam::default();
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct GpuBeam {
+    pub start_radius: Vec4,
+    pub end_speckle: Vec4,
+    pub color_kind: Vec4,
+    pub joints: Vec4,
+}
+
+/// `GpuBeamPass` is the beam pass's (radians per pixel, black share, white share, frame seed).
+///
+/// Example:
+///     let pass: GpuBeamPass = GpuBeamPass::default();
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct GpuBeamPass {
+    pub params: Vec4,
+}
+
 /// `GpuHudRect` is one HUD rectangle in window pixels (x, y, width, height) and its color.
 ///
 /// Example:

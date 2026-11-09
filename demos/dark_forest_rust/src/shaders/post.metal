@@ -1066,3 +1066,187 @@ fragment float4 hud_image_fragment(HudImageVertexOut in [[stage_in]],
     uint2 pixel = min(uint2(in.uv * float2(image.size_px)), image.size_px - 1);
     return float4(pixels[pixel.y * image.size_px.x + pixel.x]) / 255.0;
 }
+
+/** @brief `GpuBeam` matches `gpu_types::GpuBeam`: (start, radius), (end, speckle share), (colour, 1 for the rifle's), (goes on before the start, goes on past the end, -, -). */
+struct GpuBeam {
+    float4 start_radius;
+    float4 end_speckle;
+    float4 color_kind;
+    float4 joints;
+};
+
+/** @brief `BeamPass` matches `gpu_types::GpuBeamPass`: (radians per pixel, black share, white share, frame seed). */
+struct BeamPass {
+    float4 params;
+};
+
+/**
+ * @brief Lunar Surface's beam look (`render_voxel.metal`): a beam is at least a pixel wide; its haze reaches
+ * `BEAM_REACH` widths; the sniper's blade and haze and the rifle's halo opacity and core whiteness; speckle only
+ * where the glow passes `MIN_SPECKLE_GLOW`. `BEAM_QUAD_REACH` is how many widths around a beam its quad covers,
+ * `BEAM_NEAR_M` where a beam behind the camera is cut, and `BEAM_HDR_PER_DISPLAY` scales Lunar's display
+ * colours into this demo's HDR, so its tone map shows them about as bright as Lunar does.
+ */
+constant float BEAM_REACH = 4.8;
+constant float BEAM_HAZE_BRIGHTNESS = 0.45;
+constant float BEAM_HAZE_WHITENESS = 0.45;
+constant float BEAM_CORE_BRIGHTNESS = 1.6;
+constant float BEAM_CORE_WHITENESS = 0.9;
+constant float LASER_HALO_OPACITY = 0.9;
+constant float LASER_CORE_WHITENESS = 0.6;
+constant float MIN_SPECKLE_GLOW = 0.02;
+constant float BEAM_QUAD_REACH = 8.0;
+constant float BEAM_NEAR_M = 0.05;
+constant float BEAM_HDR_PER_DISPLAY = 1.0;
+/** @brief `hash_pixel`'s lowbias32 constants and the speckle kind's salt, Lunar Surface's. */
+constant uint SPECKLE_KIND_SALT = 0x9e3779b9u;
+constant uint3 PIXEL_HASH_PRIMES = uint3(73856093u, 19349663u, 2654435761u);
+constant uint2 PIXEL_HASH_MULTIPLIERS = uint2(0x7feb352du, 0x846ca68bu);
+constant uint3 PIXEL_HASH_SHIFTS = uint3(16u, 15u, 16u);
+constant uint PIXEL_HASH_DROPPED_BITS = 8u;
+constant float PIXEL_HASH_SCALE = 1.0 / 16777216.0;
+
+/** @brief `BeamVertexOut` is a beam quad's corner and which beam it belongs to. */
+struct BeamVertexOut {
+    float4 position [[position]];
+    uint beam [[flat]];
+};
+
+/**
+ * @brief `beam_vertex` makes the screen quad around beam `instance_id`: the segment cut where it goes behind the
+ * camera, projected, and widened by `BEAM_QUAD_REACH` times its width in pixels (a pixel, or the beam's radius if
+ * wider) on every side, so it covers the haze whichever way the beam points.
+ * @par Example
+ * @code
+ * pipeline(beam_vertex, beam_fragment), a triangle-strip quad per beam
+ * @endcode
+ */
+vertex BeamVertexOut beam_vertex(uint vertex_id [[vertex_id]], uint instance_id [[instance_id]],
+                                 constant GpuBeam* beams [[buffer(0)]],
+                                 constant FrameUniforms& frame [[buffer(1)]],
+                                 constant BeamPass& pass [[buffer(2)]]) {
+    GpuBeam beam = beams[instance_id];
+    float3 a = beam.start_radius.xyz, b = beam.end_speckle.xyz;
+    float za = -(frame.view * float4(a, 1.0)).z, zb = -(frame.view * float4(b, 1.0)).z;
+    BeamVertexOut out;
+    out.beam = instance_id;
+    if (za < BEAM_NEAR_M && zb < BEAM_NEAR_M) {
+        out.position = float4(2.0, 2.0, 0.0, 1.0);
+        return out;
+    }
+    if (za < BEAM_NEAR_M) {
+        a = mix(a, b, (BEAM_NEAR_M - za) / (zb - za));
+        za = BEAM_NEAR_M;
+    } else if (zb < BEAM_NEAR_M) {
+        b = mix(b, a, (BEAM_NEAR_M - zb) / (za - zb));
+        zb = BEAM_NEAR_M;
+    }
+    float4 ca = frame.view_proj * float4(a, 1.0), cb = frame.view_proj * float4(b, 1.0);
+    float2 half_size_px = 0.5 * frame.screen_size.xy;
+    float2 pa = ca.xy / ca.w * half_size_px, pb = cb.xy / cb.w * half_size_px;
+    float pixel_rad = pass.params.x, radius_m = beam.start_radius.w;
+    float reach_px = BEAM_QUAD_REACH * max(max(radius_m / (pixel_rad * za), radius_m / (pixel_rad * zb)), 1.0);
+    float2 along = pb - pa;
+    float length_px = length(along);
+    float2 axis = length_px > 1e-3 ? along / length_px : float2(1.0, 0.0);
+    float2 side = float2(-axis.y, axis.x);
+    bool is_end = (vertex_id & 2u) != 0;
+    float2 corner = (is_end ? pb + axis * reach_px : pa - axis * reach_px) + side * ((vertex_id & 1u) != 0 ? reach_px : -reach_px);
+    out.position = float4(corner / half_size_px, 0.0, 1.0);
+    return out;
+}
+
+/**
+ * @brief `hash_pixel` gives a pseudo-random number in [0, 1) for pixel `id` and `seed`, independent from pixel to
+ * pixel (a lowbias32 integer hash), as Lunar Surface's.
+ * @par Example
+ * @code
+ * float roll = hash_pixel(uint2(in.position.xy), seed);
+ * @endcode
+ */
+static float hash_pixel(uint2 id, uint seed) {
+    uint h = id.x * PIXEL_HASH_PRIMES.x ^ id.y * PIXEL_HASH_PRIMES.y ^ seed * PIXEL_HASH_PRIMES.z;
+    h ^= h >> PIXEL_HASH_SHIFTS.x;
+    h *= PIXEL_HASH_MULTIPLIERS.x;
+    h ^= h >> PIXEL_HASH_SHIFTS.y;
+    h *= PIXEL_HASH_MULTIPLIERS.y;
+    h ^= h >> PIXEL_HASH_SHIFTS.z;
+    return float(h >> PIXEL_HASH_DROPPED_BITS) * PIXEL_HASH_SCALE;
+}
+
+/**
+ * @brief `beam_fragment` draws one beam over the lit scene as Lunar Surface's `scan_beams` and `shade_ray_end` do:
+ * the pixel's ray meets the beam closest before it hits the scene (the depth prepass), at a gap measured in the
+ * beam's width (its radius, or a pixel far away); the sniper's is a flat-topped white blade in a soft haze, the
+ * rifle's a Gaussian laser over its halo. A share of the pixels its glow reaches speckles each frame, as
+ * `speckle_beam`: black, white, or dropping out (the scene without the beam). It returns premultiplied colour,
+ * with alpha how much of the scene it covers.
+ * @par Example
+ * @code
+ * pipeline(beam_vertex, beam_fragment) with premultiplied blending into the HDR target, after the lit pass
+ * @endcode
+ */
+fragment float4 beam_fragment(BeamVertexOut in [[stage_in]], constant GpuBeam* beams [[buffer(0)]],
+                              constant FrameUniforms& frame [[buffer(1)]],
+                              constant BeamPass& pass [[buffer(2)]],
+                              depth2d<float> depth [[texture(0)]]) {
+    GpuBeam beam = beams[in.beam];
+    float2 uv = in.position.xy * frame.screen_size.zw;
+    float3 eye = frame.camera_position_m.xyz;
+    float4 near_point = frame.inv_view_proj * float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1.0, 1.0);
+    float3 v = normalize(near_point.xyz / near_point.w - eye);
+    float scene_depth = depth.read(uint2(in.position.xy));
+    float ray_end_m = 1e30;
+    if (scene_depth > 0.0) {
+        float4 p = frame.inv_view_proj * float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, scene_depth, 1.0);
+        ray_end_m = length(p.xyz / p.w - eye);
+    }
+    float3 a = beam.start_radius.xyz, ab = beam.end_speckle.xyz - a, r = eye - a;
+    float ab_sq = max(dot(ab, ab), 1e-8), v_ab = dot(v, ab), v_r = dot(v, r), ab_r = dot(ab, r);
+    float denominator = ab_sq - v_ab * v_ab;
+    float t = denominator > 1e-8 ? (v_ab * ab_r - ab_sq * v_r) / denominator : -v_r;
+    t = clamp(t, 0.0, ray_end_m);
+    float s = clamp(dot(eye + v * t - a, ab) / ab_sq, 0.0, 1.0);
+    t = clamp(dot(a + ab * s - eye, v), 0.0, ray_end_m);
+    s = clamp(dot(eye + v * t - a, ab) / ab_sq, 0.0, 1.0);
+    if (s >= 1.0 && beam.joints.y > 0.5) {
+        discard_fragment();
+    }
+    float gap_m = distance(eye + v * t, a + ab * s);
+    float width_m = max(beam.start_radius.w, pass.params.x * t);
+    float q = gap_m * gap_m / (width_m * width_m);
+    bool is_rifle = beam.color_kind.w > 0.5;
+    float core = is_rifle ? exp(-q) : exp(-q * q * q);
+    float halo = exp(-q / BEAM_REACH);
+    float3 color = beam.color_kind.rgb;
+    float3 light;
+    float cover, glow;
+    if (is_rifle) {
+        cover = saturate(LASER_HALO_OPACITY * halo);
+        light = color * cover + mix(color, float3(1.0), LASER_CORE_WHITENESS) * core;
+        glow = saturate(LASER_HALO_OPACITY * halo + core);
+    } else {
+        cover = saturate(core);
+        float3 haze = mix(color, float3(1.0), BEAM_HAZE_WHITENESS) * BEAM_HAZE_BRIGHTNESS * halo;
+        light = haze * (1.0 - cover) + mix(color, float3(1.0), BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS * cover;
+        glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
+    }
+    uint seed = uint(pass.params.w);
+    uint2 id = uint2(in.position.xy);
+    float speckle = beam.end_speckle.w;
+    if (speckle > 0.0 && glow > MIN_SPECKLE_GLOW && hash_pixel(id, seed) < speckle) {
+        float kind = hash_pixel(id, seed ^ SPECKLE_KIND_SALT);
+        if (kind < pass.params.y) {
+            light *= 1.0 - glow;
+            cover = 1.0 - (1.0 - cover) * (1.0 - glow);
+        } else if (kind < pass.params.y + pass.params.z) {
+            light = light * (1.0 - glow) + glow;
+            cover = 1.0 - (1.0 - cover) * (1.0 - glow);
+        } else {
+            light = float3(0.0);
+            cover = 0.0;
+        }
+    }
+    float hdr_scale = BEAM_HDR_PER_DISPLAY / max(frame.render_params.x, 1e-6);
+    return float4(light * hdr_scale, cover);
+}
