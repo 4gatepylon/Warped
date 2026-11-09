@@ -381,22 +381,23 @@ fn pack_structure_groups(world: &VoxelWorld, lists: &mut Vec<[f32; 4]>) -> [i32;
         cells.entry(cell).or_default().push(k);
     }
     let first_header: usize = lists.len();
-    let mut blocks: BTreeMap<(i64, i64), Vec<(usize, DVec4, f64)>> = BTreeMap::new();
+    let mut group_spheres: Vec<(DVec4, f64)> = Vec::new();
+    let mut blocks: BTreeMap<(i64, i64), Vec<usize>> = BTreeMap::new();
     for (group_number, (&(block_i, block_j, _, _), group)) in cells.iter().enumerate() {
         let spheres: Vec<(DVec4, f64)> = group
             .iter()
             .map(|&k| (world.structures[k].centre, world.structures[k].radius))
             .collect();
-        let (centre, radius) = make_bounding_sphere(&spheres, world.r);
+        group_spheres.push(make_bounding_sphere(&spheres, world.r));
         blocks
             .entry((block_i, block_j))
             .or_default()
-            .push((group_number, centre, radius));
+            .push(group_number);
     }
     let mut first_member: usize = first_header + 2 * (cells.len() + blocks.len());
     let mut headers: Vec<[f32; 4]> = Vec::new();
     let mut members: Vec<[f32; 4]> = Vec::new();
-    for (group, &(_, centre, radius)) in cells.values().zip(blocks.values().flatten()) {
+    for (group, &(centre, radius)) in cells.values().zip(&group_spheres) {
         headers.push(to_f32(centre));
         headers.push([
             radius.cosh() as f32,
@@ -408,15 +409,12 @@ fn pack_structure_groups(world: &VoxelWorld, lists: &mut Vec<[f32; 4]>) -> [i32;
         first_member += group.len();
     }
     for block in blocks.values() {
-        let spheres: Vec<(DVec4, f64)> = block
-            .iter()
-            .map(|&(_, centre, radius)| (centre, radius))
-            .collect();
+        let spheres: Vec<(DVec4, f64)> = block.iter().map(|&g| group_spheres[g]).collect();
         let (centre, radius) = make_bounding_sphere(&spheres, world.r);
         headers.push(to_f32(centre));
         headers.push([
             radius.cosh() as f32,
-            block[0].0 as f32,
+            block[0] as f32,
             block.len() as f32,
             0.0,
         ]);
