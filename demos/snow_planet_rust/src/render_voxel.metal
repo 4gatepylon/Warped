@@ -340,6 +340,8 @@ constant int FOVEA_QUARTER = 2;
 constant uint FOVEA_BLOCK_PX = 4;
 constant float FOVEA_SAMPLE_MARGIN_PX = 8.0;
 constant float SOFT_BAND_PX = 48.0;
+constant float LENS_BLEND_ALPHA = 0.0;
+constant float LENS_BLEND_ALPHA_LIMIT = 0.5;
 constant float FXAA_EDGE_THRESHOLD = 0.125;
 constant float FXAA_EDGE_THRESHOLD_MIN = 0.0312;
 constant int FXAA_SEARCH_STEP_COUNT = 10;
@@ -2676,9 +2678,23 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id
     return max(color, 0.0);
 }
 
-/** @brief `write_pixel` shades a ray end into pixel `id`. @par Example @code write_pixel(scene, end, id, image); @endcode */
+/**
+ * @brief `get_lens_alpha` gives the alpha a pixel's colour is written with: `LENS_BLEND_ALPHA` deep in a lens (the ray
+ * took at least `LENS_HALF_RES_STEPS` bent steps and shows no laser core), so that `tonemap_voxel` smooths it (W-138,
+ * no aliasing), else 1.
+ * @par Example
+ * @code
+ * image.write(float4(color, get_lens_alpha(end)), id);
+ * @endcode
+ */
+static float get_lens_alpha(VoxelRayEnd end) {
+    bool is_deep = (end.surface.w >> BENT_STEPS_FIRST_BIT & BENT_STEPS_MASK) >= LENS_HALF_RES_STEPS && end.glow.z < GLOW_FLOOR;
+    return is_deep ? LENS_BLEND_ALPHA : 1.0;
+}
+
+/** @brief `write_pixel` shades a ray end into pixel `id`, with `get_lens_alpha`. @par Example @code write_pixel(scene, end, id, image); @endcode */
 static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, texture2d<float, access::write> image) {
-    image.write(float4(shade_ray_end(scene, end, id), 1.0), id);
+    image.write(float4(shade_ray_end(scene, end, id), get_lens_alpha(end)), id);
 }
 
 /**
@@ -2957,7 +2973,8 @@ kernel void prepare_refinement(device atomic_uint *refine_count [[buffer(5)]], d
  * @brief `refine_pixels` traces the three odd pixels of each listed cell, packed densely so that thread groups don't
  * wait on the few pixels that need a full trace. Deep in a lens, where all four of the cell's samples took at least
  * `LENS_HALF_RES_STEPS` bent steps, it blends the colours `resolve_pixels` gave the four even pixels instead (a
- * half-resolution lens, Lunar Surface's option D). Outside the sharp centre (W-136, sharp centre, soft edges) it blends
+ * half-resolution lens, Lunar Surface's option D), unless a laser's core shows there, and marks those pixels with
+ * alpha `LENS_BLEND_ALPHA` for `tonemap_voxel` to smooth. Outside the sharp centre (W-136, sharp centre, soft edges) it blends
  * instead: from the cell's four even pixels at `FOVEA_HALF`, and from its 4 × 4 block's four corners at
  * `FOVEA_QUARTER`, where the third pixel's thread also writes the cell's even pixel unless `resolve_pixels` shaded it.
  * It only reads pixels `resolve_pixels` wrote, so its threads never race.
@@ -2984,13 +3001,19 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
         return;
     }
     int least_steps = BENT_STEPS_MASK;
-    for (int c = 0; c < 4; c++) least_steps = min(least_steps, samples[cell + (c & 1) + (c >> 1) * columns].surface.w >> BENT_STEPS_FIRST_BIT & BENT_STEPS_MASK);
-    if (least_steps >= LENS_HALF_RES_STEPS) {
-        image.write(blend_pixels(u, image, lo, 2, id), id);
+    float most_core = 0.0;
+    for (int c = 0; c < 4; c++) {
+        VoxelRayEnd corner_end = samples[cell + (c & 1) + (c >> 1) * columns];
+        least_steps = min(least_steps, corner_end.surface.w >> BENT_STEPS_FIRST_BIT & BENT_STEPS_MASK);
+        most_core = max(most_core, corner_end.glow.z);
+    }
+    if (least_steps >= LENS_HALF_RES_STEPS && most_core < GLOW_FLOOR) {
+        image.write(float4(blend_pixels(u, image, lo, 2, id).rgb, LENS_BLEND_ALPHA), id);
         return;
     }
     Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
-    image.write(float4(shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5), id), 1.0), id);
+    VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
+    image.write(float4(shade_ray_end(scene, end, id), get_lens_alpha(end)), id);
 }
 
 /**
@@ -3097,8 +3120,9 @@ static float3 get_spline_color(constant VoxelUniforms &u, texture2d<float> hdr, 
 
 /**
  * @brief `get_soft_color` gives the HDR colour `tonemap_voxel` shows at pixel `id`: the pixel itself in the sharp
- * centre, blending over `SOFT_BAND_PX` into `get_spline_color` of the half-resolution grid outside it, and of the
- * quarter-resolution grid toward and beyond `u.fovea.y`.
+ * centre, blending over `SOFT_BAND_PX` into `get_spline_color` of the half-resolution grid outside it and deep in a
+ * lens (pixels marked `LENS_BLEND_ALPHA` by `get_lens_alpha`), and of the quarter-resolution grid toward and beyond
+ * `u.fovea.y`.
  * @par Example
  * @code
  * float3 c = get_soft_color(u, hdr, id);
@@ -3107,7 +3131,8 @@ static float3 get_spline_color(constant VoxelUniforms &u, texture2d<float> hdr, 
 static float3 get_soft_color(constant VoxelUniforms &u, texture2d<float> hdr, uint2 id) {
     float3 color = hdr.read(id).rgb;
     float r_px = get_centre_distance_px(u, float2(id));
-    float half_frac = r_px <= u.fovea.x ? 0.0 : smoothstep(u.fovea.x, u.fovea.x + SOFT_BAND_PX, r_px);
+    bool is_lens = hdr.read(id).a < LENS_BLEND_ALPHA_LIMIT;
+    float half_frac = is_lens ? 1.0 : (r_px <= u.fovea.x ? 0.0 : smoothstep(u.fovea.x, u.fovea.x + SOFT_BAND_PX, r_px));
     float quarter_frac = r_px <= u.fovea.y - SOFT_BAND_PX ? 0.0 : smoothstep(u.fovea.y - SOFT_BAND_PX, u.fovea.y, r_px);
     if (half_frac > 0.0 && quarter_frac < 1.0) color = mix(color, get_spline_color(u, hdr, id, 2), half_frac);
     if (quarter_frac > 0.0) color = mix(color, get_spline_color(u, hdr, id, FOVEA_BLOCK_PX), quarter_frac);
