@@ -341,6 +341,8 @@ are here too, since the user hadn't confirmed them.
   #458: exact ground hits far from the origin, shadow safe steps, blocks of groups (D112): at 3440x1440, 19 of 21
   views under 16.7 ms (`red_spawn` 21.0 → 14.5 ms); `wormhole_exit` (57.7 ms) and `laser_into_wormhole` (18.9 ms) left,
   with options for the lens (half resolution, longer bent steps) in the PR for the user.
+  #462: the user's option D (half-resolution lens, Dust's longer bent steps, D114): at 3440x1440 `wormhole_exit` 57.7
+  → 24.5 ms and `laser_into_wormhole` 18.6 → 13.1 ms; 20 of 21 views under 16.7 ms.
 
 ## Done
 
