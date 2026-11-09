@@ -1,6 +1,7 @@
 //! `session` runs a match: it updates the player, their guns (`guns.rs`, Lunar Surface's) and
 //! the bots, resolves shots, spawns effects (beams flying out, sparks, smoke, ground dust, decals,
-//! light flashes), plays sounds, and turns the state into the renderer's per-frame data. An optional autopilot plays the game by itself for
+//! light flashes), throws and lands the player's wormholes and puts every player's linked pairs into
+//! the warps, plays sounds, and turns the state into the renderer's per-frame data. An optional autopilot plays the game by itself for
 //! screenshots and benchmarks.
 //!
 //! Example:
@@ -11,8 +12,7 @@ use crate::game::bots::BODY_CENTRE_HEIGHT_M;
 use crate::game::warps::{BeamPath, Warps};
 use crate::render::{LensMouth, ThrownLensMouth};
 use crate::thrown_wormholes::{
-    HIT_FLASH_COLOR, Marker, MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor,
-    fly_throw,
+    HIT_FLASH_COLOR, Marker, MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor, fly_throw,
 };
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -714,13 +714,9 @@ impl Session {
                     }
                 }
                 for (index, (_, marker)) in markers.iter().enumerate() {
-                    if let Some(hit_m) = cast_ray_at_ball(
-                        start_m,
-                        piece_direction,
-                        marker.centre_m,
-                        marker.radius_m,
-                    )
-                    .filter(|&hit_m| marker.is_mouth && hit_m < nearest_m)
+                    if let Some(hit_m) =
+                        cast_ray_at_ball(start_m, piece_direction, marker.centre_m, marker.radius_m)
+                            .filter(|&hit_m| marker.is_mouth && hit_m < nearest_m)
                     {
                         nearest_m = hit_m;
                         let normal: Vec3 = (start_m + piece_direction * hit_m - marker.centre_m)
@@ -875,7 +871,13 @@ impl Session {
             .map(MouthPlace::get_centre_m)
             .collect();
         for remote in &self.remote_bots {
-            others_m.extend(remote.wormholes.get_places().iter().map(MouthPlace::get_centre_m));
+            others_m.extend(
+                remote
+                    .wormholes
+                    .get_places()
+                    .iter()
+                    .map(MouthPlace::get_centre_m),
+            );
         }
         let (arena, solids) = (&self.arena, &scene.solids);
         let message: Option<String> = self.thrown.update(
@@ -914,13 +916,8 @@ impl Session {
                         lens_throat_m: mouth.get_lens_throat_m(),
                         reach_m: mouth.reach_m,
                         lambda_squared: mouth.lambda_squared,
-                        floor_m: cast_ray(
-                            solids,
-                            mouth.centre_m,
-                            Vec3::NEG_Y,
-                            MOUTH_FLOOR_PROBE_M,
-                        )
-                        .map_or(0.0, |(_, hit)| mouth.centre_m.y - hit.distance_m),
+                        floor_m: cast_ray(solids, mouth.centre_m, Vec3::NEG_Y, MOUTH_FLOOR_PROBE_M)
+                            .map_or(0.0, |(_, hit)| mouth.centre_m.y - hit.distance_m),
                         partner: mouth.partner - first,
                     },
                     tint_rgb: Vec3::ZERO,
@@ -2093,7 +2090,9 @@ fn find_clear_exit_feet_m(warps: &Warps, solids: &[Aabb], feet_m: Vec3) -> Vec3 
         return first_m;
     }
     let offset: Vec2 = Vec2::new(feet_m.x - mouth.centre_m.x, feet_m.z - mouth.centre_m.z);
-    let radius_m: f32 = offset.length().max(mouth.throat_radius_m + EXIT_CLEARANCE_M);
+    let radius_m: f32 = offset
+        .length()
+        .max(mouth.throat_radius_m + EXIT_CLEARANCE_M);
     let start_rad: f32 = offset.y.atan2(offset.x);
     let step_rad: f32 = std::f32::consts::PI / EXIT_DIRECTION_COUNT as f32;
     for turn in 1..=EXIT_DIRECTION_COUNT {

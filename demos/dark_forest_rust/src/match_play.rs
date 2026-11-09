@@ -1,6 +1,7 @@
 //! `match_play` runs the forest's objective and, in a network game, keeps the session in step
-//! with the game server: other players become robots in their team's colour, hits and console
-//! holds go to the server, and the server's eliminations, consoles and winner come back.
+//! with the game server: other players become robots in their team's colour, hits, console holds,
+//! thrown wormholes and hits on them go to the server, and the server's eliminations, consoles,
+//! winner and wormhole damage come back.
 //! Without a server it plays the same objective locally against the AI robots.
 //!
 //! Example: `play.update(&mut session, &scene, is_e_held, dt_s)?;`

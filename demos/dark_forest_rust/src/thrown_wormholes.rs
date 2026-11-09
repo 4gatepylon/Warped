@@ -158,8 +158,8 @@ pub fn fly_throw(
         if let Some(hit_m) = find_hit(x, direction, speed_m_per_s * FLIGHT_STEP_S) {
             let hit: DVec3 = x + direction * hit_m;
             let before: DVec3 = hit - direction * BACK_OFF_M;
-            flight.landing =
-                find_hit(before, DVec3::NEG_Y, MAX_DROP_M).map(|drop_m| (before - DVec3::Y * drop_m, v));
+            flight.landing = find_hit(before, DVec3::NEG_Y, MAX_DROP_M)
+                .map(|drop_m| (before - DVec3::Y * drop_m, v));
             flight.points.push(hit);
             return flight;
         }
@@ -210,9 +210,9 @@ impl PlayerWormholes {
             radius_m: radius_m as f32,
             is_mouth,
         };
-        let flying = self.flying.map(|(color, x)| {
-            marker(x.truncate().as_vec3(), color, FLYING_MARKER_M, false)
-        });
+        let flying = self
+            .flying
+            .map(|(color, x)| marker(x.truncate().as_vec3(), color, FLYING_MARKER_M, false));
         let unlinked = self
             .get_unlinked()
             .map(|(color, place)| marker(place.get_centre_m(), color, UNLINKED_MARKER_M, true));
@@ -398,15 +398,26 @@ mod tests {
         find_hit: impl Fn(DVec3, DVec3, f64) -> Option<f64>,
     ) -> Flight {
         let settings: WormholeSettings = ServerSettings::Builtin().wormholes;
-        fly_throw(get_eye(pitch_rad), WormholeColor::Purple, &settings, find_hit)
+        fly_throw(
+            get_eye(pitch_rad),
+            WormholeColor::Purple,
+            &settings,
+            find_hit,
+        )
     }
 
     #[test]
     fn a_landed_mouth_hovers_and_heads_along_its_flight() {
-        let place: MouthPlace =
-            MouthPlace::Landed(DVec3::new(2.0, 7.0, -3.0), DVec3::new(1.0, -2.0, -1.0), EYE_M);
+        let place: MouthPlace = MouthPlace::Landed(
+            DVec3::new(2.0, 7.0, -3.0),
+            DVec3::new(1.0, -2.0, -1.0),
+            EYE_M,
+        );
         let centre_m: Vec3 = place.get_centre_m();
-        assert!((centre_m - Vec3::new(2.0, 8.68, -3.0)).length() < 1e-5, "{centre_m}");
+        assert!(
+            (centre_m - Vec3::new(2.0, 8.68, -3.0)).length() < 1e-5,
+            "{centre_m}"
+        );
         assert!((place.yaw_rad - std::f64::consts::FRAC_PI_4).abs() < TOLERANCE_M);
     }
 
@@ -445,7 +456,10 @@ mod tests {
             let color: WormholeColor = thrown.get_next_color();
             colors.push(color);
             let settings: WormholeSettings = ServerSettings::Builtin().wormholes;
-            thrown.throw(fly_throw(get_eye(0.0), color, &settings, find_ground_hit), 0.0);
+            thrown.throw(
+                fly_throw(get_eye(0.0), color, &settings, find_ground_hit),
+                0.0,
+            );
             assert!(!thrown.can_throw());
             assert!(thrown.update(0.0, EYE_M, |_| true).is_none());
             assert!(thrown.placed.flying.is_some());
@@ -475,7 +489,10 @@ mod tests {
         let purple: MouthPlace = thrown.placed.purple.expect("purple is down");
         let settings: WormholeSettings = ServerSettings::Builtin().wormholes;
         let color: WormholeColor = thrown.get_next_color();
-        thrown.throw(fly_throw(get_eye(0.0), color, &settings, find_ground_hit), 0.0);
+        thrown.throw(
+            fly_throw(get_eye(0.0), color, &settings, find_ground_hit),
+            0.0,
+        );
         thrown.update(0.0, EYE_M, |_| true);
         assert_eq!(thrown.get_kept_places(), [purple]);
         let looks: Vec<([f32; 3], bool)> = thrown

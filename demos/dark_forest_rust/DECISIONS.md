@@ -19,9 +19,8 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
 - **D6. Two pylons per team, one on the ground, one in the treehouse.** `game_design/DESIGN.md` gives the count; the
   placement makes a team both hold its ground and climb. Holding `E` for 3 s within 2.5 m turns a console off (the
   hyperbolic demo's defaults).
-- **D7. The hyperbolic demo's network protocol, unchanged.** Copying `net.rs` as is (wormhole fields always empty)
-  kept multiplayer working quickly and keeps the bytes compatible with that demo's tools. A later refactor should drop
-  the wormhole fields.
+- **D7. The hyperbolic demo's network protocol, unchanged.** Copying `net.rs` as is kept multiplayer working quickly
+  and keeps the bytes compatible with that demo's tools. Its wormhole fields were empty until D42 filled them.
 - **D8. Robots in team colours, no new models.** The FPS demo's robot is tinted blue or red for other players, as the
   user allowed reusing the robot skins and guns.
 - **D9. Dim, swampy daylight.** The FPS demo's clear HDRI is graded murky green with a weaker sun, darker exposure and
@@ -239,6 +238,28 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   mouth from there, so the deck's underside shows whole, cut by its own edge. Every other bench view is unchanged.
   **Gives up:** a ray passing just beside a deck's edge below its top isn't bent either (the lens's reach goes 1.3 m
   below the deck's top).
+- **D42. Thrown wormholes (`Q`), Lunar Surface's in flat space** (W-126, same play in every level).
+  `thrown_wormholes.rs` is Lunar's with (u, v, h) read as (x, z, y): the same throw (16 m/s, 0.3 rad up, 20 m/s²,
+  4 s), colours, markers and messages, and the server settings' `wormholes` section is Lunar's but for the mouth's
+  size (a test compares them). Linked pairs join the map's mouths in `Warps` each time they change, so walking,
+  robots, lasers and the lens handle them as the map's; a shot through an enemy pair sends Lunar's wormhole hit,
+  which the server counts (`damage_frac`) until the pair breaks. **Heuristics:** a thrown mouth keeps the forest's
+  world-fixed mirror diag(1, 1, -1) rather than Lunar's mouth-facing gluing (the shader and the walkers keep one
+  gluing), so walking in along x comes out heading back along x; a thrown mouth is sized as the lift mouths
+  (Schwarzschild radius 2.4 m, reach 3 m), not Lunar's, so it fits the maze's 1.5-3 m corridors; a mouth that would
+  sit within another warp's reach (or within two reaches of another thrown mouth), inside a solid or outside the
+  arena fizzles. A thrown mouth often lands against a bamboo wall, so a body that the gluing would put inside a
+  solid or below the floor steps out at the nearest spot around the mouth where it fits
+  (`session::find_clear_exit_feet_m`, for map mouths too, where the gluing's exit is already clear). **Lens:** the
+  start-up atlas is read back to the CPU, which would stall a frame, so a thrown mouth's view is drawn on the GPU
+  instead (`render/metal/thrown_lens.rs`): the static tiles within 30 m and the sky into six 128 px HDR cube faces,
+  two faces a frame, so a pair is ready six frames after it lands; the lens shows the pair once both views are
+  drawn, graded as the live robots are and read through a cubic B-spline kept inside each face (W-138). **Gives
+  up:** the view doesn't change after it is drawn (doors, consoles going dark), is softer than the map mouths'
+  384 px atlas, and leaves out what is farther than 30 m (the haze hides most of it). **Measured** (3440x1440 px,
+  spawn view, two throws in the first 2 s, GPU ms, 3 alternating rounds, load 3.3-4.5): median 10.0-10.5 without
+  throws and 10.5-10.6 with (two lenses in view), p99 13.0-14.4 and 11.9-13.1, worst frame 14.5-15.3 and 12.6-15.8,
+  so drawing the views makes no spike above the frames' own spread.
 
 ## Follow-ups for the next agent
 

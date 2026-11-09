@@ -885,7 +885,7 @@ impl MetalRenderer {
             }))
             .collect();
         let slots: Vec<usize> =
-            pick_live_lens_mouths(&mouths, frame.camera.position_m, &is_visible, &movers);
+            pick_live_lens_mouths(mouths, frame.camera.position_m, &is_visible, &movers);
         if slots.is_empty() {
             return uniforms;
         }

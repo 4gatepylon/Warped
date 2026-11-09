@@ -313,7 +313,9 @@ impl MetalRenderer {
                 partner as f32,
                 mouth.floor_m,
             );
-            let slot: usize = thrown.get_drawn_slot(index).expect("a shown mouth is drawn");
+            let slot: usize = thrown
+                .get_drawn_slot(index)
+                .expect("a shown mouth is drawn");
             uniforms.thrown_looks[k] = Vec4::new(
                 slot as f32,
                 thrown_mouth.tint_rgb.x,
