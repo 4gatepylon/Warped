@@ -2157,6 +2157,15 @@
 - **Rationale:** the user (2026-11-09): "there has to be enough blur to remove aliasing elsewhere", "aliasing is a
   big issue", and the half-resolution lens "is worse ONLY BECAUSE it has aliasing".
 
+### D117. Option E is the default sharp centre, W-136 (sharp centre, soft edges) and W-138 (no aliasing)
+
+- **Choice:** `DEFAULT_SHARP_CENTRE` is option E of D115: the middle half of the width sharp, half resolution out to
+  three quarters of it, and a quarter beyond (was B: the middle 66% sharp, the rest at half).
+- **Rationale:** with D116's smoothing, E shows no steps at the edges, and it is 0.3-2.4 ms faster at 3440x1440 than B
+  (Lunar `blue_hesco_rows` 14.5 → 13.4 ms, Dust `laser_across_wind_eye` 17.3 → 15.0, Snow `wormhole` 20.2 → 17.8).
+  The user (2026-11-09): "you may lower resolution outside a circle around the crosshairs if that helps"; the lead
+  chose E from #469's sheets.
+
 ## Workload
 
 ### D7. Eight fixed views
