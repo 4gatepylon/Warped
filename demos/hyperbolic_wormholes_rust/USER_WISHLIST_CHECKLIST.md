@@ -96,7 +96,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-131 Lunar wormhole_exit slow at full size.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lunar Surface's `wormhole_exit` bench view takes about 109 ms of GPU time at full 2560x1440 (the reference and the match's copy alike); in play the window's render scale drops to keep frames fast, but the view itself is far over 16.7 ms.
 - [ ] **W-132 City Sphere stairs hole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): The stairs' hole in the glass (#429) is wider than a lift hole: shots pass through it, and players on the glass level can fall in onto the steps.
 - [ ] **W-133 Match winning round wording.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): The match's progression page calls the round that wins the match "attacker advances" (e.g. round 5, Dust); changing it changes visible text.
-- [ ] **W-134 Dust map page picture stale.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Dust's committed MAP page picture (`map_pictures/dust_r50m.png`) was drawn before the ground switched to 3 noise octaves; a fresh render differs in 6.5% of its pixels.
 - [ ] **W-135 e2e-match ports and logs.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): `make e2e-match` (the older match test) uses the game's own ports 47850/47852 and writes its logs into `.build/`, not `.artifacts/`.
 
 ## Pending user review
@@ -309,6 +308,8 @@ are here too, since the user hadn't confirmed them.
     Claude Code and finished by Devin; pictures in
     `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-102/both_guns/`. State,
     2026-11-08: on `staging`, waiting for the user to test it.
+- [?] **W-134 Dust map page picture stale.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Dust's committed MAP page picture (`map_pictures/dust_r50m.png`) was drawn before the ground switched to 3 noise octaves; a fresh render differs in 6.5% of its pixels.
+  #440: redrawn with `make make-map-picture MAP=dust`.
 
 ## Done
 
