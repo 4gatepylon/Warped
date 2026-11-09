@@ -45,10 +45,12 @@ is in [`AGENTS.md`](AGENTS.md).
     open). Lunar Surface, Dust and Snow Planet: #434 (servers
     take a console hold only in reach and aimed at, console bots walk to every pylon, `claude/console-reach-walking-bots`,
     open). Dark Forest: #431 (Lunar's HUD, hit effect and
-    "YOU DIED", `claude/dark-forest-parity-hud`, open) and #439 (playable and winnable: the server takes a console hold
+    "YOU DIED", `claude/dark-forest-parity-hud`, merged), #439 (playable and winnable: the server takes a console hold
     only in reach and aimed at, 10 s; console bots walk to every pylon by the ladders; both guns with Lunar's hits;
-    Lunar's jump; hidden bot windows; `claude/dark-forest-playable`, open); still missing there: Lunar's beam looks and
-    speckle, the Tab pages, the minimap, flashlight, third person, thrown wormholes, exit prompt, movement speeds.
+    Lunar's jump; hidden bot windows; `claude/dark-forest-playable`, merged) and #445 (Lunar's movement: speeds,
+    sprint energy, crouch, jump, air control, step, a hit's slowing, the shot delay after moving, the settings'
+    respawn delay; Lunar's flashlight and exit prompt; `claude/dark-forest-movement`, open, 2026-11-09); still
+    missing there: Lunar's beam looks and speckle, the Tab pages, the minimap, third person, thrown wormholes.
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
@@ -156,7 +158,8 @@ is in [`AGENTS.md`](AGENTS.md).
   there's like tree houses and stuff. Maybe have some like rope ladders and ways of going up trees. And crossing
   across them."
   Merged into `staging/user-4gatepylon` with #399, 2026-11-08. #426: robots, players and lasers show through the
-  wormholes (open, 2026-11-08). #439: playable and winnable end to end (open, 2026-11-08).
+  wormholes (merged, 2026-11-08). #439: playable and winnable end to end (merged, 2026-11-08). #445: Lunar Surface's
+  movement, flashlight and exit prompt (open, 2026-11-09).
 - [?] **W-123 Match progression menu.** "Make sure that the menus, when you see, like, there's a menu that shows the
   game progression, kind of the game history. Like, some state, I suppose, in the game server has to keep track of the
   game history and which team won what and what the wavefronts are, who has ownership, defensive ownership, offensive

@@ -1,14 +1,15 @@
 //! `settings` is the game server's settings that `net.rs` sends to players in its welcome: how
 //! long a console takes to switch off, how far it reaches, how long a player waits to respawn,
-//! both guns (with the rifle hits that eliminate a player) and aiming; and the head bob, a player
-//! setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
+//! both guns (with the rifle hits that eliminate a player), aiming, movement, sprint energy, how a
+//! hit slows and the flashlight; and the head bob, a player setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
 //! settings, under the same names and with the same values (W-126).
 //!
 //! Example: `let settings: ServerSettings = ServerSettings::Builtin();`
 //!
 //! Interface: `ServerSettings`, `ConsoleSettings`, `RespawnSettings`, `WormholeSettings`,
-//! `SniperSettings`, `RifleSettings`, `BeamSpeckleSettings`, `AimSettings`, `HeadBobSettings`,
-//! `HEAD_BOB`; in tests, `read_lunar_setting`.
+//! `SniperSettings`, `RifleSettings`, `BeamSpeckleSettings`, `AimSettings`, `MovementSettings`,
+//! `SprintEnergySettings`, `WhenHitSettings`, `FlashlightSettings`, `HeadBobSettings`, `HEAD_BOB`;
+//! in tests, `read_lunar_setting`.
 
 use std::error::Error;
 
@@ -135,6 +136,54 @@ pub const HEAD_BOB: HeadBobSettings = HeadBobSettings {
     rifle_sprint_swing_rad: 0.06,
 };
 
+/// `MovementSettings` is how players move, as multiples of the map's own numbers where it has
+/// them: walking and sprinting speeds, a jump's height and its time in the air (which sets
+/// gravity), crouching's speed, eye height and how long it takes, and how long after the last
+/// movement key (moving upright, jumping) a shot may fire.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct MovementSettings {
+    pub walk_speed_per_map_speed: f64,
+    pub sprint_speed_per_map_speed: f64,
+    pub jump_height_m: f64,
+    pub jump_time_per_map_jump_time: f64,
+    pub crouch_speed_frac: f64,
+    pub crouch_eye_height_frac: f64,
+    pub crouch_s: f64,
+    pub shoot_after_moving_s: f64,
+}
+
+/// `SprintEnergySettings` is the sprint energy bar: seconds of sprinting that empty it, and seconds
+/// to refill an empty one while crouched and while walking or standing upright.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct SprintEnergySettings {
+    pub drain_s: f64,
+    pub refill_crouching_s: f64,
+    pub refill_walking_s: f64,
+}
+
+/// `WhenHitSettings` is how a hit slows the player who takes it: their speed, as a fraction, and
+/// for how long.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct WhenHitSettings {
+    pub slow_speed_frac: f64,
+    pub slow_s: f64,
+}
+
+/// `FlashlightSettings` is the flashlight's cone (half its opening angle and the width of its soft
+/// edge), the distance at which its light has fallen to half, and how bright it is, as a fraction of
+/// full sunlight.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct FlashlightSettings {
+    pub cone_half_angle_rad: f64,
+    pub soft_edge_rad: f64,
+    pub range_m: f64,
+    pub brightness_frac: f64,
+}
+
 /// `ServerSettings` is every setting the server decides for all players. The guns, their beams and
 /// aiming are the Lunar Surface demo's (`demos/hyperbolic_wormholes_rust/server_settings.yaml`).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -147,6 +196,10 @@ pub struct ServerSettings {
     pub rifle: RifleSettings,
     pub beam_speckle: BeamSpeckleSettings,
     pub aim: AimSettings,
+    pub movement: MovementSettings,
+    pub sprint_energy: SprintEnergySettings,
+    pub when_hit: WhenHitSettings,
+    pub flashlight: FlashlightSettings,
 }
 
 impl ServerSettings {
@@ -202,6 +255,31 @@ impl ServerSettings {
                 sniper_zoom: 2.5,
                 rifle_zoom: 1.5,
                 zoom_s: 0.15,
+            },
+            movement: MovementSettings {
+                walk_speed_per_map_speed: 2.0,
+                sprint_speed_per_map_speed: 2.0,
+                jump_height_m: 1.25,
+                jump_time_per_map_jump_time: 1.0 / 3.0,
+                crouch_speed_frac: 0.5,
+                crouch_eye_height_frac: 0.6,
+                crouch_s: 0.15,
+                shoot_after_moving_s: 0.25,
+            },
+            sprint_energy: SprintEnergySettings {
+                drain_s: 7.5,
+                refill_crouching_s: 7.5,
+                refill_walking_s: 15.0,
+            },
+            when_hit: WhenHitSettings {
+                slow_speed_frac: 0.5,
+                slow_s: 1.0,
+            },
+            flashlight: FlashlightSettings {
+                cone_half_angle_rad: 0.3,
+                soft_edge_rad: 0.08,
+                range_m: 25.0,
+                brightness_frac: 2.0,
             },
         }
     }
@@ -271,6 +349,7 @@ pub fn read_lunar_setting(file_name: &str, section_path: &[&str], key: &str) -> 
 /// | --- | --- | --- |
 /// | source | built in, sent as JSON | `test_builtin_survives_json` |
 /// | Lunar Surface file | `server_settings.yaml` | `test_guns_and_aim_match_lunar_surface` |
+/// | | movement, sprint energy, when hit, flashlight | `test_movement_matches_lunar_surface` |
 /// | | `player_settings.yaml` | `test_head_bob_matches_lunar_surface` |
 /// | | consoles and respawn | `test_consoles_and_respawn_are_lunar_surface` |
 #[cfg(test)]
@@ -340,6 +419,18 @@ mod tests {
         assert_matches_lunar(&settings.rifle, file_name, &["rifle"]);
         assert_matches_lunar(&settings.beam_speckle, file_name, &["beam_speckle"]);
         assert_matches_lunar(&settings.aim, file_name, &["aim"]);
+    }
+
+    /// `test_movement_matches_lunar_surface` checks movement, sprint energy, how a hit slows and the
+    /// flashlight are Lunar Surface's.
+    #[test]
+    fn test_movement_matches_lunar_surface() {
+        let settings: ServerSettings = ServerSettings::Builtin();
+        let file_name: &str = "server_settings.yaml";
+        assert_matches_lunar(&settings.movement, file_name, &["movement"]);
+        assert_matches_lunar(&settings.sprint_energy, file_name, &["sprint_energy"]);
+        assert_matches_lunar(&settings.when_hit, file_name, &["when_hit"]);
+        assert_matches_lunar(&settings.flashlight, file_name, &["flashlight"]);
     }
 
     /// `test_head_bob_matches_lunar_surface` checks the head bob and gun sway are Lunar Surface's.

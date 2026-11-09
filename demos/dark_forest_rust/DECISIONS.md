@@ -113,6 +113,25 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   pose 30 times a second and the server snapshots at 60 Hz, so remote robots jumped every two or three frames.
   Hits are still the shooter's call, now against where the robot is drawn. A jump of more than 3 m (a wormhole,
   a respawn) isn't blended.
+- **D26. Lunar Surface's movement, with the forest's own body and ladders.** `player.rs` follows Lunar's
+  `VoxelPlayer::step` and `VoxelWorld::set_settings` (`Movement`): walking and sprinting at the settings' multiples of
+  the map's speeds, the velocity set at once on the ground and in the air (no run-up or drift, as on Lunar), sprinting in
+  any direction while not crouching, crouching over 0.15 s to half speed with the eye at 0.6 of its height, a jump of
+  1.25 m in 0.58 s, falls capped at 40 m/s, a hit's slowing to half speed for 1 s, and steps up ledges to Lunar's
+  0.5 m (for the robots too). The map's own numbers are now Lunar Surface's map's (5 m/s walking, 9 m/s sprinting, a
+  5.2 m/s jump under 6 m/s²), so the same server settings give the same play here as on every other level; nothing
+  else reads those numbers. Kept from the forest: its body (0.3 m radius, 1.8 m tall, eye 1.68 m up; a crouched body
+  shrinks with its eye, so it fits under what the eye does), its rope ladders at the 4.4 m/s pace they were made for,
+  and the landing dip. Tests check the numbers against Lunar's own `server_settings.yaml` and map. The player also
+  waits the server settings' `respawn.delay_s` before respawning, as Lunar does, instead of its own 3 s.
+- **D27. A shot fires only 0.25 s after the last step upright or jump, as on Lunar Surface.** The autopilot and the
+  fighting bots therefore stand still while they have a target in sight.
+- **D28. The flashlight is two point lights, and `Esc` asks before quitting.** Lunar's flashlight is a cone of light
+  from the eye; this renderer has no spot lights and its shaders belong to another agent now, so `F` puts a light where
+  the view meets the world (as wide as the cone there, halved at its 25 m range) and a dim one just ahead of the eye.
+  Heuristic: gives up the cone's sharp edge and lights a little around the spot. Others don't see your flashlight, as
+  on Lunar. `Esc` frees the mouse and, pressed again, shows Lunar's exit prompt (`exit_prompt.rs`, copied); `Tab`
+  alone opens the menu.
 
 ## Follow-ups for the next agent
 

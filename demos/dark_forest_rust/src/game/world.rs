@@ -148,8 +148,11 @@ pub struct Pylon {
     pub console_index: usize,
 }
 
-/// `Arena` is the whole level.
+/// `Arena` is the whole level; `map_player` and `map_gravity_m_per_s2` are how players move on
+/// its map before the server settings (`player::Movement`).
 pub struct Arena {
+    pub map_player: crate::map::PlayerSpec,
+    pub map_gravity_m_per_s2: f32,
     pub pylons: Vec<Pylon>,
     pub warps: Warps,
     pub boxes: Vec<WorldBox>,
@@ -373,6 +376,8 @@ impl Arena {
             bounds_max_m = bounds_max_m.max(shape.centre_m + shape.half_m);
         }
         Arena {
+            map_player: map.player.clone(),
+            map_gravity_m_per_s2: map.gravity_m_per_s2,
             boxes,
             shapes,
             ladders,
