@@ -8,27 +8,19 @@
 //!
 //! Interface: `ServerSettings`, `ConsoleSettings`, `RespawnSettings`, `WormholeSettings`,
 //! `SniperSettings`, `RifleSettings`, `BeamSpeckleSettings`, `AimSettings`, `MovementSettings`,
-//! `SprintEnergySettings`, `WhenHitSettings`, `FlashlightSettings`, `HeadBobSettings`, `HEAD_BOB`;
-//! in tests, `read_lunar_setting`.
+//! `SprintEnergySettings`, `WhenHitSettings`, `FlashlightSettings`, `HeadBobSettings`, `HEAD_BOB`,
+//! `HitEffectSettings`, `HIT_EFFECTS`; in tests, `read_lunar_setting`. Every section but
+//! `WormholeSettings` is the shared `warped_shared::play_settings` one (W-126, same play in every
+//! level).
 
 use std::error::Error;
 
 use serde::{Deserialize, Serialize};
-
-/// `ConsoleSettings` is how long a player holds `E` to switch a console off, and from how far.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct ConsoleSettings {
-    pub hold_to_disable_s: f64,
-    pub reach_m: f64,
-}
-
-/// `RespawnSettings` is how long a player who was eliminated waits before coming back.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct RespawnSettings {
-    pub delay_s: f64,
-}
+pub use warped_shared::play_settings::{
+    AimSettings, BeamSpeckleSettings, ConsoleSettings, FlashlightSettings, HeadBobSettings,
+    HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
+    SprintEnergySettings, WhenHitSettings,
+};
 
 /// `WormholeSettings` is how many hits destroy thrown wormholes; the forest has none, but the
 /// protocol's hit messages carry the counts.
@@ -39,87 +31,15 @@ pub struct WormholeSettings {
     pub rifle_hits_to_destroy: u8,
 }
 
-/// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, how long the
-/// bob takes to start or stop, and how the gun in hand sways with the steps while walking and
-/// while sprinting: how far it slides left and right, and how far a gun as long as the bolt-action
-/// rifle swings (its muzzle lagging the slide; shorter guns swing in proportion).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct HeadBobSettings {
-    pub walk_depth_m: f64,
-    pub sprint_depth_m: f64,
-    pub walk_steps_per_s: f64,
-    pub sprint_steps_per_s: f64,
-    pub fade_s: f64,
-    pub gun_walk_sway_m: f64,
-    pub gun_sprint_sway_m: f64,
-    pub rifle_walk_swing_rad: f64,
-    pub rifle_sprint_swing_rad: f64,
-}
-
-/// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
-/// to reload, how many hits eliminate a player, how its beam flies (speed, and how long each
-/// point stays lit), how far a shot strays from the crosshair (the mean of an exponential
-/// distribution, and a cap; `shot_noise.rs`), and the share of its beam's pixels that speckle each
-/// frame (the same: a mean and a cap).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct SniperSettings {
-    pub shot_s: f64,
-    pub reload_s: f64,
-    pub hits_to_eliminate: u8,
-    pub beam_speed_m_per_s: f64,
-    pub beam_trail_s: f64,
-    pub noise_mean_rad: f64,
-    pub noise_max_rad: f64,
-    pub beam_speckle_mean_frac: f64,
-    pub beam_speckle_max_frac: f64,
-}
-
-/// `RifleSettings` is gun 2: its fire rate, how long a shot hits, how its beam flies, overheating
-/// and cooling, the hits that eliminate a player, each shot's recoil, the most a shot strays
-/// from the crosshair, cold and at full heat, and the share of its beam's pixels that speckle each
-/// frame, cold and at full heat (`shot_noise.rs`).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct RifleSettings {
-    pub shots_per_s: f64,
-    pub pulse_s: f64,
-    pub beam_speed_m_per_s: f64,
-    pub beam_trail_s: f64,
-    pub shots_until_overheat: u32,
-    pub cool_down_s: f64,
-    pub head_hits_to_eliminate: u8,
-    pub body_hits_to_eliminate: u8,
-    pub recoil_up_rad: f64,
-    pub recoil_sideways_rad: f64,
-    pub recoil_settle_s: f64,
-    pub noise_start_rad: f64,
-    pub noise_max_rad: f64,
-    pub beam_speckle_start_frac: f64,
-    pub beam_speckle_max_frac: f64,
-}
-
-/// `BeamSpeckleSettings` is how a laser beam's speckled pixels look, with both guns: the shares of
-/// them painted black, turned white and dropping out (showing what is behind), which add up to 1.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct BeamSpeckleSettings {
-    pub black_frac: f64,
-    pub white_frac: f64,
-    pub dropout_frac: f64,
-}
-
-/// `AimSettings` is aiming (holding the aim control): how much closer things look with each gun at
-/// full zoom, and how long zooming fully in or out takes. The mouse turns the view more slowly by
-/// the same factor.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct AimSettings {
-    pub sniper_zoom: f64,
-    pub rifle_zoom: f64,
-    pub zoom_s: f64,
-}
+/// `HIT_EFFECTS` is the Lunar Surface demo's `hit_effects` player setting
+/// (`demos/hyperbolic_wormholes_rust/player_settings.yaml`): how long a hit's red, shake and blur
+/// take to fade, how red the screen's edges turn, and how far the screen shakes and the edges blur.
+pub const HIT_EFFECTS: HitEffectSettings = HitEffectSettings {
+    effect_s: 0.6,
+    red_frac: 0.6,
+    shake_px: 6.0,
+    blur_px: 6.0,
+};
 
 /// `HEAD_BOB` is the Lunar Surface demo's `view.head_bob` player setting
 /// (`demos/hyperbolic_wormholes_rust/player_settings.yaml`): the eye's dip and the gun's sway with
@@ -135,54 +55,6 @@ pub const HEAD_BOB: HeadBobSettings = HeadBobSettings {
     rifle_walk_swing_rad: 0.03,
     rifle_sprint_swing_rad: 0.06,
 };
-
-/// `MovementSettings` is how players move, as multiples of the map's own numbers where it has
-/// them: walking and sprinting speeds, a jump's height and its time in the air (which sets
-/// gravity), crouching's speed, eye height and how long it takes, and how long after the last
-/// movement key (moving upright, jumping) a shot may fire.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct MovementSettings {
-    pub walk_speed_per_map_speed: f64,
-    pub sprint_speed_per_map_speed: f64,
-    pub jump_height_m: f64,
-    pub jump_time_per_map_jump_time: f64,
-    pub crouch_speed_frac: f64,
-    pub crouch_eye_height_frac: f64,
-    pub crouch_s: f64,
-    pub shoot_after_moving_s: f64,
-}
-
-/// `SprintEnergySettings` is the sprint energy bar: seconds of sprinting that empty it, and seconds
-/// to refill an empty one while crouched and while walking or standing upright.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct SprintEnergySettings {
-    pub drain_s: f64,
-    pub refill_crouching_s: f64,
-    pub refill_walking_s: f64,
-}
-
-/// `WhenHitSettings` is how a hit slows the player who takes it: their speed, as a fraction, and
-/// for how long.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct WhenHitSettings {
-    pub slow_speed_frac: f64,
-    pub slow_s: f64,
-}
-
-/// `FlashlightSettings` is the flashlight's cone (half its opening angle and the width of its soft
-/// edge), the distance at which its light has fallen to half, and how bright it is, as a fraction of
-/// full sunlight.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct FlashlightSettings {
-    pub cone_half_angle_rad: f64,
-    pub soft_edge_rad: f64,
-    pub range_m: f64,
-    pub brightness_frac: f64,
-}
 
 /// `ServerSettings` is every setting the server decides for all players. The guns, their beams and
 /// aiming are the Lunar Surface demo's (`demos/hyperbolic_wormholes_rust/server_settings.yaml`).
@@ -350,7 +222,7 @@ pub fn read_lunar_setting(file_name: &str, section_path: &[&str], key: &str) -> 
 /// | source | built in, sent as JSON | `test_builtin_survives_json` |
 /// | Lunar Surface file | `server_settings.yaml` | `test_guns_and_aim_match_lunar_surface` |
 /// | | movement, sprint energy, when hit, flashlight | `test_movement_matches_lunar_surface` |
-/// | | `player_settings.yaml` | `test_head_bob_matches_lunar_surface` |
+/// | | `player_settings.yaml` (head bob, hit effects) | `test_head_bob_matches_lunar_surface` |
 /// | | consoles and respawn | `test_consoles_and_respawn_are_lunar_surface` |
 #[cfg(test)]
 mod tests {
@@ -433,10 +305,12 @@ mod tests {
         assert_matches_lunar(&settings.flashlight, file_name, &["flashlight"]);
     }
 
-    /// `test_head_bob_matches_lunar_surface` checks the head bob and gun sway are Lunar Surface's.
+    /// `test_head_bob_matches_lunar_surface` checks the head bob, gun sway and a hit's look are
+    /// Lunar Surface's.
     #[test]
     fn test_head_bob_matches_lunar_surface() {
         assert_matches_lunar(&HEAD_BOB, "player_settings.yaml", &["view", "head_bob"]);
+        assert_matches_lunar(&HIT_EFFECTS, "player_settings.yaml", &["hit_effects"]);
     }
 
     /// `test_consoles_and_respawn_are_lunar_surface` checks the consoles' hold and reach and the

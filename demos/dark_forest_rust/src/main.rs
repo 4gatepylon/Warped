@@ -16,7 +16,6 @@ mod credits;
 mod exit_prompt;
 mod forest_layout;
 mod game;
-mod hud_bars;
 mod map;
 mod match_play;
 mod menu;
@@ -29,12 +28,13 @@ mod scene;
 mod server;
 #[allow(dead_code)]
 mod settings;
-#[allow(dead_code)]
-mod shot_noise;
 mod text_overlay;
 #[allow(dead_code)]
 mod thrown_wormholes;
 mod title;
+
+use warped_shared::hud::get_death_lines;
+use warped_shared::shot_noise;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -389,7 +389,7 @@ fn capture_wormhole_lens(
     for (row, mouth) in mouths.iter().enumerate() {
         for (face, (forward, up)) in render::LENS_FACES.iter().enumerate() {
             let camera: render::Camera = render::Camera {
-                view: glam::Mat4::look_to_rh(mouth.centre_m, *forward, *up),
+                view: crate::render::camera_math::make_view_rh(mouth.centre_m, *forward, *up),
                 position_m: mouth.centre_m,
                 fov_y_rad: std::f32::consts::FRAC_PI_2,
                 ..frame.camera
@@ -1347,7 +1347,8 @@ fn main() {
             let (low_m, high_m) = (session.arena.bounds_min_m, session.arena.bounds_max_m);
             let centre_m: Vec3 = (low_m + high_m) * 0.5;
             let eye_m: Vec3 = Vec3::new(centre_m.x, MAP_PICTURE_HEIGHT_M, centre_m.z);
-            frame.camera.view = glam::Mat4::look_to_rh(eye_m, Vec3::NEG_Y, Vec3::NEG_Z);
+            frame.camera.view =
+                crate::render::camera_math::make_view_rh(eye_m, Vec3::NEG_Y, Vec3::NEG_Z);
             frame.camera.position_m = eye_m;
             frame.camera.fov_y_rad =
                 2.0 * ((high_m.z - low_m.z) * 0.5 / MAP_PICTURE_HEIGHT_M).atan();
@@ -1410,13 +1411,10 @@ fn main() {
                 .get_respawn_in_s(session.settings.respawn.delay_s as f32)
         {
             death_picture.draw(
-                &[
-                    ("YOU DIED".to_string(), true),
-                    (
-                        format!("Respawning in {:.0}", respawn_in_s.ceil().max(1.0)),
-                        false,
-                    ),
-                ],
+                &{
+                    let [title, countdown] = get_death_lines(f64::from(respawn_in_s));
+                    [(title, true), (countdown, false)]
+                },
                 true,
             );
             hud_images.push(death_picture.get_image(

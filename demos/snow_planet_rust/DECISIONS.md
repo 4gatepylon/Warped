@@ -174,3 +174,10 @@ steps (`BEND_STEP_FRAC` 0.2, S10), so Lunar's longer steps (option C) aren't nee
   are a little stepped, and a thin laser seen through a lens is dotted.
 - **Tried and not taken:** the beam's haze between samples (Lunar's D111): the same pictures but no faster here.
 - **For the user:** like Lunar's option D, a visible trade-off; the lead takes it to the user.
+
+## S15. No aliasing, W-138 (no aliasing)
+
+The same code as Lunar Surface's renderer (its D116) without its half-resolution lens (#465 adds that, with its
+smoothing): outside the sharp centre tone mapping shows a cubic B-spline of the half- or quarter-resolution pixels,
+blended in over 48 px, so the soft edges show no steps, and FXAA 3.11 anti-aliases the whole image. At 3440x1440:
+0.3-1.3 ms more per view. (S14 is #465's half-resolution lens.)

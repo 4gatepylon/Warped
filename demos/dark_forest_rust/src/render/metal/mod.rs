@@ -900,12 +900,12 @@ impl MetalRenderer {
             let centre_m: Vec3 = live.mouths[mouth].centre_m;
             for (face, (forward, up)) in LENS_FACES.iter().enumerate() {
                 let camera: crate::render::Camera = crate::render::Camera {
-                    view: Mat4::look_to_rh(centre_m, *forward, *up),
+                    view: crate::render::camera_math::make_view_rh(centre_m, *forward, *up),
                     position_m: centre_m,
                     fov_y_rad: std::f32::consts::FRAC_PI_2,
                     ..frame.camera
                 };
-                let proj: Mat4 = Mat4::perspective_infinite_reverse_rh(
+                let proj: Mat4 = crate::render::camera_math::make_perspective_infinite_reverse_rh(
                     std::f32::consts::FRAC_PI_2,
                     1.0,
                     camera.near_m,
@@ -1343,12 +1343,12 @@ impl MetalRenderer {
     ) -> FrameTiming {
         let environment: &EnvironmentState = self.environment.as_ref().expect("no environment");
         let aspect: f32 = targets.width_px as f32 / targets.height_px as f32;
-        let proj: Mat4 = Mat4::perspective_infinite_reverse_rh(
+        let proj: Mat4 = crate::render::camera_math::make_perspective_infinite_reverse_rh(
             frame.camera.fov_y_rad,
             aspect,
             frame.camera.near_m,
         );
-        let viewmodel_proj: Mat4 = Mat4::perspective_infinite_reverse_rh(
+        let viewmodel_proj: Mat4 = crate::render::camera_math::make_perspective_infinite_reverse_rh(
             frame.camera.viewmodel_fov_y_rad,
             aspect,
             VIEWMODEL_NEAR_M,
@@ -2223,7 +2223,8 @@ mod tests {
     /// mouth around the camera gives the whole target.
     #[test]
     fn test_lens_scissor_covers_the_mouths_in_view() {
-        let view_proj: Mat4 = Mat4::perspective_infinite_reverse_rh(1.2, 16.0 / 9.0, 0.05);
+        let view_proj: Mat4 =
+            crate::render::camera_math::make_perspective_infinite_reverse_rh(1.2, 16.0 / 9.0, 0.05);
         let frustum: Frustum = Frustum::from_view_proj(view_proj);
         let (width_px, height_px) = (1280, 720);
         let behind: Option<MTLScissorRect> = get_lens_scissor(

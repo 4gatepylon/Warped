@@ -23,11 +23,10 @@ mod server;
 #[path = "../settings.rs"]
 mod settings;
 #[allow(dead_code)]
-#[path = "../shot_noise.rs"]
-mod shot_noise;
-#[allow(dead_code)]
 #[path = "../thrown_wormholes.rs"]
 mod thrown_wormholes;
+
+use warped_shared::shot_noise;
 
 use std::error::Error;
 use std::path::PathBuf;

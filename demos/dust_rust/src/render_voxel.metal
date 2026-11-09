@@ -381,6 +381,11 @@ constant int FOVEA_HALF = 1;
 constant int FOVEA_QUARTER = 2;
 constant uint FOVEA_BLOCK_PX = 4;
 constant float FOVEA_SAMPLE_MARGIN_PX = 8.0;
+constant float SOFT_BAND_PX = 48.0;
+constant float FXAA_EDGE_THRESHOLD = 0.125;
+constant float FXAA_EDGE_THRESHOLD_MIN = 0.0312;
+constant int FXAA_SEARCH_STEP_COUNT = 10;
+constant float FXAA_SUBPIXEL_QUALITY = 0.75;
 constant uint REFINE_CELL_MASK = (1u << 24) - 1;
 constant int REFINE_LEVEL_FIRST_BIT = 24;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
@@ -3488,15 +3493,60 @@ kernel void bloom_down(texture2d<float> source [[texture(1)]], texture2d<float, 
 }
 
 /**
+ * @brief `get_spline_color` gives the HDR colour at pixel `id` as a cubic B-spline of the 4 × 4 shaded pixels around
+ * it on the grid every `spacing_px` pixels each way: a smooth, ring-free blur about two grid steps wide, so a region
+ * shaded at half or a quarter resolution shows no steps (W-138, no aliasing).
+ * @par Example
+ * @code
+ * float3 c = get_spline_color(u, hdr, id, 2);
+ * @endcode
+ */
+static float3 get_spline_color(constant VoxelUniforms &u, texture2d<float> hdr, uint2 id, uint spacing_px) {
+    float2 g = float2(id) / float(spacing_px), f = fract(g), f2 = f * f, f3 = f2 * f;
+    int2 base = int2(floor(g)) - 1, last = (int2(u.width_px, u.height_px) - 1) / int(spacing_px);
+    float2 w[4] = {(1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0, (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0,
+                   f3 / 6.0};
+    float3 sum = float3(0.0);
+    for (int b = 0; b < 4; b++) {
+        for (int a = 0; a < 4; a++) {
+            int2 k = clamp(base + int2(a, b), int2(0), last);
+            sum += w[a].x * w[b].y * hdr.read(uint2(k * int(spacing_px))).rgb;
+        }
+    }
+    return sum;
+}
+
+/**
+ * @brief `get_soft_color` gives the HDR colour `tonemap_voxel` shows at pixel `id`: the pixel itself in the sharp
+ * centre, blending over `SOFT_BAND_PX` into `get_spline_color` of the half-resolution grid outside it, and of the
+ * quarter-resolution grid toward and beyond `u.fovea.y`.
+ * @par Example
+ * @code
+ * float3 c = get_soft_color(u, hdr, id);
+ * @endcode
+ */
+static float3 get_soft_color(constant VoxelUniforms &u, texture2d<float> hdr, uint2 id) {
+    float3 color = hdr.read(id).rgb;
+    float r_px = get_centre_distance_px(u, float2(id));
+    float half_frac = r_px <= u.fovea.x ? 0.0 : smoothstep(u.fovea.x, u.fovea.x + SOFT_BAND_PX, r_px);
+    float quarter_frac = r_px <= u.fovea.y - SOFT_BAND_PX ? 0.0 : smoothstep(u.fovea.y - SOFT_BAND_PX, u.fovea.y, r_px);
+    if (half_frac > 0.0 && quarter_frac < 1.0) color = mix(color, get_spline_color(u, hdr, id, 2), half_frac);
+    if (quarter_frac > 0.0) color = mix(color, get_spline_color(u, hdr, id, FOVEA_BLOCK_PX), quarter_frac);
+    return color;
+}
+
+/**
  * @brief `tonemap_voxel` finishes the HDR image (texture 1) like the fps_demo: mixes in the bloom levels, adds the
- * bloom's bright parts as a glow, exposes, grades, tone maps with ACES, vignettes and encodes sRGB into texture 0.
+ * bloom's bright parts as a glow, exposes, grades, tone maps with ACES, vignettes and encodes sRGB into texture 0,
+ * with its luma in alpha for `fxaa_voxel`. It reads each pixel through `get_soft_color`.
  * @par Example
  * @code
  * dispatched by render_voxel.rs after tracing, one thread per pixel.
  * @endcode
  */
-kernel void tonemap_voxel(texture2d<float> hdr [[texture(1)]], array<texture2d<float>, BLOOM_LEVELS> bloom [[texture(7)]],
-                          texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+kernel void tonemap_voxel(constant VoxelUniforms &u [[buffer(16)]], texture2d<float> hdr [[texture(1)]],
+                          array<texture2d<float>, BLOOM_LEVELS> bloom [[texture(7)]], texture2d<float, access::write> image [[texture(0)]],
+                          uint2 id [[thread_position_in_grid]]) {
     if (id.x >= hdr.get_width() || id.y >= hdr.get_height()) return;
     constexpr sampler edge(filter::linear, address::clamp_to_edge);
     float2 uv = (float2(id) + 0.5) / float2(hdr.get_width(), hdr.get_height());
@@ -3504,8 +3554,81 @@ kernel void tonemap_voxel(texture2d<float> hdr [[texture(1)]], array<texture2d<f
     for (int k = 0; k < BLOOM_LEVELS; k++) bloom_color += bloom[k].sample(edge, uv).rgb;
     float3 bloom_mean = bloom_color / float(BLOOM_LEVELS);
     float3 glow = bloom_mean * smoothstep(BLOOM_GLOW_LUMA_EDGES.x, BLOOM_GLOW_LUMA_EDGES.y, dot(bloom_mean, LUMA));
-    float3 color = (mix(hdr.read(id).rgb, bloom_mean, BLOOM_STRENGTH) + BLOOM_GLOW * glow) * EXPOSURE;
+    float3 color = (mix(get_soft_color(u, hdr, id), bloom_mean, BLOOM_STRENGTH) + BLOOM_GLOW * glow) * EXPOSURE;
     color = grade_display(aces_fitted(grade_scene(color)));
     color *= 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length((uv - 0.5) * float2(1.1, 1.0)));
-    image.write(float4(linear_to_srgb(saturate(color)), 1.0), id);
+    float3 encoded = linear_to_srgb(saturate(color));
+    image.write(float4(encoded, dot(encoded, LUMA)), id);
+}
+
+/**
+ * @brief `fxaa_voxel` anti-aliases the tone-mapped image (texture 1, luma in alpha) into texture 0 with FXAA 3.11
+ * (quality), as Dark Forest's `get_fxaa_color` does (W-138, no aliasing): it finds the edge through each pixel whose
+ * local contrast is high enough, searches along it for its ends, and samples across it by how far the pixel is from
+ * the nearer end, plus a sub-pixel blend for isolated bright or dark pixels.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs after tone mapping, one thread per pixel.
+ * @endcode
+ */
+kernel void fxaa_voxel(texture2d<float> ldr [[texture(1)]], texture2d<float, access::write> image [[texture(0)]],
+                       uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= ldr.get_width() || id.y >= ldr.get_height()) return;
+    constexpr sampler edge(filter::linear, address::clamp_to_edge);
+    float2 texel = 1.0 / float2(ldr.get_width(), ldr.get_height()), uv = (float2(id) + 0.5) * texel;
+    float4 centre = ldr.read(id);
+    float luma_centre = centre.a;
+    float luma_down = ldr.sample(edge, uv + float2(0, 1) * texel).a, luma_up = ldr.sample(edge, uv + float2(0, -1) * texel).a;
+    float luma_left = ldr.sample(edge, uv + float2(-1, 0) * texel).a, luma_right = ldr.sample(edge, uv + float2(1, 0) * texel).a;
+    float luma_min = min(luma_centre, min(min(luma_down, luma_up), min(luma_left, luma_right)));
+    float luma_max = max(luma_centre, max(max(luma_down, luma_up), max(luma_left, luma_right)));
+    float luma_range = luma_max - luma_min;
+    if (luma_range < max(FXAA_EDGE_THRESHOLD_MIN, luma_max * FXAA_EDGE_THRESHOLD)) {
+        image.write(float4(centre.rgb, 1.0), id);
+        return;
+    }
+    float luma_down_left = ldr.sample(edge, uv + float2(-1, 1) * texel).a, luma_up_right = ldr.sample(edge, uv + float2(1, -1) * texel).a;
+    float luma_up_left = ldr.sample(edge, uv + float2(-1, -1) * texel).a, luma_down_right = ldr.sample(edge, uv + float2(1, 1) * texel).a;
+    float luma_down_up = luma_down + luma_up, luma_left_right = luma_left + luma_right;
+    float luma_left_corners = luma_down_left + luma_up_left, luma_down_corners = luma_down_left + luma_down_right;
+    float luma_right_corners = luma_down_right + luma_up_right, luma_up_corners = luma_up_right + luma_up_left;
+    float edge_horizontal = abs(-2.0 * luma_left + luma_left_corners) + abs(-2.0 * luma_centre + luma_down_up) * 2.0
+        + abs(-2.0 * luma_right + luma_right_corners);
+    float edge_vertical = abs(-2.0 * luma_up + luma_up_corners) + abs(-2.0 * luma_centre + luma_left_right) * 2.0
+        + abs(-2.0 * luma_down + luma_down_corners);
+    bool is_horizontal = edge_horizontal >= edge_vertical;
+    float luma_1 = is_horizontal ? luma_up : luma_left, luma_2 = is_horizontal ? luma_down : luma_right;
+    float gradient_1 = luma_1 - luma_centre, gradient_2 = luma_2 - luma_centre;
+    bool is_1_steepest = abs(gradient_1) >= abs(gradient_2);
+    float gradient_scaled = 0.25 * max(abs(gradient_1), abs(gradient_2));
+    float step_length = (is_horizontal ? texel.y : texel.x) * (is_1_steepest ? -1.0 : 1.0);
+    float luma_local_average = 0.5 * ((is_1_steepest ? luma_1 : luma_2) + luma_centre);
+    float2 current_uv = uv + (is_horizontal ? float2(0.0, 0.5 * step_length) : float2(0.5 * step_length, 0.0));
+    float2 offset = is_horizontal ? float2(texel.x, 0.0) : float2(0.0, texel.y);
+    float2 uv_1 = current_uv - offset, uv_2 = current_uv + offset;
+    float luma_end_1 = ldr.sample(edge, uv_1).a - luma_local_average, luma_end_2 = ldr.sample(edge, uv_2).a - luma_local_average;
+    bool is_reached_1 = abs(luma_end_1) >= gradient_scaled, is_reached_2 = abs(luma_end_2) >= gradient_scaled;
+    for (int i = 0; i < FXAA_SEARCH_STEP_COUNT && !(is_reached_1 && is_reached_2); i++) {
+        float quality = i < 2 ? 1.0 : (i < 5 ? 1.5 : (i < 8 ? 2.0 : 4.0));
+        if (!is_reached_1) {
+            uv_1 -= offset * quality;
+            luma_end_1 = ldr.sample(edge, uv_1).a - luma_local_average;
+            is_reached_1 = abs(luma_end_1) >= gradient_scaled;
+        }
+        if (!is_reached_2) {
+            uv_2 += offset * quality;
+            luma_end_2 = ldr.sample(edge, uv_2).a - luma_local_average;
+            is_reached_2 = abs(luma_end_2) >= gradient_scaled;
+        }
+    }
+    float distance_1 = is_horizontal ? uv.x - uv_1.x : uv.y - uv_1.y, distance_2 = is_horizontal ? uv_2.x - uv.x : uv_2.y - uv.y;
+    bool is_direction_1 = distance_1 < distance_2, is_luma_centre_smaller = luma_centre < luma_local_average;
+    bool is_correct_variation = ((is_direction_1 ? luma_end_1 : luma_end_2) < 0.0) != is_luma_centre_smaller;
+    float final_offset = is_correct_variation ? 0.5 - min(distance_1, distance_2) / (distance_1 + distance_2) : 0.0;
+    float luma_average = (2.0 * (luma_down_up + luma_left_right) + luma_left_corners + luma_right_corners) / 12.0;
+    float subpixel_1 = saturate(abs(luma_average - luma_centre) / luma_range);
+    float subpixel_2 = (3.0 - 2.0 * subpixel_1) * subpixel_1 * subpixel_1;
+    final_offset = max(final_offset, subpixel_2 * subpixel_2 * FXAA_SUBPIXEL_QUALITY);
+    float2 final_uv = uv + (is_horizontal ? float2(0.0, final_offset * step_length) : float2(final_offset * step_length, 0.0));
+    image.write(float4(ldr.sample(edge, final_uv).rgb, 1.0), id);
 }

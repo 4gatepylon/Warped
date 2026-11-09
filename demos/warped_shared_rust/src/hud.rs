@@ -6,8 +6,9 @@
 //! console; the hit effect's look (`make_hit_effect`); and the banner's lobby and "YOU DIED"
 //! lines.
 //!
-//! Interface: `get_crosshair_rects`, `HudBars`, `HudPulses`, `make_bar_rects`, `make_hit_effect`,
-//! `get_lobby_lines`, `get_death_lines`, `describe_gun`, `ENERGY_SEGMENT_COUNT`.
+//! Interface: `get_crosshair_rects`, `HudBars`, `HudPulses`, `AmmoBar`, `make_bar_rects`,
+//! `make_ammo_bar_rects`, `make_hit_effect`, `get_lobby_lines`, `get_death_lines`, `describe_gun`,
+//! `ENERGY_SEGMENT_COUNT`.
 //!
 //! Example: `let rects: Vec<OverlayRect> = get_crosshair_rects((2560, 1440));`
 
@@ -84,16 +85,64 @@ impl HudPulses {
     }
 }
 
+/// `AmmoBar` is what the HUD's ammo bar shows: how full it is (0 to 1), in how many segments, and
+/// whether it is drawn in the overheated colour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AmmoBar {
+    pub frac: f64,
+    pub segment_count: u32,
+    pub is_overheated: bool,
+}
+
+impl AmmoBar {
+    /// `FromWeapons` is the ammo bar of the gun in hand: the sniper's one block, full when loaded
+    /// and empty while it reloads, or the rifle's shots left before it overheats, red once
+    /// overheated.
+    ///
+    /// Example: `let ammo = AmmoBar::FromWeapons(&self.weapons, &self.settings.rifle);`
+    #[allow(non_snake_case)]
+    pub fn FromWeapons(weapons: &Weapons, rifle: &RifleSettings) -> AmmoBar {
+        match weapons.gun {
+            Gun::Laser => AmmoBar {
+                frac: if weapons.sniper_reload_s <= 0.0 {
+                    1.0
+                } else {
+                    0.0
+                },
+                segment_count: 1,
+                is_overheated: false,
+            },
+            Gun::Rifle => AmmoBar {
+                frac: 1.0 - weapons.rifle_heat_frac.min(1.0),
+                segment_count: rifle.shots_until_overheat,
+                is_overheated: weapons.is_overheated,
+            },
+        }
+    }
+}
+
 /// `make_bar_rects` gives the HUD's bars as segmented bars in the HUD's look (`hud_bars.rs`): in
 /// the bottom left this player's health (if in `bars`; one segment per rifle body hit), the gun in
-/// hand's ammo (the rifle's shots left before it overheats, red once overheated, or the sniper's
-/// one block, empty while it reloads; no pulses), below the middle the console being turned off
+/// hand's ammo (`AmmoBar::FromWeapons`; no pulses), below the middle the console being turned off
 /// (if any), and the sprint energy (if in `bars`); health and energy carry `pulses`.
 ///
 /// Example: `rects.extend(make_bar_rects(&bars, &self.weapons, &self.settings.rifle, &self.hud_pulses));`
 pub fn make_bar_rects(
     bars: &HudBars,
     weapons: &Weapons,
+    rifle: &RifleSettings,
+    pulses: &HudPulses,
+) -> Vec<OverlayRect> {
+    make_ammo_bar_rects(bars, &AmmoBar::FromWeapons(weapons, rifle), rifle, pulses)
+}
+
+/// `make_ammo_bar_rects` is `make_bar_rects` with the ammo bar given (`ammo`), for a level whose
+/// guns aren't a `Weapons`.
+///
+/// Example: `rects.extend(make_ammo_bar_rects(&bars, &ammo, &settings.rifle, &pulses));`
+pub fn make_ammo_bar_rects(
+    bars: &HudBars,
+    ammo: &AmmoBar,
     rifle: &RifleSettings,
     pulses: &HudPulses,
 ) -> Vec<OverlayRect> {
@@ -115,30 +164,17 @@ pub fn make_bar_rects(
             ),
         ));
     }
-    rects.extend(match weapons.gun {
-        Gun::Laser => hud_bars::make_segmented_bar(
-            HEAT_BAR_MIN_FRAC,
-            1,
-            if weapons.sniper_reload_s <= 0.0 {
-                1.0
-            } else {
-                0.0
-            },
-            HEAT_BAR_RGB,
-            NO_RECT_PULSE,
-        ),
-        Gun::Rifle => hud_bars::make_segmented_bar(
-            HEAT_BAR_MIN_FRAC,
-            rifle.shots_until_overheat,
-            1.0 - weapons.rifle_heat_frac.min(1.0),
-            if weapons.is_overheated {
-                HEAT_BAR_OVERHEATED_RGB
-            } else {
-                HEAT_BAR_RGB
-            },
-            NO_RECT_PULSE,
-        ),
-    });
+    rects.extend(hud_bars::make_segmented_bar(
+        HEAT_BAR_MIN_FRAC,
+        ammo.segment_count,
+        ammo.frac,
+        if ammo.is_overheated {
+            HEAT_BAR_OVERHEATED_RGB
+        } else {
+            HEAT_BAR_RGB
+        },
+        NO_RECT_PULSE,
+    ));
     if let Some(hold_frac) = bars.console_hold_frac {
         rects.extend(hud_bars::make_progress_bar(
             DISABLE_BAR_MIN_FRAC,

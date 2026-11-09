@@ -25,7 +25,7 @@ use super::guns::{
     Gun, GunInput, GunStep, Guns, HALF_FOV_RAD, LASER_MAX_LENGTH_M, MUZZLE_M, Tracer,
     take_hit_weight,
 };
-use super::hud::{BarPulsePair, HudState, OverlayHudState, build_hud, build_overlay_rects};
+use super::hud::{HudState, build_hud, build_overlay_rects};
 use super::nav::NavGraph;
 use super::player::{MAX_HEALTH, Movement, Player, PlayerInput};
 use super::world::{Arena, Surface};
@@ -34,8 +34,10 @@ use crate::console_reach::ConsolePlace;
 use crate::render::overlay::{HitEffect, OverlayRect};
 use crate::render::{Beam, Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
 use crate::scene::{GunViewmodel, Scene, draw_items_for};
-use crate::settings::ServerSettings;
+use crate::settings::{HIT_EFFECTS, ServerSettings};
 use crate::shot_noise::ShotNoise;
+use warped_shared::health::fade_effect_frac;
+use warped_shared::hud::{AmmoBar, HudBars, HudPulses, make_hit_effect};
 
 /// `MAX_DECAL_COUNT` is how many impact marks stay in the world.
 const MAX_DECAL_COUNT: usize = 160;
@@ -186,16 +188,6 @@ const OFF_PYLON_TINT: Vec3 = Vec3::new(0.3, 0.3, 0.3);
 const BEACON_BEAM_M: f32 = 25.0;
 const BEACON_BEAM_WIDTH_M: f32 = 0.12;
 const BEACON_BEAM_RGB: [Vec3; 2] = [Vec3::new(0.3, 0.6, 2.0), Vec3::new(2.0, 0.35, 0.2)];
-/// `HIT_EFFECT_S`, `HIT_RED_FRAC`, `HIT_SHAKE_PX` and `HIT_BLUR_PX` are the Lunar Surface demo's
-/// `hit_effects` player settings: seconds the red, shake and blur of a hit take to fade, how red the
-/// screen's edges turn, and how far the screen shakes and the edges blur, in window pixels.
-const HIT_EFFECT_S: f32 = 0.6;
-const HIT_RED_FRAC: f32 = 0.6;
-const HIT_SHAKE_PX: f32 = 6.0;
-const HIT_BLUR_PX: f32 = 6.0;
-/// `HIT_SHAKE_TURN_RAD` is the golden angle, how far the shake's direction turns each frame (the
-/// Lunar Surface demo's `SPAWN_TURN_RAD`).
-const HIT_SHAKE_TURN_RAD: f64 = 2.399_963_229_728_653;
 /// `FLICKER_SLOW_RAD_PER_S` and `FLICKER_FAST_RAD_PER_S` are the two waves a flame flickers by.
 const FLICKER_SLOW_RAD_PER_S: f32 = 11.0;
 const FLICKER_FAST_RAD_PER_S: f32 = 27.0;
@@ -234,7 +226,7 @@ pub struct Session {
     flashes: Vec<Flash>,
     hit_marker_s: f32,
     kill_marker_s: f32,
-    hit_effect_frac: f32,
+    hit_effect_frac: f64,
     last_health: f32,
     frame_count: u64,
     spawn_counter: usize,
@@ -259,7 +251,7 @@ pub struct Session {
     pub bot_console: Option<usize>,
     pub is_team_known: bool,
     pub is_flashlight_on: bool,
-    bar_pulses: BarPulsePair,
+    hud_pulses: HudPulses,
     robot_hold: Option<RobotHold>,
     robot_hold_s: f32,
 }
@@ -368,7 +360,7 @@ impl Session {
             bot_console: None,
             is_team_known: true,
             is_flashlight_on: false,
-            bar_pulses: BarPulsePair::New(),
+            hud_pulses: HudPulses::New(),
             robot_hold: None,
             robot_hold_s: 0.0,
         }
@@ -948,8 +940,9 @@ impl Session {
             self.since_movement_key_s + dt_s
         };
         self.last_health = self.player.health;
-        let bar_state: OverlayHudState = self.overlay_hud_state();
-        self.bar_pulses.update(dt_s, &bar_state);
+        let bars: HudBars = self.get_hud_bars();
+        self.hud_pulses
+            .update(f64::from(dt_s), &bars, &self.settings.rifle);
         let mut player_input: PlayerInput = controls.player;
         if !self.is_autopilot {
             player_input.look_delta_rad /= self.guns.get_zoom(&self.settings) as f32;
@@ -1112,7 +1105,8 @@ impl Session {
         self.flashes.retain(|flash| flash.age_s < flash.life_s);
         self.hit_marker_s = (self.hit_marker_s - dt_s).max(0.0);
         self.kill_marker_s = (self.kill_marker_s - dt_s).max(0.0);
-        self.hit_effect_frac = (self.hit_effect_frac - dt_s / HIT_EFFECT_S).max(0.0);
+        self.hit_effect_frac =
+            fade_effect_frac(self.hit_effect_frac, f64::from(dt_s), HIT_EFFECTS.effect_s);
     }
 
     /// `add_remote_flight` starts the beam of another player's shot as Lunar Surface draws it: traced
@@ -1234,44 +1228,38 @@ impl Session {
         ]
     }
 
-    /// `get_hit_effect` is what the last hit on the player still does to the view, as the Lunar
-    /// Surface demo's `get_hit_effect` gives it: red edges, a blur from the edges inward, and a
-    /// shake in a new direction each frame (the golden angle apart), fading over `HIT_EFFECT_S`.
+    /// `get_hit_effect` is what the last hit on the player still does to the view, as every level
+    /// shows it (`warped_shared::hud::make_hit_effect`): red edges, a blur from the edges inward,
+    /// and a shake in a new direction each frame, fading over `HIT_EFFECTS.effect_s`.
     fn get_hit_effect(&self) -> HitEffect {
-        let shake_rad: f64 = self.frame_count as f64 * HIT_SHAKE_TURN_RAD;
-        let shake_px: f32 = HIT_SHAKE_PX * self.hit_effect_frac;
-        HitEffect {
-            strength_frac: self.hit_effect_frac,
-            red_frac: HIT_RED_FRAC,
-            blur_px: HIT_BLUR_PX,
-            shake_px: [
-                shake_rad.cos() as f32 * shake_px,
-                shake_rad.sin() as f32 * shake_px,
-            ],
+        make_hit_effect(self.hit_effect_frac, self.frame_count, &HIT_EFFECTS)
+    }
+
+    /// `get_hud_bars` is what the HUD's health, energy and console bars show now, as Lunar
+    /// Surface's: health in segments of one rifle hit to the body, the sprint energy and the
+    /// console hold.
+    fn get_hud_bars(&self) -> HudBars {
+        HudBars {
+            health_frac: Some(f64::from(self.player.health / MAX_HEALTH)),
+            energy_frac: Some(f64::from(self.player.energy_frac)),
+            console_hold_frac: self.console_hold_frac.map(f64::from),
         }
     }
 
-    /// `overlay_hud_state` is what the HUD's bars show now, as Lunar Surface's: health in segments
-    /// of one rifle hit to the body; the sniper's one block while it is loaded, or the rifle's heat
-    /// in segments of one shot (red once overheated); the sprint energy, the console hold and
-    /// whether the menu covers the view.
-    fn overlay_hud_state(&self) -> OverlayHudState {
-        let (ammo_frac, ammo_segment_count) = match self.guns.gun {
-            Gun::Laser => (f32::from(u8::from(self.guns.sniper_reload_s <= 0.0)), 1),
-            Gun::Rifle => (
-                1.0 - self.guns.rifle_heat_frac.min(1.0) as f32,
-                self.settings.rifle.shots_until_overheat,
-            ),
-        };
-        OverlayHudState {
-            health_frac: self.player.health / MAX_HEALTH,
-            health_segment_count: u32::from(self.settings.rifle.body_hits_to_eliminate),
-            ammo_frac,
-            ammo_segment_count,
-            is_overheated: self.guns.gun == Gun::Rifle && self.guns.is_overheated,
-            energy_frac: self.player.energy_frac,
-            console_hold_frac: self.console_hold_frac,
-            is_view_covered: self.is_view_covered,
+    /// `get_ammo_bar` is what the HUD's ammo bar shows now: the sniper's one block while it is
+    /// loaded, or the rifle's heat in segments of one shot (red once overheated).
+    fn get_ammo_bar(&self) -> AmmoBar {
+        match self.guns.gun {
+            Gun::Laser => AmmoBar {
+                frac: f64::from(u8::from(self.guns.sniper_reload_s <= 0.0)),
+                segment_count: 1,
+                is_overheated: false,
+            },
+            Gun::Rifle => AmmoBar {
+                frac: f64::from(1.0 - self.guns.rifle_heat_frac.min(1.0) as f32),
+                segment_count: self.settings.rifle.shots_until_overheat,
+                is_overheated: self.guns.is_overheated,
+            },
         }
     }
 
@@ -1557,8 +1545,11 @@ impl Session {
         );
         hud_rects.extend(self.objective_hud(width_px, height_px));
         let overlay_rects: Vec<OverlayRect> = build_overlay_rects(
-            &self.overlay_hud_state(),
-            &self.bar_pulses,
+            &self.get_hud_bars(),
+            &self.get_ammo_bar(),
+            &self.settings.rifle,
+            &self.hud_pulses,
+            self.is_view_covered,
             (width_px as u32, height_px as u32),
         );
         let lens_particles: Vec<Particle> = world_particles[..robot_particle_count]
