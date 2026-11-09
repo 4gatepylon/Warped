@@ -108,10 +108,12 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
-- [ ] **W-138 No aliasing.** The user, 2026-11-09, about W-136 (sharp centre, soft edges): "I think middle sharp is fine but there has to be enough blur to remove aliasing elsewhere", "aliasing is a big issue", "like no one ever ever like aliasing so you gota figure out how to deal with. that in particular". Applies to every level: the soft edges, half-resolution lenses and the rest of the image.
 
 ## Pending user review
 
+- [?] **W-138 No aliasing.** The user, 2026-11-09, about W-136 (sharp centre, soft edges): "I think middle sharp is fine but there has to be enough blur to remove aliasing elsewhere", "aliasing is a big issue", "like no one ever ever like aliasing so you gota figure out how to deal with. that in particular". Applies to every level: the soft edges, half-resolution lenses and the rest of the image.
+  #469: Lunar Surface, the match, Dust and Snow Planet: soft edges and Lunar's half-resolution lens shown through a
+  smooth cubic B-spline, lasers kept sharp in lenses, and FXAA on every frame (0.2-0.8 ms at 3440x1440).
 - [?] **W-136 Sharp centre, soft edges.** The user, 2026-11-09: "if you need to lower resolution in different places, you can just like blur things. One thing you could also consider doing is having like a narrower field of view where like the center of the screen is clear and fully, you know, full resolution, everything, but the edges are blurry or something like that." And: "Try to at least have the ability to see a nice, good resolution for the important things that are right in front of you." Applies to every level's speed work (60 FPS).
   #464: the middle 66% of the width drawn as before and the rest at half resolution, blended (option B, the
   default; options A-E with timings in the PR for the user), in Lunar Surface, the match, Dust and Snow Planet.
