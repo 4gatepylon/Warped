@@ -17,8 +17,9 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
-    MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLLibrary, MTLPixelFormat, MTLResourceOptions,
-    MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLLibrary, MTLOrigin, MTLPixelFormat,
+    MTLRegion, MTLResourceOptions, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
+    MTLTextureUsage,
 };
 
 use crate::dust::DustCloud;
@@ -33,7 +34,7 @@ use crate::render_metal::{
     encode_adaptive_sampling, make_pipeline,
 };
 use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
-use crate::terrain::MoundGrid;
+use crate::terrain::HeightGrid;
 use crate::thrown_wormholes::{GREEN_COLOR, HIT_FLASH_COLOR, PURPLE_COLOR, WormholeColor};
 use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
@@ -63,6 +64,8 @@ const AVATAR_BUFFER_INDICES: [usize; 2] = [8, 10];
 const HAND_LIGHT_BUFFER_INDEX: usize = 28;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
+const TERRAIN_HEIGHTS_TEXTURE_INDEX: usize = 16;
+const BYTES_PER_FLOAT: usize = 4;
 const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
 const MILKY_WAY_TEXTURE_INDEX: usize = 3;
 const MILKY_WAY_TEXTURE_PX: (usize, usize) = (4096, 1024);
@@ -122,6 +125,7 @@ pub struct VoxelUniforms {
     pub terrain: [f32; 4],
     pub relief: [f32; 4],
     pub mound_grid: [f32; 4],
+    pub height_grid: [f32; 4],
     pub flashlight_position: [f32; 4],
     pub flashlight_direction: [f32; 4],
     pub flashlight: [f32; 4],
@@ -242,7 +246,8 @@ pub struct VoxelFrame {
     beams: Vec<GpuBeam>,
     clearance: Arc<ClearanceGrids>,
     surfaces: Vec<[f32; 4]>,
-    mound_grid: Option<Arc<MoundGrid>>,
+    mound_grid: Option<Arc<HeightGrid>>,
+    height_grid: Option<Arc<HeightGrid>>,
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
     meshes: Arc<Vec<MeshModel>>,
@@ -297,8 +302,15 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
 ///
 /// Example: `let grid = get_mound_grid(&world.terrain);`
-fn get_mound_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<MoundGrid>> {
+fn get_mound_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<HeightGrid>> {
     terrain.as_ref().and_then(|t| t.mound_grid.as_ref())
+}
+
+/// `get_height_grid` gives a terrain's baked height grid, if it has one.
+///
+/// Example: `let grid = get_height_grid(&world.terrain);`
+fn get_height_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<HeightGrid>> {
+    terrain.as_ref().and_then(|t| t.height_grid.as_ref())
 }
 
 /// `to_f32` converts a double 4-vector to floats.
@@ -593,6 +605,9 @@ impl VoxelFrame {
                 ]
                 .map(|x| x as f32)
             }),
+            height_grid: get_height_grid(&world.terrain).map_or([0.0; 4], |g| {
+                [g.origin_m[0], g.origin_m[1], 1.0 / g.cell_m, 1.0].map(|x| x as f32)
+            }),
             flashlight_position: world
                 .flashlight_eye
                 .map_or([0.0, 0.0, 0.0, 1.0], |eye| to_f32(eye.col(AXIS_W))),
@@ -661,6 +676,7 @@ impl VoxelFrame {
             clearance: Arc::clone(&world.clearance),
             surfaces: world.surfaces.clone(),
             mound_grid: get_mound_grid(&world.terrain).cloned(),
+            height_grid: get_height_grid(&world.terrain).cloned(),
             dust_bursts,
             dust_particles,
             meshes: Arc::clone(&world.meshes),
@@ -762,6 +778,83 @@ fn make_hdr_texture(
         .ok_or("Metal: no memory for the HDR texture")?)
 }
 
+/// `make_library` compiles `render_voxel.metal` on `device`, with the sizes and colours this
+/// file and its neighbours set filled in.
+///
+/// Example: `let library = make_library(&device)?;`
+fn make_library(
+    device: &ProtocolObject<dyn MTLDevice>,
+) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
+    let source: String = SHADER_SOURCE
+        .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
+        .replace(
+            "__BYTES_PER_RAY_END__",
+            &VOXEL_BYTES_PER_RAY_END.to_string(),
+        )
+        .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
+        .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+        .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
+        .replace(
+            "__BYTES_PER_VOXEL_UNIFORMS__",
+            &std::mem::size_of::<VoxelUniforms>().to_string(),
+        )
+        .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
+        .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
+        .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR));
+    Ok(device
+        .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
+        .map_err(|error| {
+            format!(
+                "Metal: the voxel shader didn't compile: {}",
+                error.localizedDescription()
+            )
+        })?)
+}
+
+/// `make_height_texture` puts a baked height grid in a one-channel float texture, a texel per
+/// point (u along x), which the shader reads texel by texel; without a grid, one texel of 0.
+///
+/// Example: `let texture = make_height_texture(device, Some(&grid))?;`
+fn make_height_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    grid: Option<&HeightGrid>,
+) -> Result<Texture> {
+    let (size, heights): ([usize; 2], &[f32]) =
+        grid.map_or(([1, 1], &NO_MOUNDS[..]), |g| (g.size, &g.heights[..]));
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+    let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::R32Float,
+            size[0],
+            size[1],
+            false,
+        )
+    };
+    descriptor.setUsage(MTLTextureUsage::ShaderRead);
+    descriptor.setStorageMode(MTLStorageMode::Shared);
+    let texture: Texture = device
+        .newTextureWithDescriptor(&descriptor)
+        .ok_or("Metal: no memory for the terrain's heights")?;
+    let region: MTLRegion = MTLRegion {
+        origin: MTLOrigin { x: 0, y: 0, z: 0 },
+        size: MTLSize {
+            width: size[0],
+            height: size[1],
+            depth: 1,
+        },
+    };
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE HEIGHTS WILL HAPPEN
+    unsafe {
+        texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+            region,
+            0,
+            NonNull::new(heights.as_ptr() as *mut std::ffi::c_void).expect("the heights"),
+            size[0] * BYTES_PER_FLOAT,
+        )
+    };
+    Ok(texture)
+}
+
 /// `dispatch` runs a kernel over a size, one thread per pixel.
 ///
 /// Example: `dispatch(encoder, &self.tonemap, (1280, 800));`
@@ -799,6 +892,7 @@ pub struct VoxelGpu {
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
     meshes: Option<(*const Vec<MeshModel>, MeshGpu)>,
+    terrain_heights: (*const HeightGrid, Texture),
     post: Option<PostTextures>,
     milky_way: Texture,
     is_milky_way_baked: bool,
@@ -813,30 +907,7 @@ impl VoxelGpu {
         device: &ProtocolObject<dyn MTLDevice>,
         textures: SurfaceTextures,
     ) -> Result<VoxelGpu> {
-        let source: String = SHADER_SOURCE
-            .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
-            .replace(
-                "__BYTES_PER_RAY_END__",
-                &VOXEL_BYTES_PER_RAY_END.to_string(),
-            )
-            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
-            .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
-            .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
-            .replace(
-                "__BYTES_PER_VOXEL_UNIFORMS__",
-                &std::mem::size_of::<VoxelUniforms>().to_string(),
-            )
-            .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
-            .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
-            .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR));
-        let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
-            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
-            .map_err(|error| {
-                format!(
-                    "Metal: the voxel shader didn't compile: {}",
-                    error.localizedDescription()
-                )
-            })?;
+        let library: Retained<ProtocolObject<dyn MTLLibrary>> = make_library(device)?;
         Ok(VoxelGpu {
             trace_pixels: make_pipeline(device, &library, KERNEL_NAME)?,
             probe_hand_light: make_pipeline(device, &library, "probe_hand_light")?,
@@ -857,6 +928,7 @@ impl VoxelGpu {
                 .collect(),
             textures,
             meshes: None,
+            terrain_heights: (std::ptr::null(), make_height_texture(device, None)?),
             post: None,
             milky_way: make_hdr_texture(device, MILKY_WAY_TEXTURE_PX)?,
             is_milky_way_baked: false,
@@ -933,6 +1005,15 @@ impl VoxelGpu {
             .expect("the meshes were just uploaded")
             .1
             .bind(encoder);
+        let grid: Option<&HeightGrid> = frame.height_grid.as_deref();
+        let grid_key: *const HeightGrid = grid.map_or(std::ptr::null(), std::ptr::from_ref);
+        if self.terrain_heights.0 != grid_key {
+            self.terrain_heights = (grid_key, make_height_texture(device, grid)?);
+        }
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURE WILL HAPPEN
+        unsafe {
+            encoder.setTexture_atIndex(Some(&self.terrain_heights.1), TERRAIN_HEIGHTS_TEXTURE_INDEX)
+        };
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
         unsafe {
@@ -1026,7 +1107,8 @@ impl VoxelGpu {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of packing a frame's laser beams and the beacons' beams for the shader.
+    //! Tests of packing a frame's laser beams and the beacons' beams for the shader, and of the
+    //! shader's ground against the CPU's.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -1034,14 +1116,163 @@ mod tests {
     //! | Team | blue, red | `beams_carry_their_gun_team_and_speckle` |
     //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
     //! | A beacon's console | on (its beam is bright), off (its beam goes, the others stay) | `beacon_beams_go_with_their_consoles` |
+    //! | Where on Lunar Surface's crater | floor, wall, rim, outer flank | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+    //! | Mounds | on a mound, off the mounds | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+    //! | Where in a grid cell | at a grid point, inside a cell | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+    //! | Baked grid | inside it, just inside its edge, past its edge along u and along v (the shape's height) | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+
+    use objc2_metal::{
+        MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCreateSystemDefaultDevice,
+    };
 
     use super::*;
     use crate::map::{Map, get_map_folder};
     use crate::net::MAX_CONSOLE_COUNT;
+    use crate::terrain::Terrain;
     use crate::voxel_world::{Shot, VoxelPlayer, VoxelWorld};
 
     const SPECKLE_FRAC: f64 = 0.4;
     const RENDER_PX: (u32, u32) = (64, 40);
+    const POINTS_BUFFER_INDEX: usize = 2;
+    const HEIGHTS_BUFFER_INDEX: usize = 3;
+    const MOUNDS_BUFFER_INDEX: usize = 26;
+    const GROUND_MATCH_M: f64 = 0.001;
+    const FAR_GRID_POINT: [f64; 2] = [1200.0, 1000.0];
+    const IN_CELL_FRAC: [f64; 2] = [0.37, 0.61];
+    const PAST_EDGE_M: f64 = 3.0;
+    const BEFORE_EDGE_M: f64 = 0.1;
+
+    /// `measure_ground_on_gpu` runs the shader's `measure_terrain_heights` on `world`'s frame at
+    /// `points` (Fermi u, v in meters) and gives the heights it draws there.
+    ///
+    /// Example: `let heights_m = measure_ground_on_gpu(&world, &[[0.0, 0.0]]);`
+    fn measure_ground_on_gpu(world: &VoxelWorld, points: &[[f32; 2]]) -> Vec<f32> {
+        let device = MTLCreateSystemDefaultDevice().expect("a Metal GPU");
+        let library = make_library(&device).expect("the voxel shader");
+        let pipeline: Pipeline =
+            make_pipeline(&device, &library, "measure_terrain_heights").expect("the kernel");
+        let camera: DMat4 = VoxelPlayer::AtSpawn(world, 0).get_camera_frame(world);
+        let frame: VoxelFrame = VoxelFrame::Build(world, camera, &[], None, &[], RENDER_PX);
+        let mounds: &[f32] = frame
+            .mound_grid
+            .as_ref()
+            .map_or(&NO_MOUNDS[..], |g| &g.heights);
+        let make_buffer = |bytes: &[u8]| {
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A COPY PAST THE BYTES WILL HAPPEN
+            unsafe {
+                device.newBufferWithBytes_length_options(
+                    NonNull::new(bytes.as_ptr().cast_mut().cast()).expect("a slice isn't null"),
+                    bytes.len(),
+                    MTLResourceOptions::StorageModeShared,
+                )
+            }
+            .expect("a buffer")
+        };
+        let heights = make_buffer(as_bytes(&vec![0.0_f32; points.len()]));
+        let texture: Texture =
+            make_height_texture(&device, frame.height_grid.as_deref()).expect("the heights");
+        let queue = device.newCommandQueue().expect("a command queue");
+        let command_buffer = queue.commandBuffer().expect("a command buffer");
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .expect("a compute encoder");
+        encoder.setComputePipelineState(&pipeline);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE KERNEL READING THE WRONG BUFFERS WILL HAPPEN
+        unsafe {
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&frame.uniforms).cast(),
+                std::mem::size_of::<VoxelUniforms>(),
+                UNIFORMS_BUFFER_INDEX,
+            );
+            encoder.setBuffer_offset_atIndex(
+                Some(&make_buffer(as_bytes(mounds))),
+                0,
+                MOUNDS_BUFFER_INDEX,
+            );
+            encoder.setTexture_atIndex(Some(&texture), TERRAIN_HEIGHTS_TEXTURE_INDEX);
+            encoder.setBuffer_offset_atIndex(
+                Some(&make_buffer(as_bytes(points))),
+                0,
+                POINTS_BUFFER_INDEX,
+            );
+            encoder.setBuffer_offset_atIndex(Some(&heights), 0, HEIGHTS_BUFFER_INDEX);
+        }
+        encoder.dispatchThreads_threadsPerThreadgroup(
+            MTLSize {
+                width: points.len(),
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: points.len(),
+                height: 1,
+                depth: 1,
+            },
+        );
+        encoder.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE HEIGHTS WILL HAPPEN
+        unsafe {
+            std::slice::from_raw_parts(heights.contents().as_ptr().cast::<f32>(), points.len())
+        }
+        .to_vec()
+    }
+
+    #[test]
+    fn the_shader_draws_the_ground_the_cpu_walks_and_hits_on() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let terrain: &Terrain = world.terrain.as_ref().expect("Lunar Surface's terrain");
+        let grid: &HeightGrid = terrain
+            .height_grid
+            .as_ref()
+            .expect("Lunar Surface's baked heights");
+        let mound = &map
+            .ground
+            .terrain
+            .as_ref()
+            .expect("Lunar Surface's terrain")
+            .mounds[0];
+        let corner_m: [f64; 2] = [0, 1].map(|a| grid.origin_m[a] + FAR_GRID_POINT[a] * grid.cell_m);
+        let end_m: [f64; 2] =
+            [0, 1].map(|a| grid.origin_m[a] + (grid.size[a] - 1) as f64 * grid.cell_m);
+        let points: Vec<[f32; 2]> = [
+            ("crater floor", [20.0, -25.0]),
+            ("blue spawn", [-107.0, 0.0]),
+            ("crater wall", [0.0, -75.0]),
+            ("rim", [0.0, 88.0]),
+            ("outer flank, off the mounds", [-230.0, 0.0]),
+            ("on a mound", [mound.u_m, mound.v_m]),
+            ("at a grid point", corner_m),
+            (
+                "inside a cell",
+                [0, 1].map(|a| corner_m[a] + IN_CELL_FRAC[a] * grid.cell_m),
+            ),
+            (
+                "just inside the grid's edge",
+                [end_m[0] - BEFORE_EDGE_M, 0.0],
+            ),
+            (
+                "past the grid's edge along u",
+                [end_m[0] + PAST_EDGE_M, 0.0],
+            ),
+            (
+                "past the grid's edge along v",
+                [0.0, end_m[1] + PAST_EDGE_M],
+            ),
+        ]
+        .map(|(_, [u_m, v_m])| [u_m as f32, v_m as f32])
+        .to_vec();
+        let gpu_heights_m: Vec<f32> = measure_ground_on_gpu(&world, &points);
+        for ([u_m, v_m], gpu_m) in points.iter().zip(&gpu_heights_m) {
+            let cpu_m: f64 = terrain.get_height_m(f64::from(*u_m), f64::from(*v_m));
+            assert!(
+                (f64::from(*gpu_m) - cpu_m).abs() < GROUND_MATCH_M,
+                "at ({u_m}, {v_m}) m the shader draws the ground at {gpu_m} m and the CPU at {cpu_m} m"
+            );
+        }
+    }
 
     #[test]
     fn beams_carry_their_gun_team_and_speckle() {

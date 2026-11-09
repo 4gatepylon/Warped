@@ -43,6 +43,7 @@ pub const MARKER_NAME: &str = "a thrown wormhole";
 const MAX_MARKER_COUNT: usize = 16;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
+const BAKED_TERRAIN_REACH_M: f64 = 250.0;
 pub(crate) const BEND_STEP_FRAC: f64 = 0.08;
 const CONSOLE_PULSE_HZ: f64 = 1.0;
 const CONSOLE_FRENZY_PULSE_HZ: f64 = 8.0;
@@ -547,6 +548,24 @@ fn renormalize_frame(body: DMat4) -> DMat4 {
     DMat4::from_cols(r, DVec4::Y, t, g)
 }
 
+/// `make_terrain` reads a map's terrain and bakes its height over the map's boundary box grown by
+/// `BAKED_TERRAIN_REACH_M`, where the rays of a player inside the boundary meet the ground; a map
+/// without a boundary keeps it unbaked.
+///
+/// Example: `let terrain = make_terrain(&map);`
+fn make_terrain(map: &Map) -> Option<Terrain> {
+    let terrain: Terrain = Terrain::FromMap(map.ground.terrain.as_ref()?);
+    let boundary: Option<&crate::map::Boundary> =
+        map.regions.as_ref().and_then(|r| r.boundary.as_ref());
+    Some(match boundary {
+        Some(boundary) => terrain.bake_heights([
+            boundary.u_m + BAKED_TERRAIN_REACH_M,
+            boundary.v_m + BAKED_TERRAIN_REACH_M,
+        ]),
+        None => terrain,
+    })
+}
+
 /// `find_material` gives the id of the material with `name`, or -1.
 ///
 /// Example: `let glass = find_material(map, "glass");`
@@ -795,7 +814,7 @@ impl VoxelWorld {
         let mut world: VoxelWorld = VoxelWorld {
             name: map.name.clone(),
             r,
-            terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
+            terrain: make_terrain(map),
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),
             consoles: team_consoles,
