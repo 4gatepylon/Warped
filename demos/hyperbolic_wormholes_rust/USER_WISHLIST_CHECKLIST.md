@@ -112,7 +112,7 @@ is in [`AGENTS.md`](AGENTS.md).
 ## Pending user review
 
 - [?] **W-137 Crouched robots sink.** A bug found by agents on 2026-11-09: other windows place a remote player's feet one standing eye height below the eye they receive (`VoxelPlayer::FromEye`), so a crouched player's robot sinks about 0.7 m into the floor (Lunar Surface and its copies).
-  #W137_PR: each window sends its crouch, and other windows stand a crouched robot on the floor, squashed to the crouched eye height, with its hit shapes (Lunar Surface, Dust, Snow Planet, the match, City Sphere; Dark Forest with its robots' switch to the teal robot).
+  #463: each window sends its crouch, and other windows stand a crouched robot on the floor, squashed to the crouched eye height, with its hit shapes (Lunar Surface, Dust, Snow Planet, the match, City Sphere; Dark Forest with its robots' switch to the teal robot).
 - [?] **W-127 Dark Forest canopy flicker.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): In about one fixed-step capture in three or four, a few thousand canopy pixels differ, also on the base build before any of the 2026-11-08 work; it looks like a GPU race in the FPS-demo renderer.
   #444: the forest is drawn in 8 m tiles, and repeat captures no longer differ in thousands of canopy pixels (8 of 20 differ in at most 28 pixels by 1-2/255, against 4 of 20 by up to 4,173 pixels and 23/255 before).
 - [?] **W-128 Dark Forest double lens.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Standing within 4 m of a gate shows a faint second image of the wormhole's lens over the direct view.
