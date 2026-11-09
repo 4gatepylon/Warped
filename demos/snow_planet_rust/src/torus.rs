@@ -190,7 +190,9 @@ impl Torus {
     }
 
     /// `move_ray` moves a ray (point x, tangent v) `offset_m` (u, v) along the ground by the glue.
-    fn move_ray(&self, x: DVec4, v: DVec4, offset_m: [f64; 2]) -> (DVec4, DVec4) {
+    ///
+    /// Example: `let (x, v) = torus.move_ray(x, v, [112.0, 0.0]);`
+    pub fn move_ray(&self, x: DVec4, v: DVec4, offset_m: [f64; 2]) -> (DVec4, DVec4) {
         let fermi_m: [f64; 3] = get_fermi_coordinates(x, self.r_m);
         let to_m: [f64; 3] = [
             fermi_m[0] + offset_m[0],

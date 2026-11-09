@@ -4074,16 +4074,41 @@ impl Session {
             ),
             None => (self.player.frame, Vec::new()),
         };
+        let torus: Option<torus::Torus> = self.voxel.as_ref().and_then(|voxel| voxel.world.torus);
+        let nearest = |x: DVec4| -> DVec4 {
+            torus.map_or(x, |torus| torus.move_nearest(feet.col(AXIS_W), x))
+        };
         let players: Vec<(DVec4, u32)> = match &self.multiplayer {
             Some(multiplayer) => multiplayer
                 .client
                 .players
                 .iter()
-                .map(|player| (player.frame.col(AXIS_W), player.team))
+                .map(|player| (nearest(player.frame.col(AXIS_W)), player.team))
                 .collect(),
             None => Vec::new(),
         };
-        let size_px: (u32, u32) = self.map_layout.get_size_px();
+        let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> = match torus {
+            None => beams,
+            Some(torus) => beams
+                .into_iter()
+                .map(|(segments, team)| {
+                    let moved: Vec<voxel_world::BeamSegment> = segments
+                        .into_iter()
+                        .map(|segment| {
+                            let half_s: f64 = 0.5 * segment.length;
+                            let middle: DVec4 =
+                                segment.a * half_s.cosh() + segment.b * half_s.sinh();
+                            let offset_m: [f64; 2] =
+                                torus.get_nearest_offset_m(feet.col(AXIS_W), middle);
+                            let (a, b) = torus.move_ray(segment.a, segment.b, offset_m);
+                            voxel_world::BeamSegment { a, b, ..segment }
+                        })
+                        .collect();
+                    (moved, team)
+                })
+                .collect(),
+        };
+        let size_px: (u32, u32) = self.map_layout.get_plain_size_px();
         Some(render_metal::OverlayMinimap {
             map_pixels: self.map_layout.get_plain_pixels(),
             map_size_px: (size_px.0 as usize, size_px.1 as usize),
@@ -4666,7 +4691,7 @@ fn save_map_picture(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> R
     let mut world: VoxelWorld = VoxelWorld::FromMap(&map)?;
     BlackHoleGrowth::New(arguments.black_hole_strength).update(&mut world, 0, 0.0);
     let layout: map_layout::MapLayout = map_layout::MapLayout::FromMap(&map, MAP_PHOTO_MAX_PX)?;
-    let (corner_m, m_per_px) = layout.get_placement();
+    let (corner_m, m_per_px) = layout.get_photo_placement();
     let size_px: (u32, u32) = layout.get_size_px();
     let start: Instant = Instant::now();
     let pixels: Vec<u8> =
