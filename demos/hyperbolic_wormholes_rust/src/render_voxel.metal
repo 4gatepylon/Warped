@@ -116,6 +116,9 @@ constant float GLASS_TINT = 0.8;
 constant float3 GLASS_SHEEN = float3(0.05, 0.07, 0.09);
 constant float BEAM_RADIUS_M = 0.02;
 constant float BEAM_REACH = 4.8;
+constant float BEAM_MASK_WIDTHS = 7.2;
+constant int BEAM_MASK_BITS = 32;
+constant float BEAM_MASK_REACHES = 4.0;
 constant float SPOT_RADIUS_M = 0.15;
 constant float DUST_MIN_WIDTH_PX = 1.5;
 constant float DUST_CUTOFF_WIDTHS = 3.0;
@@ -2320,11 +2323,36 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
-static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
-                       thread float &speckle) {
+/**
+ * @brief `get_beam_mask` marks (bit i) each of the first 32 beams whose segment comes within warp w's reach, one longest
+ * bent step and `BEAM_MASK_WIDTHS` of its glow's widths at `travel_limit` of the warp's centre: the only beams whose glow
+ * a ray inside the reach can see before it has travelled `travel_limit`. Later beams are always scanned.
+ * @par Example
+ * @code
+ * uint mask = get_beam_mask(scene, inside, travelled + BEAM_MASK_REACHES * warps[inside].params.z);
+ * @endcode
+ */
+static uint get_beam_mask(thread const Scene &scene, int w, float travel_limit) {
+    float r = scene.u.curvature_radius_m, far_width_m = scene.u.pixel_angle_rad * r * sinh(min(travel_limit, FAR_S));
+    float4 c = scene.warps[w].centre;
+    float reach_m = (scene.warps[w].params.z + MAX_BEND_STEP_M / r) * r;
+    uint mask = 0;
+    for (int i = 0; i < min(scene.u.beam_count, BEAM_MASK_BITS); i++) {
+        float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
+        float radius_m = int(info.w + HALF_KIND) >= BEACON_BEAM_CODE ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
+        float sigma = clamp(clamp_atanh(mdot(c, b) / -mdot(c, a)), 0.0, info.x);
+        float d_m = measure_gap(c, geodesic_point(a, b, sigma)) * r;
+        if (d_m - reach_m <= BEAM_MASK_WIDTHS * max(radius_m, far_width_m)) mask |= 1u << uint(i);
+    }
+    return mask;
+}
+
+/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. Of the first 32 beams it scans only those in `mask` (`get_beam_mask`). @par Example @code scan_beams(scene, x, v, s, t, ~0u, core, halo, code, speckle); @endcode */
+static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, uint mask, thread float &core, thread float &halo,
+                       thread float &code, thread float &speckle) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad, far_width_m = pix * r * sinh(min(travelled + s_end, FAR_S));
     for (int i = 0; i < scene.u.beam_count; i++) {
+        if (i < BEAM_MASK_BITS && (mask >> uint(i) & 1u) == 0) continue;
         float4 mid = scene.beams[i].mid, info = scene.beams[i].info;
         int beam_code = int(info.w + HALF_KIND);
         float half_len = 0.5 * info.x, radius_m = beam_code >= BEACON_BEAM_CODE ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
@@ -2541,7 +2569,9 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float4 dust = float4(0.0);
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
-    int outcome = OUTCOME_LOST, last_warp = -1, tint = 0;
+    int outcome = OUTCOME_LOST, last_warp = -1, tint = 0, mask_warp = -1;
+    uint beam_mask = 0;
+    float mask_travel_limit = 0.0;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
     float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
@@ -2563,7 +2593,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             float glass_s = NO_HIT_S;
             trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
-            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, ~0u, core, halo, code, speckle);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
@@ -2587,7 +2617,14 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         float glass_s = NO_HIT_S;
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
-        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+        if (u.beam_count > 0) {
+            if (mask_warp != inside || travelled + ds > mask_travel_limit) {
+                mask_warp = inside;
+                mask_travel_limit = travelled + ds + BEAM_MASK_REACHES * warps[inside].params.z;
+                beam_mask = get_beam_mask(scene, inside, mask_travel_limit);
+            }
+            scan_beams(scene, x, v, hit.s, travelled, beam_mask, core, halo, code, speckle);
+        }
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
         if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
