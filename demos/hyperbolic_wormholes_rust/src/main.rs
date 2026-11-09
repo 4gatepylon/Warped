@@ -27,6 +27,8 @@ mod avatar_animation;
 mod avatar_model;
 mod black_hole_growth;
 #[allow(dead_code)]
+mod console_bot;
+#[allow(dead_code)]
 mod console_reach;
 mod credits;
 mod dust;
