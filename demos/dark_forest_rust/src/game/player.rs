@@ -1,7 +1,8 @@
-//! `player` moves the player as Lunar Surface's `VoxelPlayer::step` moves it (W-126, same play in
-//! every level): mouse look, walking, sprinting and its energy, crouching, jumping, gravity, a hit's
-//! slowing and the head bob, with the numbers of `Movement` (the map's own times the server
-//! settings, as Lunar's `VoxelWorld::set_settings` works them out); plus the forest's own rope
+//! `player` moves the player by the movement rules every level shares (`warped_shared::movement`,
+//! Lunar Surface's, W-126 (same play in every level)): crouching, sprinting and its energy, the
+//! head bob and a hit's slowing come from `MoveState::step`, with the numbers of `Movement` (the
+//! map's own times the server settings, as Lunar's `VoxelWorld::set_settings` works them out);
+//! the forest (`Forest`, a `Ground`) then carries the step out: jumping, gravity, its own rope
 //! ladders, collision and landing dip.
 //!
 //! Example:
@@ -9,6 +10,7 @@
 //!     let eye_m: Vec3 = player.eye_position_m();
 
 use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
+use warped_shared::movement::{Ground, MoveInput, MoveIntent, MoveRules, MoveState};
 
 use super::collision::{Aabb, MoveResult, move_body};
 use super::world::LadderVolume;
@@ -118,7 +120,10 @@ pub struct PlayerInput {
     pub is_jump_pressed: bool,
 }
 
-/// `Player` is the player's body and view.
+/// `Player` is the player's body and view: where its feet are, how it moves and looks, whether it
+/// stands on something, how tall it is now, its health and death, the movement rules' state
+/// (`moves`: crouch, sprint energy, sprinting, the head bob and a hit's slow), the landing dip,
+/// whether this frame was a footstep, and whether it climbs a ladder.
 pub struct Player {
     pub feet_m: Vec3,
     pub velocity_m_s: Vec3,
@@ -129,15 +134,18 @@ pub struct Player {
     pub health: f32,
     pub dead_time_s: Option<f32>,
     pub since_hit_s: f32,
-    pub bob_phase_rad: f64,
-    pub bob_frac: f64,
-    pub crouch_frac: f32,
-    pub slowed_s: f32,
+    pub moves: MoveState,
     pub landing_dip_m: f32,
-    pub is_sprinting: bool,
-    pub energy_frac: f32,
     pub did_step: bool,
     pub is_climbing: bool,
+}
+
+/// `Forest` is the forest as the movement rules' `Ground`: its boxes to collide with, its rope
+/// ladders, and the map's jump and gravity (`Movement`).
+pub struct Forest<'a> {
+    pub movement: &'a Movement,
+    pub solids: &'a [Aabb],
+    pub ladders: &'a [LadderVolume],
 }
 
 impl Player {
@@ -153,13 +161,8 @@ impl Player {
             health: MAX_HEALTH,
             dead_time_s: None,
             since_hit_s: REGEN_DELAY_S,
-            bob_phase_rad: 0.0,
-            bob_frac: 0.0,
-            crouch_frac: 0.0,
-            slowed_s: 0.0,
+            moves: MoveState::New(),
             landing_dip_m: 0.0,
-            is_sprinting: false,
-            energy_frac: 1.0,
             did_step: false,
             is_climbing: false,
         }
@@ -195,12 +198,12 @@ impl Player {
     ///
     /// Example: `let bob_m: f64 = player.get_bob_m();`
     pub fn get_bob_m(&self) -> f64 {
-        let depth_m: f64 = if self.is_sprinting {
+        let depth_m: f64 = if self.moves.is_sprinting {
             HEAD_BOB.sprint_depth_m
         } else {
             HEAD_BOB.walk_depth_m
         };
-        -self.bob_frac * depth_m * self.bob_phase_rad.sin().abs()
+        -self.moves.bob_frac * depth_m * self.moves.bob_phase_rad.sin().abs()
     }
 
     /// `camera_world` is the camera's world transform.
@@ -246,14 +249,15 @@ impl Player {
             .map(|time_s: f32| (respawn_delay_s - time_s).max(0.0))
     }
 
-    /// `update` applies one frame of input and physics as Lunar Surface's `VoxelPlayer::step`
-    /// does, with `movement`'s numbers: crouching toward `crouch_frac` 1 over `crouch_s` (the body
-    /// and eye lowering together; standing up waits for room), sprinting (any direction, not
-    /// crouched) while energy lasts, the head bob, a speed of walking or sprinting times the
-    /// crouching share and a hit's slowing, set at once on the ground and in the air, a jump, gravity
-    /// up to `MAX_FALL_SPEED_M_PER_S`; then the forest's rope ladders, collision (stepping up
-    /// ledges, `collision::STEP_HEIGHT_M`, in steps of at most `MAX_MOVE_STEP_M`) and landing dip. A footstep (`did_step`) falls at each
-    /// dip of the head bob.
+    /// `update` applies one frame of input as every level does: the shared movement rules first
+    /// (`MoveState::step`: crouching toward `crouch_frac` 1 over `crouch_s`, the body and eye
+    /// lowering together, though standing up waits for room; sprinting while energy lasts; the
+    /// head bob; the share of walking or sprinting speed a hit and crouching allow), then the
+    /// forest carries the step out (`Forest::move_body`: the walk at that speed, set at once on
+    /// the ground and in the air, a jump, gravity up to `MAX_FALL_SPEED_M_PER_S`, the rope
+    /// ladders, collision stepping up ledges, `collision::STEP_HEIGHT_M`, in steps of at most
+    /// `MAX_MOVE_STEP_M`, and the landing dip). A footstep (`did_step`) falls at each dip of the
+    /// head bob.
     pub fn update(
         &mut self,
         input: &PlayerInput,
@@ -276,12 +280,24 @@ impl Player {
         self.pitch_rad =
             (self.pitch_rad - input.look_delta_rad.y).clamp(-MAX_PITCH_RAD, MAX_PITCH_RAD);
 
-        let settings: &MovementSettings = &movement.settings;
-        let crouch_step: f32 = dt_s / settings.crouch_s as f32;
-        let crouch_target: f32 = f32::from(u8::from(input.is_crouch_held));
-        let new_crouch_frac: f32 =
-            self.crouch_frac + (crouch_target - self.crouch_frac).clamp(-crouch_step, crouch_step);
-        let new_height_m: f32 = STAND_HEIGHT_M - movement.get_crouch_drop_m(new_crouch_frac);
+        let axes: Vec2 = input.move_axes.clamp_length_max(1.0);
+        let before: MoveState = self.moves;
+        let rules: MoveRules = MoveRules {
+            movement: &movement.settings,
+            energy: &movement.sprint_energy,
+            when_hit: &movement.when_hit,
+            head_bob: &HEAD_BOB,
+        };
+        let move_input: MoveInput = MoveInput {
+            is_moving: axes.length() > 0.0,
+            is_sprint_held: input.is_sprint_held,
+            is_crouch_held: input.is_crouch_held,
+            is_flying: false,
+            is_on_ground: self.is_on_ground,
+        };
+        let slow_frac: f64 = self.moves.step(&move_input, &rules, f64::from(dt_s));
+        let new_height_m: f32 =
+            STAND_HEIGHT_M - movement.get_crouch_drop_m(self.moves.crouch_frac as f32);
         let grown: Aabb = Aabb {
             min_m: self.feet_m - Vec3::new(BODY_RADIUS_M, 0.0, BODY_RADIUS_M) + Vec3::Y * 0.01,
             max_m: self.feet_m + Vec3::new(BODY_RADIUS_M, new_height_m, BODY_RADIUS_M),
@@ -289,120 +305,33 @@ impl Player {
         if new_height_m <= self.height_m
             || !solids.iter().any(|solid: &Aabb| solid.overlaps(&grown))
         {
-            (self.crouch_frac, self.height_m) = (new_crouch_frac, new_height_m);
-        }
-
-        let forward: Vec3 = Quat::from_rotation_y(self.yaw_rad) * Vec3::NEG_Z;
-        let right: Vec3 = Quat::from_rotation_y(self.yaw_rad) * Vec3::X;
-        let axes: Vec2 = input.move_axes.clamp_length_max(1.0);
-        let is_moving: bool = axes.length() > 0.0;
-        let energy: &SprintEnergySettings = &movement.sprint_energy;
-        let wants_to_sprint: bool = input.is_sprint_held && !input.is_crouch_held && is_moving;
-        self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
-        let energy_change_per_s: f64 = match (wants_to_sprint, input.is_crouch_held) {
-            (true, _) => -1.0 / energy.drain_s,
-            (false, true) => 1.0 / energy.refill_crouching_s,
-            (false, false) => 1.0 / energy.refill_walking_s,
-        };
-        self.energy_frac = (self.energy_frac + energy_change_per_s as f32 * dt_s).clamp(0.0, 1.0);
-        let is_walking: bool = is_moving && self.is_on_ground;
-        let fade_frac: f64 = f64::from(dt_s) / HEAD_BOB.fade_s;
-        self.bob_frac +=
-            (f64::from(u8::from(is_walking)) - self.bob_frac).clamp(-fade_frac, fade_frac);
-        self.did_step = false;
-        if is_walking {
-            let steps_per_s: f64 = if self.is_sprinting {
-                HEAD_BOB.sprint_steps_per_s
-            } else {
-                HEAD_BOB.walk_steps_per_s
-            };
-            let phase_rad: f64 =
-                self.bob_phase_rad + std::f64::consts::TAU * steps_per_s * f64::from(dt_s);
-            self.did_step = (phase_rad / std::f64::consts::PI).floor()
-                > (self.bob_phase_rad / std::f64::consts::PI).floor();
-            self.bob_phase_rad = phase_rad % std::f64::consts::TAU;
-        }
-        let slow_frac: f32 = if self.slowed_s > 0.0 {
-            movement.when_hit.slow_speed_frac as f32
+            self.height_m = new_height_m;
         } else {
-            1.0
-        } * if input.is_crouch_held {
-            settings.crouch_speed_frac as f32
-        } else {
-            1.0
-        };
-        self.slowed_s = (self.slowed_s - dt_s).max(0.0);
-        let speed_m_s: f32 = slow_frac
-            * if self.is_sprinting {
+            self.moves.crouch_frac = before.crouch_frac;
+        }
+        let stepped_rad: f64 =
+            (self.moves.bob_phase_rad - before.bob_phase_rad).rem_euclid(std::f64::consts::TAU);
+        self.did_step = ((before.bob_phase_rad + stepped_rad) / std::f64::consts::PI).floor()
+            > (before.bob_phase_rad / std::f64::consts::PI).floor();
+        let speed_m_per_s: f64 = slow_frac
+            * f64::from(if self.moves.is_sprinting {
                 movement.sprint_m_per_s
             } else {
                 movement.walk_m_per_s
-            };
-        let direction: Vec3 = forward * axes.y + right * axes.x;
-        let target_m_s: Vec3 = direction * speed_m_s;
-        self.velocity_m_s = target_m_s.with_y(
-            (self.velocity_m_s.y - movement.gravity_m_per_s2 * dt_s).max(-MAX_FALL_SPEED_M_PER_S),
-        );
-        if input.is_jump_pressed && self.is_on_ground {
-            self.velocity_m_s.y = movement.jump_m_per_s;
-        }
-        let body: Aabb = Aabb {
-            min_m: self.feet_m - Vec3::new(BODY_RADIUS_M, 0.0, BODY_RADIUS_M),
-            max_m: self.feet_m + Vec3::new(BODY_RADIUS_M, self.height_m, BODY_RADIUS_M),
+            });
+        let intent: MoveIntent = MoveIntent {
+            forward_frac: f64::from(axes.y),
+            right_frac: f64::from(axes.x),
+            speed_m_per_s,
+            is_jump_held: input.is_jump_pressed,
+            is_crouch_held: input.is_crouch_held,
         };
-        let ladder: Option<&LadderVolume> = ladders.iter().find(|l| l.aabb.overlaps(&body));
-        let ladder_m_s: Vec3 = direction * LADDER_WALK_M_S;
-        self.is_climbing = ladder.is_some_and(|ladder| {
-            let facing: Vec3 = -ladder.frame.z_axis.truncate();
-            let walking_in: bool = ladder_m_s.dot(facing) > LADDER_FACING_DOT * LADDER_WALK_M_S;
-            !input.is_jump_pressed && (self.is_climbing || !self.is_on_ground || walking_in)
-        });
-        if self.is_climbing {
-            let down_sign: f32 = if self.pitch_rad < CLIMB_DOWN_PITCH_RAD {
-                -1.0
-            } else {
-                1.0
-            };
-            let climb_m_s: f32 = axes.y * down_sign * CLIMB_SPEED_M_S
-                - f32::from(u8::from(input.is_crouch_held)) * CLIMB_SPEED_M_S;
-            let ladder: &LadderVolume = ladder.expect("a climber is on a ladder");
-            let facing: Vec3 = -ladder.frame.z_axis.truncate();
-            let is_at_top: bool = self.feet_m.y > ladder.aabb.max_m.y - CLIMB_TOP_STEP_M;
-            let along_m_s: Vec3 = if is_at_top {
-                ladder_m_s
-            } else {
-                (ladder_m_s - facing * ladder_m_s.dot(facing)) * CLIMB_HORIZONTAL_FRAC
-            };
-            self.velocity_m_s = along_m_s.with_y(climb_m_s.max(-CLIMB_SPEED_M_S * 1.5));
-        }
-
-        let fall_speed_m_s: f32 = -self.velocity_m_s.y;
-        let was_on_ground: bool = self.is_on_ground;
-        let delta_m: Vec3 = self.velocity_m_s * dt_s;
-        let step_count: usize = (delta_m.length() / MAX_MOVE_STEP_M).ceil().max(1.0) as usize;
-        let mut did_hit_ceiling: bool = false;
-        for _ in 0..step_count {
-            let result: MoveResult = move_body(
-                solids,
-                self.feet_m,
-                Player::half_extent_m(self.height_m),
-                delta_m / step_count as f32,
-                self.is_on_ground || self.is_climbing,
-            );
-            self.feet_m = result.position_m;
-            self.is_on_ground = result.is_on_ground;
-            did_hit_ceiling |= result.did_hit_ceiling;
-        }
-        if self.is_on_ground || did_hit_ceiling {
-            self.velocity_m_s.y = self.velocity_m_s.y.clamp(-0.5, 0.0);
-            if did_hit_ceiling {
-                self.velocity_m_s.y = 0.0;
-            }
-        }
-        if self.is_on_ground && !was_on_ground && fall_speed_m_s > 3.0 {
-            self.landing_dip_m = (fall_speed_m_s * 0.012).min(0.12);
-        }
-        self.landing_dip_m = (self.landing_dip_m - dt_s * 0.5).max(0.0);
+        let forest: Forest = Forest {
+            movement,
+            solids,
+            ladders,
+        };
+        self.is_on_ground = forest.move_body(self, &intent, f64::from(dt_s));
     }
 
     /// `slow_down` starts a hit's slowing (`Movement::when_hit`'s `slow_s`), as Lunar Surface slows
@@ -410,7 +339,94 @@ impl Player {
     ///
     /// Example: `player.slow_down(&movement);`
     pub fn slow_down(&mut self, movement: &Movement) {
-        self.slowed_s = movement.when_hit.slow_s as f32;
+        self.moves.slowed_s = movement.when_hit.slow_s;
+    }
+}
+
+impl Ground for Forest<'_> {
+    type Body = Player;
+
+    /// `move_body` carries out a step's `intent` for the player in the forest: the walk at its
+    /// speed, set at once on the ground and in the air, a jump from the ground, gravity up to
+    /// `MAX_FALL_SPEED_M_PER_S`; on a rope ladder (walked into, or already climbing), climbing
+    /// up with forward (down while looking down, or holding crouch) and stepping off at the top;
+    /// collision, stepping up ledges, in steps of at most `MAX_MOVE_STEP_M`; and the landing dip.
+    /// It says whether the player then stands on something.
+    ///
+    /// Example: `let is_on_ground: bool = forest.move_body(&mut player, &intent, 1.0 / 60.0);`
+    fn move_body(&self, body: &mut Player, intent: &MoveIntent, dt_s: f64) -> bool {
+        let dt_s: f32 = dt_s as f32;
+        let forward: Vec3 = Quat::from_rotation_y(body.yaw_rad) * Vec3::NEG_Z;
+        let right: Vec3 = Quat::from_rotation_y(body.yaw_rad) * Vec3::X;
+        let (forward_frac, right_frac) = (intent.forward_frac as f32, intent.right_frac as f32);
+        let direction: Vec3 = forward * forward_frac + right * right_frac;
+        let target_m_s: Vec3 = direction * intent.speed_m_per_s as f32;
+        body.velocity_m_s = target_m_s.with_y(
+            (body.velocity_m_s.y - self.movement.gravity_m_per_s2 * dt_s)
+                .max(-MAX_FALL_SPEED_M_PER_S),
+        );
+        if intent.is_jump_held && body.is_on_ground {
+            body.velocity_m_s.y = self.movement.jump_m_per_s;
+        }
+        let aabb: Aabb = Aabb {
+            min_m: body.feet_m - Vec3::new(BODY_RADIUS_M, 0.0, BODY_RADIUS_M),
+            max_m: body.feet_m + Vec3::new(BODY_RADIUS_M, body.height_m, BODY_RADIUS_M),
+        };
+        let ladder: Option<&LadderVolume> = self.ladders.iter().find(|l| l.aabb.overlaps(&aabb));
+        let ladder_m_s: Vec3 = direction * LADDER_WALK_M_S;
+        body.is_climbing = ladder.is_some_and(|ladder| {
+            let facing: Vec3 = -ladder.frame.z_axis.truncate();
+            let walking_in: bool = ladder_m_s.dot(facing) > LADDER_FACING_DOT * LADDER_WALK_M_S;
+            !intent.is_jump_held && (body.is_climbing || !body.is_on_ground || walking_in)
+        });
+        if body.is_climbing {
+            let down_sign: f32 = if body.pitch_rad < CLIMB_DOWN_PITCH_RAD {
+                -1.0
+            } else {
+                1.0
+            };
+            let climb_m_s: f32 = forward_frac * down_sign * CLIMB_SPEED_M_S
+                - f32::from(u8::from(intent.is_crouch_held)) * CLIMB_SPEED_M_S;
+            let ladder: &LadderVolume = ladder.expect("a climber is on a ladder");
+            let facing: Vec3 = -ladder.frame.z_axis.truncate();
+            let is_at_top: bool = body.feet_m.y > ladder.aabb.max_m.y - CLIMB_TOP_STEP_M;
+            let along_m_s: Vec3 = if is_at_top {
+                ladder_m_s
+            } else {
+                (ladder_m_s - facing * ladder_m_s.dot(facing)) * CLIMB_HORIZONTAL_FRAC
+            };
+            body.velocity_m_s = along_m_s.with_y(climb_m_s.max(-CLIMB_SPEED_M_S * 1.5));
+        }
+
+        let fall_speed_m_s: f32 = -body.velocity_m_s.y;
+        let was_on_ground: bool = body.is_on_ground;
+        let mut is_on_ground: bool = body.is_on_ground;
+        let delta_m: Vec3 = body.velocity_m_s * dt_s;
+        let step_count: usize = (delta_m.length() / MAX_MOVE_STEP_M).ceil().max(1.0) as usize;
+        let mut did_hit_ceiling: bool = false;
+        for _ in 0..step_count {
+            let result: MoveResult = move_body(
+                self.solids,
+                body.feet_m,
+                Player::half_extent_m(body.height_m),
+                delta_m / step_count as f32,
+                is_on_ground || body.is_climbing,
+            );
+            body.feet_m = result.position_m;
+            is_on_ground = result.is_on_ground;
+            did_hit_ceiling |= result.did_hit_ceiling;
+        }
+        if is_on_ground || did_hit_ceiling {
+            body.velocity_m_s.y = body.velocity_m_s.y.clamp(-0.5, 0.0);
+            if did_hit_ceiling {
+                body.velocity_m_s.y = 0.0;
+            }
+        }
+        if is_on_ground && !was_on_ground && fall_speed_m_s > 3.0 {
+            body.landing_dip_m = (fall_speed_m_s * 0.012).min(0.12);
+        }
+        body.landing_dip_m = (body.landing_dip_m - dt_s * 0.5).max(0.0);
+        is_on_ground
     }
 }
 
@@ -428,6 +444,7 @@ impl Player {
 /// | sprint energy while sprinting | some left, empty | `test_sprinting_drains_energy_then_stops` |
 /// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
 /// | time since death | before the settings' respawn delay, after it | `test_respawn_waits_the_settings_delay` |
+/// | rules' state each step | walking, sprinting, crouching, jumping, standing, hit: the shared `MoveState` stepped with the same keys and ground, bit for bit | `test_the_rules_are_the_shared_ones` |
 #[cfg(test)]
 mod tests {
     use glam::Mat4;
@@ -539,7 +556,7 @@ mod tests {
     fn run_s(input: &PlayerInput, energy_frac: f32, seconds: f32) -> Player {
         let solids: [Aabb; 1] = open_ground();
         let mut player: Player = Player::new(Vec3::ZERO, 0.0);
-        player.energy_frac = energy_frac;
+        player.moves.energy_frac = f64::from(energy_frac);
         let movement: Movement = forest_movement();
         let dt_s: f32 = 1.0 / 120.0;
         for _ in 0..(seconds / dt_s).round() as usize {
@@ -648,7 +665,7 @@ mod tests {
             player.update(&PlayerInput::default(), &movement, &solids, &[], 1.0 / 60.0);
         }
         assert!(player.height_m <= roof_m, "stood up into the roof");
-        assert!(player.crouch_frac > 0.5);
+        assert!(player.moves.crouch_frac > 0.5);
     }
 
     /// `test_sprinting_drains_energy_then_stops` checks sprint energy empties in `drain_s` of
@@ -662,9 +679,9 @@ mod tests {
         };
         let drain_s: f32 = forest_movement().sprint_energy.drain_s as f32;
         let half: Player = run_s(&sprint, 1.0, drain_s * 0.5);
-        assert!(half.is_sprinting && (half.energy_frac - 0.5).abs() < 0.01);
+        assert!(half.moves.is_sprinting && (half.moves.energy_frac - 0.5).abs() < 0.01);
         let empty: Player = run_s(&sprint, 1.0, drain_s + 0.5);
-        assert!(!empty.is_sprinting && empty.energy_frac == 0.0);
+        assert!(!empty.moves.is_sprinting && empty.moves.energy_frac == 0.0);
     }
 
     /// `test_a_jump_matches_lunar_surface` checks a standing jump rises as high and stays in the
@@ -722,17 +739,66 @@ mod tests {
             0.0,
             energy.refill_walking_s as f32 * 0.5,
         );
-        assert!((standing.energy_frac - 0.5).abs() < 0.01);
+        assert!((standing.moves.energy_frac - 0.5).abs() < 0.01);
         let crouch: PlayerInput = PlayerInput {
             is_crouch_held: true,
             ..PlayerInput::default()
         };
         let crouched: Player = run_s(&crouch, 0.0, energy.refill_crouching_s as f32 * 0.5);
         assert!(
-            (crouched.energy_frac - 0.5).abs() < 0.01,
+            (crouched.moves.energy_frac - 0.5).abs() < 0.01,
             "{}",
-            crouched.energy_frac
+            crouched.moves.energy_frac
         );
+    }
+
+    /// `test_the_rules_are_the_shared_ones` checks every step's crouch, sprint energy, sprinting,
+    /// head bob and slow are those of the shared `MoveState` stepped with the same keys and the
+    /// same ground under the player (W-126 (same play in every level)).
+    #[test]
+    fn test_the_rules_are_the_shared_ones() {
+        let movement: Movement = forest_movement();
+        let solids: [Aabb; 1] = open_ground();
+        let dt_s: f32 = 1.0 / 60.0;
+        let rules: MoveRules = MoveRules {
+            movement: &movement.settings,
+            energy: &movement.sprint_energy,
+            when_hit: &movement.when_hit,
+            head_bob: &HEAD_BOB,
+        };
+        let mut player: Player = Player::new(Vec3::ZERO, 0.0);
+        let mut shared: MoveState = MoveState::New();
+        let legs: [(Vec2, bool, bool, bool, usize); 6] = [
+            (Vec2::Y, false, false, false, 60),
+            (Vec2::Y, true, false, false, 240),
+            (Vec2::Y, true, true, false, 60),
+            (Vec2::new(1.0, 1.0), false, false, true, 90),
+            (Vec2::ZERO, false, false, false, 60),
+            (Vec2::NEG_Y, false, true, false, 60),
+        ];
+        player.slow_down(&movement);
+        shared.slowed_s = movement.when_hit.slow_s;
+        for (move_axes, is_sprint_held, is_crouch_held, is_jump_pressed, step_count) in legs {
+            let input: PlayerInput = PlayerInput {
+                move_axes,
+                is_sprint_held,
+                is_crouch_held,
+                is_jump_pressed,
+                ..PlayerInput::default()
+            };
+            for _ in 0..step_count {
+                let shared_input: MoveInput = MoveInput {
+                    is_moving: move_axes != Vec2::ZERO,
+                    is_sprint_held,
+                    is_crouch_held,
+                    is_flying: false,
+                    is_on_ground: player.is_on_ground,
+                };
+                shared.step(&shared_input, &rules, f64::from(dt_s));
+                player.update(&input, &movement, &solids, &[], dt_s);
+                assert_eq!(player.moves, shared);
+            }
+        }
     }
 
     /// `test_respawn_waits_the_settings_delay` checks a dead player respawns once the delay it is

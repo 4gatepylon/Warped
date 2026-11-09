@@ -64,7 +64,8 @@ is in [`AGENTS.md`](AGENTS.md).
     merged), #466 (Dark Forest on the shared crate: its HUD, hit effect, shot noise and settings sections,
     glam 0.34; `claude/dark-forest-shared-hud`, merged), #468 (Dark Forest's guns on the shared `Weapons`,
     `claude/dark-forest-shared-guns`, merged), #473 (Dark Forest's robots are Lunar's teal robot,
-    animated by the shared gait rules; `claude/dark-forest-teal-robots`, open).
+    animated by the shared gait rules; `claude/dark-forest-teal-robots`, merged), #474 (Dark Forest's player
+    moves by the shared rules through a `Ground`; `claude/dark-forest-shared-movement`, open).
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":

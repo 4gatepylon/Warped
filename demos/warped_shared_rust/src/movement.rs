@@ -5,7 +5,8 @@
 //! space, with its own collisions (the `VoxelPlayer::step` of Lunar Surface, Dust, Snow Planet
 //! and the match, and City Sphere's `CityWorld::move_player`).
 //!
-//! Interface: `MoveState` (`step`), `MoveInput`, `MoveRules`, `get_crouched_height_frac`,
+//! Interface: `MoveState` (`step`), `MoveInput`, `MoveRules`, `MoveIntent`, `Ground`,
+//! `get_crouched_height_frac`,
 //! `encode_crouch_level`, `decode_crouch_level`, `CROUCH_LEVEL_COUNT`.
 //!
 //! Example: `let slow_frac: f64 = state.step(&input, &rules, 1.0 / 60.0);`
@@ -46,6 +47,33 @@ pub fn decode_crouch_level(level: u8) -> f64 {
     f64::from(level) / f64::from(CROUCH_LEVEL_COUNT)
 }
 
+/// `MoveIntent` is what the rules ask of a body for one step, for its level to carry out in its
+/// own space (`Ground::move_body`): walking forward and right (each -1 to 1, at most 1 together)
+/// at `speed_m_per_s` (the walking or sprinting speed times `MoveState::step`'s share), and the
+/// jump and crouch keys held.
+#[derive(Clone, Copy, Debug)]
+pub struct MoveIntent {
+    pub forward_frac: f64,
+    pub right_frac: f64,
+    pub speed_m_per_s: f64,
+    pub is_jump_held: bool,
+    pub is_crouch_held: bool,
+}
+
+/// `Ground` is a level's space as the movement rules see it: it moves a body of its own
+/// (`Body`) by a step's `MoveIntent`, with its own gravity, collisions and climbing, and says
+/// whether the body then stands on something (which the next step's rules take as on the ground).
+/// Dark Forest's forest of boxes and ladders is one.
+pub trait Ground {
+    type Body;
+
+    /// `move_body` moves `body` by `intent` for `dt_s` in this space, and says whether it then
+    /// stands on something.
+    ///
+    /// Example: `let is_on_ground: bool = forest.move_body(&mut player, &intent, 1.0 / 60.0);`
+    fn move_body(&self, body: &mut Self::Body, intent: &MoveIntent, dt_s: f64) -> bool;
+}
+
 /// `MoveState` is what the rules keep between steps: how far down a crouch is (0 standing, 1
 /// crouched), the sprint energy (0 to 1), whether the player sprints, the head bob's phase and
 /// how much of it shows (0 to 1), and how long a hit still slows the player.
@@ -81,6 +109,21 @@ pub struct MoveRules<'a> {
 }
 
 impl MoveState {
+    /// `New` is a player standing still with full sprint energy, neither crouched nor slowed.
+    ///
+    /// Example: `let state: MoveState = MoveState::New();`
+    #[allow(non_snake_case)]
+    pub fn New() -> MoveState {
+        MoveState {
+            crouch_frac: 0.0,
+            energy_frac: 1.0,
+            is_sprinting: false,
+            bob_phase_rad: 0.0,
+            bob_frac: 0.0,
+            slowed_s: 0.0,
+        }
+    }
+
     /// `step` moves the rules on by `dt_s`: the crouch toward held or not (over
     /// `movement.crouch_s`), sprinting (held with a move key, not crouched, while there is
     /// energy) and the energy, the head bob's steps (while walking on the ground), and the slow
