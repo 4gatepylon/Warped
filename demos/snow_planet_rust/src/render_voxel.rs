@@ -36,6 +36,7 @@ use crate::render_metal::{
 use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
 use crate::terrain::MoundGrid;
 use crate::thrown_wormholes::{GREEN_COLOR, HIT_FLASH_COLOR, PURPLE_COLOR, WormholeColor};
+use crate::torus::get_nearest_offset_m;
 use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
@@ -138,7 +139,29 @@ pub struct VoxelUniforms {
     pub blizzards: [[f32; 4]; MAX_BLIZZARD_COUNT],
     pub blizzard_air: [[f32; 4]; MAX_BLIZZARD_COUNT],
     pub laser_color: [f32; 4],
+    pub torus: [f32; 4],
 }
+
+/// `get_lens_copy` gives, on a looping world, how many periods (u, v) a ray must have gone around from
+/// the eye to meet warp `w`'s copy nearest the eye: the only copy of a black hole the shader bends light
+/// around (the user's "Fog at 80 m + home lens"); the others are dark disks. Without a loop, none.
+///
+/// Example: `let [ku, kv] = get_lens_copy(world, camera, w);`
+fn get_lens_copy(world: &VoxelWorld, camera: DMat4, w: &VoxelWarp) -> [f32; 2] {
+    let Some(torus) = world.torus else {
+        return [0.0, 0.0];
+    };
+    let [u_m, v_m] = torus.get_spot_m(w.centre);
+    let original_m: [f64; 2] = [u_m - w.copy_offset_m[0], v_m - w.copy_offset_m[1]];
+    let nearest_m: [f64; 2] =
+        get_nearest_offset_m(torus.get_spot_m(camera.col(3)), original_m, torus.periods_m);
+    [0, 1].map(|i| ((nearest_m[i] - w.copy_offset_m[i]) / torus.periods_m[i]).round() as f32)
+}
+
+/// `MAX_COPY_DISTANCE_M` is how far a ray goes around a looping world before it stops being moved
+/// across the seams (DECISIONS S15, the user's "C1 + C2": one period, not S11's 224 m): past it, it
+/// sees only the empty snowfield, as before the world looped, so the copies of the level end there.
+const MAX_COPY_DISTANCE_M: f64 = 112.0;
 
 /// `MAX_BLIZZARD_COUNT` is how many blizzards the renderer draws (the rest only slow and freeze).
 pub const MAX_BLIZZARD_COUNT: usize = 8;
@@ -431,6 +454,7 @@ impl VoxelFrame {
         size_px: (u32, u32),
     ) -> VoxelFrame {
         let r: f64 = world.r;
+        let camera: DMat4 = world.torus.map_or(camera, |torus| torus.wrap_frame(camera));
         let mesh_roots: Vec<i32> = get_mesh_roots(&world.meshes);
         let body_first_material: i32 = get_first_materials(&world.meshes)[world.body_mesh];
         let (avatar_triangles, avatar_nodes, avatar_roots) =
@@ -507,7 +531,10 @@ impl VoxelFrame {
                         grid.offset as i32,
                     ],
                     grid: pack_grid(grid, r),
-                    lens: [w.lens_rad as f32, w.lens_core as f32, 0.0, 0.0],
+                    lens: {
+                        let [ku, kv] = get_lens_copy(world, camera, w);
+                        [w.lens_rad as f32, w.lens_core as f32, ku, kv]
+                    },
                 }
             })
             .collect();
@@ -666,6 +693,14 @@ impl VoxelFrame {
             laser_color: world
                 .laser_color
                 .map_or([0.0; 4], |[r, g, b]| [r, g, b, 1.0]),
+            torus: world.torus.map_or([0.0; 4], |torus| {
+                [
+                    (torus.periods_m[0] / r) as f32,
+                    (torus.periods_m[1] / r) as f32,
+                    (MAX_COPY_DISTANCE_M / r) as f32,
+                    1.0,
+                ]
+            }),
         };
         assert_eq!(
             world.palette.len(),
@@ -1076,6 +1111,7 @@ mod tests {
     //! | Team | blue, red | `beams_carry_their_gun_team_and_speckle` |
     //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
     //! | A beacon's console | on (its beam is bright), off (its beam goes, the others stay) | `beacon_beams_go_with_their_consoles` |
+    //! | Eye on a looping world | on the black hole's side of the seam, across it | `each_black_hole_bends_light_at_its_copy_nearest_the_eye` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -1084,6 +1120,30 @@ mod tests {
 
     const SPECKLE_FRAC: f64 = 0.4;
     const RENDER_PX: (u32, u32) = (64, 40);
+
+    #[test]
+    fn each_black_hole_bends_light_at_its_copy_nearest_the_eye() {
+        let mut map: Map = Map::Load(&get_map_folder("snow_planet")).expect("the Snow Planet map");
+        map.curve_flat(crate::map::FLAT_CURVATURE_RADIUS_M);
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let torus = world.torus.expect("Snow Planet loops");
+        for (eye_m, north_copy) in [([-1.0, 20.0], [0.0, 0.0]), ([-1.0, -30.0], [0.0, -1.0])] {
+            let camera: DMat4 =
+                VoxelPlayer::AtView(&world, eye_m, [eye_m[0] + 1.0, eye_m[1]], None, 0.0)
+                    .get_camera_frame(&world);
+            for w in world.warps.iter().filter(|w| w.name == "black hole north") {
+                let lens_copy: [f32; 2] = get_lens_copy(&world, camera, w);
+                let copy: [f32; 2] =
+                    [0, 1].map(|i| lens_copy[i] + (w.copy_offset_m[i] / torus.periods_m[i]) as f32);
+                assert_eq!(
+                    copy,
+                    north_copy.map(|k: f64| k as f32),
+                    "eye {eye_m:?}, {:?}",
+                    w.copy_offset_m
+                );
+            }
+        }
+    }
 
     #[test]
     fn beams_carry_their_gun_team_and_speckle() {

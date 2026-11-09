@@ -156,7 +156,8 @@ pub struct VoxelStructure {
 /// `VoxelWarp` is a black hole or a wormhole mouth: its frame, m and reach in curvature units,
 /// its partner, the structures within its reach, its colour if a player threw it, whether it
 /// flashes red (just hit), and a black hole's wide lens (`get_lens_log_index`): the most it turns
-/// a ray (radians, 0 for none) and its core radius (curvature units).
+/// a ray (radians, 0 for none) and its core radius (curvature units); on a looping world, the offset in
+/// meters (u, v) of the copy it is (a ghost past a seam), none for the original.
 #[derive(Clone)]
 pub struct VoxelWarp {
     pub name: String,
@@ -172,6 +173,7 @@ pub struct VoxelWarp {
     pub is_flashing: bool,
     pub lens_rad: f64,
     pub lens_core: f64,
+    pub copy_offset_m: [f64; 2],
 }
 
 /// `SpecialMaterials` is the ids of the materials the `lunar` style draws in its own way (-1 when
@@ -775,6 +777,7 @@ impl VoxelWorld {
                 is_flashing: false,
                 lens_rad: 0.0,
                 lens_core: 0.0,
+                copy_offset_m: [0.0, 0.0],
             });
         }
         if let Some(torus) = &torus {
@@ -795,6 +798,7 @@ impl VoxelWorld {
                                     < structures[k].radius + reach
                             })
                             .collect(),
+                        copy_offset_m: offset_m,
                         ..warps[w].clone()
                     });
                 }
@@ -1200,6 +1204,7 @@ impl VoxelWorld {
                     is_flashing: false,
                     lens_rad: 0.0,
                     lens_core: 0.0,
+                    copy_offset_m: [0.0, 0.0],
                 });
             }
         }

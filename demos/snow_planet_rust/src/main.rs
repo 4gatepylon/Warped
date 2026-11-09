@@ -1126,6 +1126,23 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         view("blue_pylon", [-24.0, 11.0], [-34.0, 11.0], None, 0.1),
         view("red_pylon", [24.0, -11.0], [34.0, -11.0], None, 0.1),
         view("seam", [-50.0, 20.0], [-56.0, 0.0], None, 0.0),
+        view("loop_u", [-28.0, 0.0], [-100.0, 0.0], None, 0.0),
+        view("loop_v", [-20.0, 0.0], [-20.0, 50.0], None, 0.0),
+        view("loop_diagonal", [-28.0, -4.0], [40.0, 40.0], None, 0.0),
+        view(
+            "seam_black_hole",
+            [-4.0, -24.0],
+            [-1.0, -60.0],
+            Some(5.0),
+            0.0,
+        ),
+        view(
+            "seam_black_hole_side",
+            [12.0, -32.0],
+            [-1.0, -43.5],
+            None,
+            0.0,
+        ),
         VoxelView {
             is_laser_on: true,
             ..view("laser_into_whiteout", [-20.0, 0.0], [0.0, 0.0], None, 0.0)

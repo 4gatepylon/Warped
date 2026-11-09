@@ -280,3 +280,45 @@ Built on `claude/snow-planet-torus-walk`, 2026-11-08 (Claude Code), on layer 1 (
   3 for the two near a corner) and 2 of the north and south-east black holes, whose reach crosses the v seam.
 - **Not yet:** rays (the view still ends at the seam, past which the ghosts show), lasers, other players and thrown
   mouths across the seams; the minimap and map page.
+
+## S15. Seeing around the loop, layer 3 (User: the cost)
+
+Built on `claude/snow-planet-torus-rays`, 2026-11-08 (Claude Code), on layer 2 (S14).
+
+- **Rays:** `render_voxel.metal` cuts each straight stretch of a ray at the nearest seam (`find_seam_s`: a linear
+  equation for u, a quadratic for v, in the chord's Klein parameter) and carries it across by the glue (`cross_seam`),
+  until it has gone `MAX_COPY_DISTANCE_M` (224 m, S11's V1). A ray that leaves a warp past a seam comes back into the
+  cell (`wrap_into_cell`). Inside a warp's reach rays aren't cut. Shadow rays (80 m) cross up to 3 seams.
+- **Sky and sun:** on a looping world they are looked up in Fermi frames (`carry_from_centre`): the sun at a point has
+  the same parts along the Fermi axes everywhere, so light matches across the seams, and the sky is the escaping
+  ray, as if it had gone straight on at the seams, carried to the eye and read in the eye's Fermi frame, so it
+  doesn't jump when a player crosses a seam. Reading it where the ray escaped instead broke the sky into shards
+  (an H³ line turns about 8° against the Fermi axes over a cell).
+- **Blizzard:** the fog and flakes cover every copy of the white-out the first stretch of a ray passes, and the fog
+  length is how far the ray went.
+- **The camera** is moved into the cell (a third-person camera can stand past a seam).
+- **Cost (User):** the first version more than doubled every view at 2560×1440 (`blue_spawn` 15.7 → 39.1 ms,
+  `black_hole` 19.5 → 73.6 ms). The user chose "C1 + C2" and allowed heuristics that look right ("you can use
+  heuristics to achieve this even if it might be sometimes physically incorrect slightly"). Built:
+  - **C1:** a black hole met after a seam and more than `NEAR_COPY_LENS_M` (40 m) along the ray is a black disk of
+    its capture radius (`BLACK_DISK_PER_M`, 20 × its mass, about 5.5 m, measured with the laser), fogged like a far
+    surface, with no lens. Gives up the far copies' lensing rings; near copies keep theirs, so no seam shows.
+  - **C2:** copies out to 112 m (`MAX_COPY_DISTANCE_M`), one period, not 224 m.
+  - **Heuristics kept:** past a seam, no beams (the copies' 400 m beacon beams and lasers aren't drawn, 2 to 3 ms,
+    and the sky is less busy); a ray rising above `SCENE_TOP_M` (20 m) isn't carried across seams (nothing to meet).
+  - **Tried and dropped:** copies' pylons as their plain collision cylinders (under 1 ms, and they showed as flat
+    coloured slabs); flakes only in near copies of the blizzard; sun and shadow rays without the loop (each under
+    3%).
+  - **The user's second cut, quoting "Fog at 80 m + home lens":** from a player's height (`is_fog_wall_on`: a
+    looping snow world, eye below 20 m), far surfaces fade fully into the snow fog between 40 m and `FOG_END_M`
+    (80 m, a smoothstep on top of today's fog, so no wall shows), and a ray heading down stops there in fog.
+    Rising rays still reach the sky; views from high up keep today's fog. Each black hole is lensed only at its
+    copy nearest the eye (`get_lens_copy`, any ghost included, so a lens across a seam stays whole); every other
+    copy is a fogged dark disk of the visible core, 2.2 m (`BLACK_DISK_PER_M` 8). Gives up: far surfaces fade
+    sooner than today (40 to 80 m), and a hole half a period away swaps lens and disk as the eye passes halfway.
+  - **Still over (User):** with "C1 + C2", every view was 1.5 to 2.3 times today's `staging/user-4gatepylon`
+    (`blue_spawn` 13.0 → 22.5 ms, `black_hole` 15.4 → 35.5 ms); with "Fog at 80 m + home lens" as well, 1.2 to
+    2 times (`blue_spawn` 12.6 → 16.2 ms, `black_hole` 15.3 → 31.1 ms), 20 of 26 views still over 16.7 ms. Where the time goes, for `blue_spawn`: 12.7 ms today; 16.3 with the
+    ghosts (layer 2: the ghost black holes' lenses past the seam); 18.1 with the loop's sky, sun and blizzard
+    copies but no rays across seams; 25.8 with rays across seams (before the heuristics), 22.5 after them. The rest
+    is the copies themselves within 112 m: their pylons, mounds and nearby black-hole lenses.
