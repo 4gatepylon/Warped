@@ -105,9 +105,6 @@ is in [`AGENTS.md`](AGENTS.md).
   them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
   when turning inside a wormhole, which the house already paints from the pixels around it; "it doesn't need to be
   100% correct physically"), and Lunar Surface should match the WebGL level.
-- [ ] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
-  together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
-  Mac over loopback.
 - [ ] **W-44 Smooth wormhole interior.** Inside a wormhole, looking sideways shows a grainy texture; it should look
   pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
 - [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
@@ -378,6 +375,10 @@ are here too, since the user hadn't confirmed them.
 
 ## Done
 
+- [x] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
+  together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
+  Mac over loopback.
+  Confirmed by the user, 2026-11-09: "it ahs been tested between multiple players on mac and it owrks".
 Confirmed by the user after testing.
 
 - [x] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
