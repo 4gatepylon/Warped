@@ -531,8 +531,9 @@ fn save_photo(
 }
 
 /// `VERTICAL_ROUTE` is `--play-route`'s loop from red's spawn: up a ladder to the treehouse, over
-/// the bridges, up the lookout, down, round a clump of trees and back.
-const VERTICAL_ROUTE: [Vec3; 20] = [
+/// the bridges, up the lookout, down, and back round a grove and wide of the wormhole mouth at
+/// (-2, 24), which would otherwise send it to the far side.
+const VERTICAL_ROUTE: [Vec3; 22] = [
     Vec3::new(0.0, 0.0, 50.0),
     Vec3::new(11.0, 0.0, 49.5),
     Vec3::new(11.0, 7.0, 45.0),
@@ -551,7 +552,9 @@ const VERTICAL_ROUTE: [Vec3; 20] = [
     Vec3::new(-6.0, 0.0, 10.25),
     Vec3::new(-7.0, 0.0, 13.0),
     Vec3::new(-5.5, 0.0, 15.25),
-    Vec3::new(0.0, 0.0, 30.0),
+    Vec3::new(-3.0, 0.0, 17.75),
+    Vec3::new(3.25, 0.0, 19.0),
+    Vec3::new(3.25, 0.0, 35.75),
     Vec3::new(0.0, 0.0, 46.0),
 ];
 
