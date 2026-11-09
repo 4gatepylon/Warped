@@ -33,6 +33,7 @@ use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
 };
+use warped_shared::movement::MoveState;
 use warped_shared::shot_noise::ShotNoise;
 use warped_shared::weapons::{Weapons, take_hit_weight};
 
@@ -55,7 +56,7 @@ use crate::render_city::{
     push_dust_particle, push_glow_ball, push_mesh, push_mouth,
 };
 use crate::render_metal::{self, FrameData};
-use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
+use crate::settings::{HeadBobSettings, MinimapCorner, PerPlayerSettings, ServerSettings};
 use crate::third_person;
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor};
 use crate::viewmodel;
@@ -442,10 +443,7 @@ impl Brain {
         sight: &BrainSight,
     ) -> BrainOutput {
         let mut out = BrainOutput {
-            input: CityInput {
-                speed_frac: 1.0,
-                ..CityInput::default()
-            },
+            input: CityInput::default(),
             is_shooting: false,
             console: None,
             wants_rifle: false,
@@ -1030,8 +1028,6 @@ struct CitySession {
     since_movement_key_s: f64,
     was_firing: bool,
     has_shot_hit_wormholes: bool,
-    bob_phase_rad: f64,
-    bob_frac: f64,
     remote_lasers: HashMap<u32, bool>,
     remote_motion: HashMap<u32, Motion>,
     disabling: Option<u8>,
@@ -1058,7 +1054,6 @@ struct CitySession {
     thrown: ThrownWormholes,
     hit_effect_frac: f64,
     hit_feedback: HitFeedback,
-    slowed_s: f64,
     frame_count: u64,
 }
 
@@ -1132,8 +1127,6 @@ impl CitySession {
             since_movement_key_s: f64::INFINITY,
             was_firing: false,
             has_shot_hit_wormholes: false,
-            bob_phase_rad: 0.0,
-            bob_frac: 0.0,
             remote_lasers: HashMap::new(),
             remote_motion: HashMap::new(),
             disabling: None,
@@ -1161,7 +1154,6 @@ impl CitySession {
             thrown: ThrownWormholes::New(),
             hit_effect_frac: 0.0,
             hit_feedback: HitFeedback::New(),
-            slowed_s: 0.0,
             frame_count: 0,
         })
     }
@@ -1425,10 +1417,7 @@ impl CitySession {
         self.update_hit(dt_s);
         self.weapons.tick(dt_s);
         let is_playing: bool = self.is_spawned && self.client.game.winner.is_none();
-        let mut input = CityInput {
-            speed_frac: self.get_speed_frac(),
-            ..CityInput::default()
-        };
+        let mut input: CityInput = CityInput::default();
         let (mut wants_shot, mut console) = (false, None);
         let sight: BrainSight = self.get_brain_sight();
         let can_brain_shoot: bool = self.can_shoot()
@@ -1443,10 +1432,7 @@ impl CitySession {
                     can_brain_shoot,
                     &sight,
                 );
-                input = CityInput {
-                    speed_frac: self.get_speed_frac(),
-                    ..out.input
-                };
+                input = out.input;
                 if out.wants_throw && self.thrown.can_throw() {
                     let flight = fly_city_throw(
                         &self.world,
@@ -1471,6 +1457,7 @@ impl CitySession {
             input.right_frac = axis(Action::MoveRight, Action::MoveLeft);
             input.is_sprinting = is(Action::Sprint);
             input.is_jumping = is(Action::Jump);
+            input.is_crouching = is(Action::Crouch);
             wants_shot = is(Action::Shoot) && self.is_captured;
             if is(Action::TurnOffConsole) {
                 console = self.find_console(None);
@@ -1479,8 +1466,13 @@ impl CitySession {
         self.update_wormholes(now_s);
         if self.is_spawned {
             let before: DVec3 = self.player.feet;
-            self.world
-                .move_player(&mut self.player, &input, &self.settings, dt_s);
+            self.world.move_player(
+                &mut self.player,
+                &input,
+                &self.settings,
+                &self.player_settings.view.head_bob,
+                dt_s,
+            );
             self.pass_through_wormholes(before);
             self.update_gun_motion(&input, dt_s);
         }
@@ -1522,15 +1514,15 @@ impl CitySession {
         Ok(())
     }
 
-    /// `update_gun_motion` moves the head bob and the gun as Lunar Surface does on its voxel maps:
-    /// the step phase advances at the head bob's walking or sprinting steps a second while moving
-    /// on the ground, `bob_frac` eases in and out over its `fade_s`, and the gun's pose goes
-    /// toward jogging while sprinting and back to aiming otherwise. As on Lunar Surface, it counts
-    /// the time since a movement key (walking or jumping) was last held, and moving ends the shot
-    /// under way (`can_shoot`).
+    /// `update_gun_motion` moves the gun as Lunar Surface does on its voxel maps: it steps with
+    /// the head bob that `move_player` stepped (its phase, and `bob_frac` easing in and out), and
+    /// its pose goes toward jogging while sprinting and back to aiming otherwise. As on Lunar
+    /// Surface, it counts the time since a movement key (walking upright, not crouched, or
+    /// jumping) was last held, and moving ends the shot under way (`can_shoot`).
     fn update_gun_motion(&mut self, input: &CityInput, dt_s: f64) {
         let is_moving: bool = input.forward_frac != 0.0 || input.right_frac != 0.0;
-        self.since_movement_key_s = if is_moving || input.is_jumping {
+        let is_walking_upright: bool = is_moving && !input.is_crouching;
+        self.since_movement_key_s = if is_walking_upright || input.is_jumping {
             0.0
         } else {
             self.since_movement_key_s + dt_s
@@ -1538,22 +1530,10 @@ impl CitySession {
         if !self.can_shoot() {
             self.weapons.shot_time_s = 0.0;
         }
-        let bob = &self.player_settings.view.head_bob;
-        let is_stepping: bool = is_moving && self.player.is_on_ground;
-        if is_stepping {
-            let steps_per_s: f64 = if self.player.is_sprinting {
-                bob.sprint_steps_per_s
-            } else {
-                bob.walk_steps_per_s
-            };
-            self.bob_phase_rad = (self.bob_phase_rad + std::f64::consts::TAU * steps_per_s * dt_s)
-                % std::f64::consts::TAU;
-        }
-        let fade_frac: f64 = dt_s / bob.fade_s;
-        self.bob_frac +=
-            (f64::from(u8::from(is_stepping)) - self.bob_frac).clamp(-fade_frac, fade_frac);
-        (self.weapons.gun_phase_rad, self.weapons.step_frac) = (self.bob_phase_rad, self.bob_frac);
-        let pose_target: f64 = f64::from(u8::from(self.player.is_sprinting && is_moving));
+        let moves: &MoveState = &self.player.move_state;
+        (self.weapons.gun_phase_rad, self.weapons.step_frac) =
+            (moves.bob_phase_rad, moves.bob_frac);
+        let pose_target: f64 = f64::from(u8::from(moves.is_sprinting && is_moving));
         self.weapons.run_pose_frac += (pose_target - self.weapons.run_pose_frac)
             .clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
     }
@@ -1626,16 +1606,18 @@ impl CitySession {
     /// when sprinting, by the player settings' `view.head_bob`.
     fn get_bob_m(&self) -> f64 {
         let bob = &self.player_settings.view.head_bob;
-        let depth_m: f64 = if self.player.is_sprinting {
+        let moves: &MoveState = &self.player.move_state;
+        let depth_m: f64 = if moves.is_sprinting {
             bob.sprint_depth_m
         } else {
             bob.walk_depth_m
         };
-        self.bob_frac * depth_m * self.bob_phase_rad.sin().abs()
+        moves.bob_frac * depth_m * moves.bob_phase_rad.sin().abs()
     }
 
     /// `update_hit` starts Lunar Surface's hit effect and slows this player
-    /// (`when_hit.slow_s`) when their health drops, whatever hurt them, and fades both over `dt_s`.
+    /// (`when_hit.slow_s`, counted down by the movement rules) when their health drops, whatever
+    /// hurt them, and fades the effect over `dt_s`.
     fn update_hit(&mut self, dt_s: f64) {
         self.hit_effect_frac = fade_effect_frac(
             self.hit_effect_frac,
@@ -1650,18 +1632,7 @@ impl CitySession {
             self.hit_effect_frac = 1.0;
         }
         if response.should_slow {
-            self.slowed_s = self.settings.when_hit.slow_s;
-        }
-        self.slowed_s = (self.slowed_s - dt_s).max(0.0);
-    }
-
-    /// `get_speed_frac` is this player's speed as a fraction: `when_hit.slow_speed_frac` while
-    /// slowed by a hit, else 1.
-    fn get_speed_frac(&self) -> f64 {
-        if self.slowed_s > 0.0 {
-            self.settings.when_hit.slow_speed_frac
-        } else {
-            1.0
+            self.player.move_state.slowed_s = self.settings.when_hit.slow_s;
         }
     }
 
@@ -1681,7 +1652,7 @@ impl CitySession {
     fn get_hud_bars(&self) -> HudBars {
         HudBars {
             health_frac: Some(self.client.health_frac),
-            energy_frac: Some(self.player.energy_frac),
+            energy_frac: Some(self.player.move_state.energy_frac),
             console_hold_frac: self
                 .disabling
                 .map(|_| self.disabling_s / self.settings.consoles.hold_to_disable_s),
@@ -3484,6 +3455,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
     let duration_s: f64 = arguments.exit_after_s.ok_or("--bot needs --exit-after-s")?;
     let start: Instant = Instant::now();
     let mut settings: ServerSettings = ServerSettings::Builtin();
+    let head_bob: HeadBobSettings = PerPlayerSettings::Builtin().view.head_bob;
     let mut player: CityPlayer = world.make_player(0, 0);
     let (mut is_spawned, mut respawn_in_s, mut spawn_count) = (false, None::<f64>, 0);
     let (mut hit_count, mut eliminated_count) = (0u32, 0u32);
@@ -3551,7 +3523,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 false,
                 &BrainSight::default(),
             );
-            world.move_player(&mut player, &out.input, &settings, dt_s);
+            world.move_player(&mut player, &out.input, &settings, &head_bob, dt_s);
             disabling = out.console.and_then(|index| {
                 find_aimed_console(
                     &world,
@@ -3611,7 +3583,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 false,
                 &BrainSight::default(),
             );
-            world.move_player(&mut player, &out.input, &settings, dt_s);
+            world.move_player(&mut player, &out.input, &settings, &head_bob, dt_s);
             let targets: Vec<Target> = client
                 .players
                 .iter()
@@ -3696,6 +3668,7 @@ mod tests {
     //! | When an eliminated player comes back | before the respawn delay (never), within a join retry after it, at their team's spawn | `an_eliminated_player_respawns_only_after_the_delay` |
     //! | Walk from a spawn up the stairs | each team, each of its two spawns, walking and sprinting: reaches the glass level, then its pylon, never stuck | `every_spawn_walks_up_the_stairs_to_its_pylon` |
     //! | Level jumped in | City Sphere, Lunar Surface (the reference, its own settings and code): the same height and time in the air | `a_jump_matches_lunar_surface` |
+    //! | Level crouched in, walking | City Sphere, Lunar Surface: the same time to crouch, crouched eye height and crouched speed, as shares of standing | `crouching_matches_lunar_surface` |
     //! | Settings file | server (all but the sprint and City's `glass`), player: the same as Lunar Surface's | `the_settings_files_match_lunar_surface` |
     //! | Walk on foot from a spawn to a console | each team, spawn and console (own, the other team's), 60 and 20 updates a second: aimed within reach at the end; not when facing away or with too short a reach | `every_pylon_is_reachable_on_foot_from_every_spawn` |
     use super::*;
@@ -3705,6 +3678,11 @@ mod tests {
     const TOO_SHORT_REACH_M: f64 = 0.5;
     const WALK_TIMEOUT_S: f64 = 40.0;
     const GLASS_LEVEL_TOLERANCE_M: f64 = 0.05;
+
+    /// `head_bob` is the built-in player settings' head bob.
+    fn head_bob() -> HeadBobSettings {
+        PerPlayerSettings::Builtin().view.head_bob
+    }
 
     /// `walk_steps` plays `steps` for `player` with the real movement and settings, `step_s` at a
     /// time, sprinting if `is_sprinting`, until the steps are done or `WALK_TIMEOUT_S` runs out; it
@@ -3741,7 +3719,7 @@ mod tests {
                 is_sprinting,
                 ..out.input
             };
-            world.move_player(player, &input, &settings, step_s);
+            world.move_player(player, &input, &settings, &head_bob(), step_s);
             time_s += step_s;
         }
         assert!(brain.is_done(), "the walk took over {WALK_TIMEOUT_S} s");
@@ -3841,6 +3819,8 @@ mod tests {
     const MAX_JUMP_STEP_COUNT: usize = 120;
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.05;
     const LUNAR_JUMP_AT_M: [f64; 2] = [-27.0, 0.0];
+    const CROUCH_WALK_S: f64 = 0.5;
+    const CROUCH_SPEED_TOLERANCE_FRAC: f64 = 1e-3;
     const CITY_ONLY_SECTION: &str = "glass:";
     const CITY_ONLY_SETTING: &str = "  sprint_speed_per_map_speed:";
 
@@ -3862,10 +3842,9 @@ mod tests {
         let mut player: CityPlayer = world.make_player(0, 0);
         let jump: CityInput = CityInput {
             is_jumping: true,
-            speed_frac: 1.0,
             ..CityInput::default()
         };
-        world.move_player(&mut player, &jump, &settings, WALK_STEP_S);
+        world.move_player(&mut player, &jump, &settings, &head_bob(), WALK_STEP_S);
         let height_m = |player: &CityPlayer| world.street_radius_m - player.feet.length();
         let (mut apex_m, mut air_step_count): (f64, usize) = (height_m(&player), 1);
         while !player.is_on_ground {
@@ -3873,17 +3852,26 @@ mod tests {
                 air_step_count < MAX_JUMP_STEP_COUNT,
                 "the jump never landed"
             );
-            world.move_player(&mut player, &CityInput::default(), &settings, WALK_STEP_S);
+            world.move_player(
+                &mut player,
+                &CityInput::default(),
+                &settings,
+                &head_bob(),
+                WALK_STEP_S,
+            );
             apex_m = apex_m.max(height_m(&player));
             air_step_count += 1;
         }
         (apex_m, air_step_count)
     }
 
-    /// `measure_lunar_jump` gives the same as `measure_city_jump` on Lunar Surface, with Lunar
-    /// Surface's own movement settings (its `server_settings.yaml`) and its own code
-    /// (`VoxelWorld::set_settings`, `VoxelPlayer::step`).
-    fn measure_lunar_jump() -> (f64, usize) {
+    /// `make_lunar_world` gives Lunar Surface's world with Lunar Surface's own movement settings
+    /// (its `server_settings.yaml`), and a player standing on its flat spawn area, facing along
+    /// it.
+    fn make_lunar_world() -> (
+        crate::voxel_world::VoxelWorld,
+        crate::voxel_world::VoxelPlayer,
+    ) {
         let yaml: serde_yaml::Value =
             serde_yaml::from_str(&read_lunar_file("server_settings.yaml")).expect("YAML");
         let mut settings: ServerSettings = ServerSettings::Builtin();
@@ -3895,13 +3883,21 @@ mod tests {
             crate::voxel_world::VoxelWorld::FromMap(&map).expect("a voxel world");
         world.set_settings(settings);
         let at_m: [f64; 2] = LUNAR_JUMP_AT_M;
-        let mut player: crate::voxel_world::VoxelPlayer = crate::voxel_world::VoxelPlayer::AtView(
+        let player: crate::voxel_world::VoxelPlayer = crate::voxel_world::VoxelPlayer::AtView(
             &world,
             at_m,
             [at_m[0] + 1.0, at_m[1]],
             None,
             0.0,
         );
+        (world, player)
+    }
+
+    /// `measure_lunar_jump` gives the same as `measure_city_jump` on Lunar Surface, with Lunar
+    /// Surface's own movement settings (its `server_settings.yaml`) and its own code
+    /// (`VoxelWorld::set_settings`, `VoxelPlayer::step`).
+    fn measure_lunar_jump() -> (f64, usize) {
+        let (world, mut player) = make_lunar_world();
         let start_m: f64 = player.h_m;
         let jump: crate::physics::Input = crate::physics::Input {
             up: true,
@@ -3935,6 +3931,95 @@ mod tests {
         assert!(
             city_step_count.abs_diff(lunar_step_count) <= 1,
             "City Sphere {city_step_count} steps in the air, Lunar Surface {lunar_step_count}"
+        );
+    }
+
+    /// `Crouch` is what crouching while walking forward does: the steps it takes to crouch fully,
+    /// the crouched eye height as a fraction of the standing one, and the crouched walking speed
+    /// as a fraction of walking upright.
+    #[derive(Debug)]
+    struct Crouch {
+        step_count: usize,
+        eye_frac: f64,
+        speed_frac: f64,
+    }
+
+    /// `measure_city_crouch` walks forward from blue's spawn for `CROUCH_WALK_S`, upright and
+    /// crouched, under City Sphere's own settings, and gives what crouching did.
+    fn measure_city_crouch() -> Crouch {
+        let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
+        let settings: ServerSettings = ServerSettings::Builtin();
+        let walk = |is_crouching: bool| -> (CityPlayer, f64, Option<usize>) {
+            let mut player: CityPlayer = world.make_player(0, 0);
+            let input: CityInput = CityInput {
+                forward_frac: 1.0,
+                is_crouching,
+                ..CityInput::default()
+            };
+            let (mut speed_m_per_s, mut crouched_step_count) = (0.0, None);
+            for k in 0..(CROUCH_WALK_S / WALK_STEP_S).round() as usize {
+                let before: DVec3 = player.feet;
+                world.move_player(&mut player, &input, &settings, &head_bob(), WALK_STEP_S);
+                speed_m_per_s = (player.feet - before).length() / WALK_STEP_S;
+                if player.move_state.crouch_frac == 1.0 && crouched_step_count.is_none() {
+                    crouched_step_count = Some(k + 1);
+                }
+            }
+            (player, speed_m_per_s, crouched_step_count)
+        };
+        let ((_, upright_m_per_s, _), (crouched, crouched_m_per_s, step_count)) =
+            (walk(false), walk(true));
+        Crouch {
+            step_count: step_count.expect("the player crouched fully"),
+            eye_frac: (crouched.eye_height_m - crouched.crouch_drop_m) / crouched.eye_height_m,
+            speed_frac: crouched_m_per_s / upright_m_per_s,
+        }
+    }
+
+    /// `measure_lunar_crouch` gives the same as `measure_city_crouch` on Lunar Surface, with its
+    /// own settings and code.
+    fn measure_lunar_crouch() -> Crouch {
+        let (world, start) = make_lunar_world();
+        let walk = |crouch: bool| -> (crate::voxel_world::VoxelPlayer, f64, Option<usize>) {
+            let mut player: crate::voxel_world::VoxelPlayer = start;
+            let input: crate::physics::Input = crate::physics::Input {
+                forward: true,
+                crouch,
+                ..crate::physics::Input::default()
+            };
+            let (mut speed_m_per_s, mut crouched_step_count) = (0.0, None);
+            for k in 0..(CROUCH_WALK_S / WALK_STEP_S).round() as usize {
+                speed_m_per_s = player.step(&world, &input, WALK_STEP_S, 0).forward_m_per_s;
+                if player.crouch_frac == 1.0 && crouched_step_count.is_none() {
+                    crouched_step_count = Some(k + 1);
+                }
+            }
+            (player, speed_m_per_s, crouched_step_count)
+        };
+        let ((_, upright_m_per_s, _), (crouched, crouched_m_per_s, step_count)) =
+            (walk(false), walk(true));
+        let eye_m: f64 = world.player.eye_height_m;
+        Crouch {
+            step_count: step_count.expect("the player crouched fully"),
+            eye_frac: (eye_m - crouched.get_crouch_drop_m(&world)) / eye_m,
+            speed_frac: crouched_m_per_s / upright_m_per_s,
+        }
+    }
+
+    /// `crouching_matches_lunar_surface` crouches while walking in City Sphere and on Lunar
+    /// Surface (W-126 (same play in every level): City Sphere had no crouch): it takes as many
+    /// steps, lowers the eye to the same share of standing, and slows walking as much.
+    #[test]
+    fn crouching_matches_lunar_surface() {
+        let (city, lunar) = (measure_city_crouch(), measure_lunar_crouch());
+        assert_eq!(city.step_count, lunar.step_count, "{city:?} {lunar:?}");
+        assert!(
+            (city.eye_frac - lunar.eye_frac).abs() < 1e-9,
+            "{city:?} {lunar:?}"
+        );
+        assert!(
+            (city.speed_frac - lunar.speed_frac).abs() < CROUCH_SPEED_TOLERANCE_FRAC,
+            "{city:?} {lunar:?}"
         );
     }
 
