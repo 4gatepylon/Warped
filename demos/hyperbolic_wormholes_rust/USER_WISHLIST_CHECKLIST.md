@@ -117,6 +117,8 @@ is in [`AGENTS.md`](AGENTS.md).
 - [?] **W-139 Dark Forest thrown-wormhole sheet.** A bug found by agents on 2026-11-09: in Dark Forest's `spawn` view, a hard straight-edged sheet covers part of a thrown wormhole's lens (upper right), like a clipping glitch in the lens capture.
   #478: it was red's lift mouth on its deck, its lens reaching through the deck; no lens is drawn from below a
   mouth's floor now, so the deck's underside (the sheet) hides it whole.
+- [ ] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
+- [ ] **W-141 One window for the whole game.** The user, 2026-11-09: "please make it so that all this stuff is one window (if you need to make it one app thats fine, yuo can make a new demo for that and in the main readme say that the official mvp version is in that new folder)", and "thing 2 is to be able to play against gbots or alone selecting from the game itself".
 
 ## Pending user review
 
