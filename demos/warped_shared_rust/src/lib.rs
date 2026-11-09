@@ -8,6 +8,8 @@
 //! - `geometry`: the hyperboloid model's maths.
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
+//! - `play_settings`: the settings files' sections every level reads alike.
+//! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
 //! - `mesh`, `avatar_model`: glTF models of the maps' structures and the players' robot body.
 //! - `spaceships`: the spaceships in the sky.
 //! - `key_bindings`, `exit_prompt`: a player's controls, and the "leave the game?" prompt.
@@ -33,9 +35,11 @@ pub mod key_bindings;
 pub mod mesh;
 #[cfg(target_os = "macos")]
 pub mod overlay;
+pub mod play_settings;
 #[cfg(target_os = "macos")]
 pub mod render_mesh;
 pub mod shapes;
+pub mod shot_noise;
 pub mod spaceships;
 #[cfg(target_os = "macos")]
 pub mod texture_arrays;

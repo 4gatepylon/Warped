@@ -26,6 +26,8 @@ included.
 | `app_bundle` | where the game's files are: in `Warped.app` or in the checkout; `get_model_path` | yes |
 | `fps_demo_assets` (+ `build.rs`) | reads assets from disk or from the models built into the program | yes |
 | `shapes` | the smooth solids structures are made of, and `MapShape`, a map file's description of one | yes |
+| `play_settings` | the settings files' sections every level reads alike: movement, sprint energy, both guns, consoles, respawn, a hit's slowing and look, aiming, thrown wormholes, the view and the minimap | yes |
+| `shot_noise` | how far each shot strays from the crosshair, and its beam's speckle | yes |
 | `mesh`, `avatar_model` | glTF models of the maps' structures and the players' robot body | yes |
 | `spaceships` | the spaceships in the sky | yes |
 | `key_bindings`, `exit_prompt` | a player's controls (SDL), and the "leave the game?" prompt | no (SDL) |
@@ -44,12 +46,13 @@ each level's `render_metal.rs` (which re-exports them, so `render_metal::Overlay
 Everything else differs between levels, or needs a module that does:
 
 - `map.rs` (each level adds map fields, such as Dust's atmosphere, and its own `MapName`s), `settings.rs` (each embeds
-  its own `server_settings.yaml`; City Sphere adds `glass`), `voxel_world.rs`, `render_voxel.*`, `map_layout.rs`,
+  its own `server_settings.yaml` and `player_settings.yaml` and composes the shared
+  `play_settings` sections into its `ServerSettings` and `PerPlayerSettings`; City Sphere adds `glass`), `voxel_world.rs`, `render_voxel.*`, `map_layout.rs`,
   `net.rs`, `multiplayer.rs`, `main.rs`, `title.rs`, `credits.rs`, `dust.rs`, `terrain.rs` (Dust's own), and
   `voxel_textures.rs` (each level's own surface sets).
 - Files identical in every level but needing one of those: `avatar_animation`, `black_hole_growth`,
   `voxel_clearance`, `minimap` and `third_person` need `voxel_world`; `menu` needs `net`, `settings` and `credits`;
-  `shot_noise` needs `settings`; the house demo's engine (`world`, `scene_data`, `physics`, `render_cpu`,
+  the house demo's engine (`world`, `scene_data`, `physics`, `render_cpu`,
   `map_export`) needs `map` and `thrown_wormholes`.
 - Files identical in all but City Sphere: `render_metal.*` (City adds its own frame kind), `thrown_wormholes`
   (City adds `update_placing`, which Lunar's `update` could call), `third_person` (City makes four constants
@@ -70,11 +73,15 @@ warped_shared = { path = "../warped_shared_rust" }
 ```rust
 // src/main.rs, beside the level's own `mod` lines
 use warped_shared::{app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, hud_bars, key_bindings, mesh,
-    overlay, render_mesh, shapes, spaceships, texture_arrays, viewmodel};
+    overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel};
 ```
 
 A level's game server alone (`src/bin/*_server.rs`, built for Linux by `make build-server-bundle`) uses only the
-modules that build there: `use warped_shared::{geometry, shapes};`.
+modules that build there: `use warped_shared::{geometry, play_settings, shapes, shot_noise};`.
+
+A level's `settings.rs` re-exports the `play_settings` sections (`pub use crate::play_settings::{...}`), so its
+own files keep naming them `crate::settings::RifleSettings`. `shot_noise`'s tests read Lunar Surface's
+`server_settings.yaml` for the guns' built-in numbers.
 
 ## Adding a level
 

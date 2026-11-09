@@ -42,7 +42,6 @@ mod render_metal;
 mod render_voxel;
 mod scene_data;
 mod settings;
-mod shot_noise;
 mod terrain;
 mod third_person;
 mod thrown_wormholes;
@@ -55,7 +54,7 @@ mod zone_walls;
 
 use warped_shared::{
     app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, hud_bars, key_bindings, mesh,
-    overlay, render_mesh, shapes, spaceships, texture_arrays, viewmodel,
+    overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel,
 };
 
 use std::error::Error;
