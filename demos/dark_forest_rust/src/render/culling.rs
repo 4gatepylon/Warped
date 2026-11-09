@@ -192,6 +192,8 @@ pub fn fit_cascades(
 /// | sphere position | beside the frustum | `test_frustum_contains_sphere` |
 /// | cascade | split distances, first to last | `test_cascade_splits_increase` |
 /// | cascade | a point inside the first cascade's slice | `test_cascades_cover_their_slice` |
+/// | camera move vs last fit | a turn, a step within the slack, a step past the first cascade's slack | `test_cascades_stay_until_the_camera_leaves_them` |
+/// | point vs cascade | at its slice's far distance in any direction, after a turn and a step | `test_cascades_cover_their_far_distance_all_round` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +231,71 @@ mod tests {
         let ndc: Vec3 = cascades.view_proj[0].project_point3(point);
         assert!(ndc.x.abs() < 1.0 && ndc.y.abs() < 1.0);
         assert!(ndc.z > 0.0 && ndc.z < 1.0);
+    }
+
+    /// `camera_at` is a 75° camera at `position_m` turned `yaw_rad` about the vertical.
+    fn camera_at(position_m: Vec3, yaw_rad: f32) -> CascadeCamera {
+        CascadeCamera {
+            inverse_view: Mat4::from_translation(position_m) * Mat4::from_rotation_y(yaw_rad),
+            fov_y_rad: 75.0_f32.to_radians(),
+            aspect: 2.4,
+        }
+    }
+
+    /// `SUN` is a sun high in the south-west.
+    const SUN: Vec3 = Vec3::new(-0.4, 0.8, 0.3);
+
+    /// `test_cascades_stay_until_the_camera_leaves_them` checks that a turn and a short step keep
+    /// every cascade, and that a step past the first cascade's slack (on every axis of the sun's
+    /// view, since the step is √3 times it) moves it but not the last.
+    #[test]
+    fn test_cascades_stay_until_the_camera_leaves_them() {
+        let sun: Vec3 = SUN.normalize();
+        let first: Cascades = fit_cascades(&camera_at(Vec3::ZERO, 0.0), sun, 110.0, 2048, None);
+        let turned: Cascades =
+            fit_cascades(&camera_at(Vec3::ZERO, 2.0), sun, 110.0, 2048, Some(&first));
+        assert_eq!(turned.view_proj, first.view_proj);
+        let stepped: Cascades = fit_cascades(
+            &camera_at(Vec3::new(0.3, 0.0, 0.2), 2.0),
+            sun,
+            110.0,
+            2048,
+            Some(&turned),
+        );
+        assert_eq!(stepped.view_proj, first.view_proj);
+        let slack_m: f32 = first.radius_m[0] - first.split_far_m[0];
+        let walked: Cascades = fit_cascades(
+            &camera_at(Vec3::new((slack_m + 1.0) * 3.0_f32.sqrt(), 0.0, 0.0), 2.0),
+            sun,
+            110.0,
+            2048,
+            Some(&stepped),
+        );
+        assert_ne!(walked.view_proj[0], first.view_proj[0]);
+        assert_eq!(walked.view_proj[CASCADE_COUNT - 1], first.view_proj[CASCADE_COUNT - 1]);
+    }
+
+    /// `test_cascades_cover_their_far_distance_all_round` checks that, after a turn and a step
+    /// that keep the cascades, points at each slice's far distance in 26 directions around the
+    /// camera land inside that cascade's map and depth range.
+    #[test]
+    fn test_cascades_cover_their_far_distance_all_round() {
+        let sun: Vec3 = SUN.normalize();
+        let first: Cascades = fit_cascades(&camera_at(Vec3::ZERO, 0.0), sun, 110.0, 2048, None);
+        let position_m: Vec3 = Vec3::new(0.4, 0.1, -0.3);
+        let moved: Cascades =
+            fit_cascades(&camera_at(position_m, 1.0), sun, 110.0, 2048, Some(&first));
+        for index in 0..CASCADE_COUNT {
+            for (x, y, z) in (-1..=1)
+                .flat_map(|x| (-1..=1).flat_map(move |y| (-1..=1).map(move |z| (x, y, z))))
+                .filter(|&direction| direction != (0, 0, 0))
+            {
+                let direction: Vec3 = Vec3::new(x as f32, y as f32, z as f32).normalize();
+                let point: Vec3 = position_m + direction * moved.split_far_m[index];
+                let ndc: Vec3 = moved.view_proj[index].project_point3(point);
+                assert!(ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0, "{index} {direction} {ndc}");
+                assert!((0.0..=1.0).contains(&ndc.z), "{index} {direction} {ndc}");
+            }
+        }
     }
 }

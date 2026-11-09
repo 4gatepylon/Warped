@@ -1297,19 +1297,31 @@ impl MetalRenderer {
             *should_redraw = self.static_shadow_keys[cascade] != Some(key);
             self.static_shadow_keys[cascade] = Some(key);
         }
-        let frame_uniforms: GpuFrameUniforms =
+        let mut frame_uniforms: GpuFrameUniforms =
             self.frame_uniforms(frame, settings, targets, &cascades, proj, viewmodel_proj);
+        let view_frustum: Frustum = Frustum::from_view_proj(frame_uniforms.view_proj);
+        let to_gpu_light = |light: &crate::render::PointLight| GpuPointLight {
+            position_radius: light.position_m.extend(light.radius_m),
+            color: light.color_rgb.extend(0.0),
+        };
+        let mut all_point_lights: Vec<GpuPointLight> = frame
+            .point_lights
+            .iter()
+            .take(MAX_POINT_LIGHT_COUNT)
+            .map(to_gpu_light)
+            .collect();
         let mut point_lights: Vec<GpuPointLight> = frame
             .point_lights
             .iter()
             .take(MAX_POINT_LIGHT_COUNT)
-            .map(|light| GpuPointLight {
-                position_radius: light.position_m.extend(light.radius_m),
-                color: light.color_rgb.extend(0.0),
-            })
+            .filter(|light| view_frustum.contains_sphere(light.position_m, light.radius_m))
+            .map(to_gpu_light)
             .collect();
-        if point_lights.is_empty() {
-            point_lights.push(GpuPointLight::default());
+        frame_uniforms.post_params.w = point_lights.len() as f32;
+        for lights in [&mut all_point_lights, &mut point_lights] {
+            if lights.is_empty() {
+                lights.push(GpuPointLight::default());
+            }
         }
 
         let frame_index: usize = self.frame_index;
@@ -1367,6 +1379,10 @@ impl MetalRenderer {
             joints_offset_bytes,
             frame: &frame_uniforms,
             point_lights: &point_lights,
+        };
+        let all_light_buffers: FrameBuffers = FrameBuffers {
+            point_lights: &all_point_lights,
+            ..buffers
         };
 
         let command_buffer: CommandBuffer = self
@@ -1687,7 +1703,7 @@ impl MetalRenderer {
                 settings,
                 targets,
                 &cascades,
-                &buffers,
+                &all_light_buffers,
                 &camera_frustum,
                 (lens_particles_offset_bytes, lens_particles.len()),
                 live,
