@@ -94,7 +94,10 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
    City Sphere's `CitySession` still has its own guns. Then the rest, each moved out of the Lunar copies'
    `main.rs` and called from there and from City Sphere's. These also move the last files that only waited for
    `settings` (`menu` once `credits` and `net::Score` are parameters).
-3. `movement` with the `Ground` trait: `VoxelWorld` first (four levels at once, since they share `voxel_world.rs`'s
+3. `movement` with the `Ground` trait. Done for the rules (`claude/shared-movement`): `MoveState::step` is
+   the first part of every `VoxelPlayer::step`, and each level has a play trace (`play_trace.rs`) that
+   showed the five levels' paths unchanged bit for bit. The `Ground` trait comes with its second user (City
+   Sphere's `CityWorld` or Dark Forest's player), since `VoxelWorld` alone needs no trait. Then: `VoxelWorld` first (four levels at once, since they share `voxel_world.rs`'s
    walking code), then City Sphere's `CityWorld`.
 4. Dark Forest, in this order: raise its `glam` from 0.30 to 0.34 (this crate's); depend on `warped_shared`; replace
    its copies with the shared modules, each a deletion plus a few call-site changes since #439 copied them from

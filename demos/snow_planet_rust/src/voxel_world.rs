@@ -37,6 +37,7 @@ use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
+use warped_shared::movement::{MoveInput, MoveRules, MoveState};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
@@ -2346,40 +2347,36 @@ impl VoxelPlayer {
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
         let len: f64 = forward.hypot(side);
         let settings: PlayerSettings = world.player;
-        let (energy, bob) = (&world.settings.sprint_energy, &world.head_bob);
-        let crouch_step: f64 = dt_s / world.settings.movement.crouch_s;
-        let crouch_target: f64 = f64::from(u8::from(input.crouch));
-        self.crouch_frac += (crouch_target - self.crouch_frac).clamp(-crouch_step, crouch_step);
-        let wants_to_sprint: bool = input.sprint && !input.crouch && len > 0.0;
-        self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
-        let energy_change_per_s: f64 = match (wants_to_sprint, input.crouch) {
-            (true, _) => -1.0 / energy.drain_s,
-            (false, true) => 1.0 / energy.refill_crouching_s,
-            (false, false) => 1.0 / energy.refill_walking_s,
+        let mut state: MoveState = MoveState {
+            crouch_frac: self.crouch_frac,
+            energy_frac: self.energy_frac,
+            is_sprinting: self.is_sprinting,
+            bob_phase_rad: self.bob_phase_rad,
+            bob_frac: self.bob_frac,
+            slowed_s: self.slowed_s,
         };
-        self.energy_frac = (self.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
-        let is_walking: bool = len > 0.0 && !self.is_flying && self.is_on_ground;
-        let bob_target: f64 = f64::from(u8::from(is_walking));
-        self.bob_frac += (bob_target - self.bob_frac).clamp(-dt_s / bob.fade_s, dt_s / bob.fade_s);
-        if is_walking {
-            let hz: f64 = if self.is_sprinting {
-                bob.sprint_steps_per_s
-            } else {
-                bob.walk_steps_per_s
-            };
-            self.bob_phase_rad =
-                (self.bob_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
-        }
-        let slow_frac: f64 = if self.slowed_s > 0.0 {
-            world.settings.when_hit.slow_speed_frac
-        } else {
-            1.0
-        } * if input.crouch && !self.is_flying {
-            world.settings.movement.crouch_speed_frac
-        } else {
-            1.0
+        let move_input: MoveInput = MoveInput {
+            is_moving: len > 0.0,
+            is_sprint_held: input.sprint,
+            is_crouch_held: input.crouch,
+            is_flying: self.is_flying,
+            is_on_ground: self.is_on_ground,
         };
-        self.slowed_s = (self.slowed_s - dt_s).max(0.0);
+        let rules: MoveRules = MoveRules {
+            movement: &world.settings.movement,
+            energy: &world.settings.sprint_energy,
+            when_hit: &world.settings.when_hit,
+            head_bob: &world.head_bob,
+        };
+        let slow_frac: f64 = state.step(&move_input, &rules, dt_s);
+        MoveState {
+            crouch_frac: self.crouch_frac,
+            energy_frac: self.energy_frac,
+            is_sprinting: self.is_sprinting,
+            bob_phase_rad: self.bob_phase_rad,
+            bob_frac: self.bob_frac,
+            slowed_s: self.slowed_s,
+        } = state;
         let blizzard_frac: f64 = world
             .find_blizzard(self.body.col(AXIS_W))
             .map_or(1.0, |b| b.speed_frac);

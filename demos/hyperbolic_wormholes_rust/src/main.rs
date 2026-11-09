@@ -39,6 +39,8 @@ mod multiplayer;
 mod net;
 mod physics;
 mod picture_saver;
+#[cfg(test)]
+mod play_trace;
 mod render_cpu;
 mod render_metal;
 mod render_voxel;

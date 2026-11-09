@@ -28,6 +28,7 @@ included.
 | `shapes` | the smooth solids structures are made of, and `MapShape`, a map file's description of one | yes |
 | `play_settings` | the settings files' sections every level reads alike: movement, sprint energy, both guns, consoles, respawn, a hit's slowing and look, aiming, thrown wormholes, the view and the minimap | yes |
 | `shot_noise` | how far each shot strays from the crosshair, and its beam's speckle | yes |
+| `movement` | the rules of moving (`MoveState::step`): crouching, sprint energy, the head bob's steps, a hit's and crouching's slow; each level's `VoxelPlayer::step` moves the player in its own space | yes |
 | `mesh`, `avatar_model` | glTF models of the maps' structures and the players' robot body | yes |
 | `spaceships` | the spaceships in the sky | yes |
 | `key_bindings`, `exit_prompt` | a player's controls (SDL), and the "leave the game?" prompt | no (SDL) |
@@ -102,7 +103,11 @@ own files keep naming them `crate::settings::RifleSettings`. `shot_noise`'s test
 ## Changing a shared file
 
 A change here changes every level, so check them all: `make test` here, then `make test-levels` (each level's
-`make test`), and `make bench-views` in each level, comparing the pictures with the ones before the change. The
+`make test`), and `make bench-views` in each level, comparing the pictures with the ones before the change. Each level's
+play trace (`src/play_trace.rs`, an ignored test) walks a player through a fixed script of keys and writes
+every step's state exactly; record it before and after a change to movement and compare the files:
+`PLAY_TRACE_MAP=lunar-surface PLAY_TRACE_FILE=/tmp/after.txt cargo test --release record_play_trace --
+--ignored`. The
 overlay structs are also declared in each level's `render_metal.metal`, and `viewmodel.metal` is compiled by each
 level's renderer, so a change to their layout changes those shaders in the same commit.
 
