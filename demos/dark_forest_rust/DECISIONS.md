@@ -211,6 +211,15 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   8x), which calms planks and decks seen edge-on a little; the bridge plank's grain still shows a faint zig-zag at a
   grazing angle. FXAA was already on and covers the rest; `--photo --photo-hud` captures the frame as the player
   sees it (after FXAA), `--photo` alone before it. Cost at 3440x1440: within 0.2 ms per view.
+- **D41. A deck's wormhole shows no lens from below its deck** (W-139, Dark Forest thrown-wormhole sheet). Red's and
+  blue's lift mouths stand on the corner of a 7 m deck, and their visible lens reaches 0.7 m below its top, through
+  the 0.3 m deck (the wishlist called it a thrown wormhole's; it is the lift's deck mouth). From the ground (the
+  `spawn` view, upper right) the deck's underside, flat and pale in the haze, hid the middle of the lens with a
+  straight edge, and below it a sliver of the lens showed the world above the deck through the deck. The lens pass now
+  draws nothing for a ray that enters a mouth's reach below that mouth's floor (`get_lens_color`): the floor hides the
+  mouth from there, so the deck's underside shows whole, cut by its own edge. Every other bench view is unchanged.
+  **Gives up:** a ray passing just beside a deck's edge below its top isn't bent either (the lens's reach goes 1.3 m
+  below the deck's top).
 
 ## Follow-ups for the next agent
 
