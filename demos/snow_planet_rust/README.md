@@ -31,6 +31,9 @@ make join-game SERVER=127.0.0.1      # terminal 2: your window; press 1 (blue) o
   in the map's `regions.blizzards` with its numbers (DECISIONS S3).
 - Everything else plays as on Lunar Surface, W-126 (same play in every level): the same settings files, and a jump
   as high and as long (DECISIONS S12).
+- Layout, paired bands for the looping world to come (DECISIONS S11, S13): each spawn sits a quarter of the 112 m
+  loop from the middle (u = ∓28 m), with its two pylons 8 m to either side, so once the level loops both ways
+  around to the other team are 56 m long. Until then the level still ends at its edge.
 
 ## Match interface
 

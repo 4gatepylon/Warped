@@ -60,7 +60,7 @@ FOG_M: float = 75.0
 # The only cover, few because the warps and blizzards shape play: blue's rounded snow mounds (u, v, half sizes,
 # yaw); red's are the same turned half a turn.
 BLUE_MOUNDS: list[tuple] = [
-    (-26.0, 7.0, [1.8, 0.9, 1.4], 0.3),
+    (-40.0, -6.0, [1.8, 0.9, 1.4], 0.3),
     (-12.0, -31.0, [2.0, 1.0, 1.2], -0.5),
     (-42.0, 27.0, [1.6, 0.8, 1.6], 0.9),
 ]
@@ -97,7 +97,15 @@ MIN_HOLE_TO_MOUTH_M: float = 20.0
 MIN_HOLE_TO_CENTRE_M: float = 21.0
 BOUNDARY_U_M: float = 60.0
 BOUNDARY_V_M: float = 40.0
-PYLON_SPOTS: list[tuple[float, float]] = [(-34.0, 16.0), (-34.0, -16.0), (34.0, 16.0), (34.0, -16.0)]
+# Paired bands on the torus (DESIGN.md, DECISIONS S11, L1): each spawn sits at a quarter of the u period, so both
+# ways around to the other team are SPAWN_U_M * 2 long; each team's zone is ZONE_HALF_M either side of its spawn, and
+# the two middle bands (around u = 0 and around the u seam) are the two routes. The pylons flank the spawn.
+SPAWN_U_M: float = PERIOD_U_M / 4.0
+ZONE_HALF_M: float = 14.0
+PYLON_U_M: float = 30.0
+PYLON_V_M: float = 8.0
+PYLON_SPOTS: list[tuple[float, float]] = [(-PYLON_U_M, PYLON_V_M), (-PYLON_U_M, -PYLON_V_M),
+                                          (PYLON_U_M, PYLON_V_M), (PYLON_U_M, -PYLON_V_M)]
 # Mouth A stands by blue's south pylon, well inside the boundary ellipse (a mouth on its edge trapped walkers, W-126),
 # moved up to MOUTH_JITTER_M by MOUTH_SEED; mouth B is A turned half a turn about the middle.
 MOUTH_A_SPOT: tuple[float, float] = (-45.0, -21.0)
@@ -120,6 +128,19 @@ def scatter_mounds(rng: random.Random) -> list[tuple]:
             for u_m, v_m, half_m, yaw_rad in BLUE_MOUNDS]
 
 
+def get_torus_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """`get_torus_distance` gives the distance in meters between ground spots a and b (u, v) the shortest way around
+    the torus, whose axes loop every PERIOD_U_M and PERIOD_V_M.
+
+    Example:
+        >>> get_torus_distance((-50.0, 0.0), (50.0, 0.0))
+        12.0
+    """
+    du_m: float = (a[0] - b[0] + PERIOD_U_M / 2.0) % PERIOD_U_M - PERIOD_U_M / 2.0
+    dv_m: float = (a[1] - b[1] + PERIOD_V_M / 2.0) % PERIOD_V_M - PERIOD_V_M / 2.0
+    return math.hypot(du_m, dv_m)
+
+
 def scatter_mouths() -> list[tuple[float, float]]:
     """`scatter_mouths` gives mouth A's spot, MOUTH_A_SPOT moved up to MOUTH_JITTER_M by MOUTH_SEED, and mouth B's, A
     turned half a turn about the middle, each checked to stand well inside the boundary and clear of the pylons.
@@ -136,7 +157,7 @@ def scatter_mouths() -> list[tuple[float, float]]:
         boundary_frac: float = (u_m / BOUNDARY_U_M) ** 2 + (v_m / BOUNDARY_V_M) ** 2
         if boundary_frac > MAX_MOUTH_BOUNDARY_FRAC:
             raise ValueError(f"a mouth at ({u_m}, {v_m}) is {boundary_frac} of the way to the boundary")
-        if min(math.dist((u_m, v_m), pylon) for pylon in PYLON_SPOTS) < MIN_MOUTH_TO_PYLON_M:
+        if min(get_torus_distance((u_m, v_m), pylon) for pylon in PYLON_SPOTS) < MIN_MOUTH_TO_PYLON_M:
             raise ValueError(f"a mouth at ({u_m}, {v_m}) is nearer than {MIN_MOUTH_TO_PYLON_M} m to a pylon")
     return spots
 
@@ -155,11 +176,11 @@ def scatter_black_holes(rng: random.Random, mound_spots: list[tuple[float, float
                                v_m + rng.uniform(-HOLE_JITTER_M, HOLE_JITTER_M)) for name, u_m, v_m in BLACK_HOLES]
         spots: list[tuple[float, float]] = [(u_m, v_m) for _, u_m, v_m in holes]
         is_clear: bool = all(
-            math.dist(a, b) >= MIN_HOLE_GAP_M for i, a in enumerate(spots) for b in spots[i + 1:]
+            get_torus_distance(a, b) >= MIN_HOLE_GAP_M for i, a in enumerate(spots) for b in spots[i + 1:]
         ) and all(
-            math.dist(a, b) >= MIN_HOLE_CLEARANCE_M for a in spots for b in PYLON_SPOTS + mound_spots
+            get_torus_distance(a, b) >= MIN_HOLE_CLEARANCE_M for a in spots for b in PYLON_SPOTS + mound_spots
         ) and all(
-            math.dist(a, b) >= MIN_HOLE_TO_MOUTH_M for a in spots for b in mouth_spots
+            get_torus_distance(a, b) >= MIN_HOLE_TO_MOUTH_M for a in spots for b in mouth_spots
         ) and all(math.hypot(*a) >= MIN_HOLE_TO_CENTRE_M for a in spots)
         if is_clear:
             return holes
@@ -180,7 +201,7 @@ def make_pylon(team: str, index: int, u_m: float, v_m: float) -> dict:
     """`make_pylon` gives a team's pylon `index` (its console's material) at (u, v): the beacon model on a cylinder.
 
     Example:
-        >>> make_pylon("blue", 0, -34.0, 16.0)["shapes"][0]["material"]
+        >>> make_pylon("blue", 0, -PYLON_U_M, PYLON_V_M)["shapes"][0]["material"]
         11
     """
     return {
@@ -211,8 +232,8 @@ def make_map() -> dict:
         structures.append(make_box("red snow mound", ru, rv, half_m, PACKED, ryaw, "box", MOUND_ROUND_M))
     lights: list[dict] = []
     for team, sign in (("blue", -1.0), ("red", 1.0)):
-        for index, v_m in enumerate((16.0, -16.0)):
-            u_m = sign * 34.0
+        for index, v_m in enumerate((PYLON_V_M, -PYLON_V_M)):
+            u_m = sign * PYLON_U_M
             structures.append(make_pylon(team, index, u_m, sign * v_m))
             lights.append({"position": [sign * v_m, 8.0, -u_m, 1.0], "color": TEAM_LIGHT[team], "radius_m": 8.0})
     warps: list[dict] = []
@@ -266,12 +287,14 @@ def make_map() -> dict:
         "sky": {"transport": "parallel", "sun": {"direction": [c / norm for c in sun], "color": [1.0, 0.95, 0.88]},
                 "stars": False, "clouds": True, "zenith_color": [0.42, 0.56, 0.74],
                 "horizon_color": [0.82, 0.87, 0.93], "fog_m": FOG_M, "snow_per_m3": SNOW_PER_M3},
-        "spawns": [{"team": "blue", "frame": make_frame(-48.0, 0.0)},
-                   {"team": "red", "frame": make_frame(48.0, 0.0, 0.0, math.pi)}],
+        "spawns": [{"team": "blue", "frame": make_frame(-SPAWN_U_M, 0.0)},
+                   {"team": "red", "frame": make_frame(SPAWN_U_M, 0.0, 0.0, math.pi)}],
         "regions": {
-            "zones": [{"team": "blue", "u_min_m": None, "u_max_m": -20.0},
-                      {"team": "middle", "u_min_m": -20.0, "u_max_m": 20.0},
-                      {"team": "red", "u_min_m": 20.0, "u_max_m": None}],
+            "zones": [{"team": "middle", "u_min_m": None, "u_max_m": -SPAWN_U_M - ZONE_HALF_M},
+                      {"team": "blue", "u_min_m": -SPAWN_U_M - ZONE_HALF_M, "u_max_m": -SPAWN_U_M + ZONE_HALF_M},
+                      {"team": "middle", "u_min_m": -SPAWN_U_M + ZONE_HALF_M, "u_max_m": SPAWN_U_M - ZONE_HALF_M},
+                      {"team": "red", "u_min_m": SPAWN_U_M - ZONE_HALF_M, "u_max_m": SPAWN_U_M + ZONE_HALF_M},
+                      {"team": "middle", "u_min_m": SPAWN_U_M + ZONE_HALF_M, "u_max_m": None}],
             "boundary": {"kind": "fermi_ellipse", "u_m": BOUNDARY_U_M, "v_m": BOUNDARY_V_M},
             "zone_walls": {"height_m": 6.0, "thickness_m": 0.6, "opacity_frac": 0.25},
             "blizzards": [{**blizzard, **BLIZZARD_NUMBERS} for blizzard in BLIZZARDS],

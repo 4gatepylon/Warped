@@ -113,6 +113,104 @@ For a future agent:
   `devin/snow-planet-torus` (worktree `.devin/worktrees/snow-planet-torus`); the blizzard light bending is parked
   on `devin/snow-planet-swirl-parked`. Neither is in any PR.
 
+## S11. Plan: the looping world (User: options G, V, L)
+
+Status, 2026-11-08: the user said to build it "After parity", and the lead chose the recommended options for the
+user, who hasn't picked: G1, L1 and V1. They are built as stacked PRs from `claude/snow-planet-torus-layout` (layer
+1, L1), on top of W-126 (same play in every level), which moved the wormhole mouths (S12). The plan as written,
+with the mock-up, is on `claude/snow-planet-torus` (commit `902bd73`):
+
+A plan (2026-11-08, Claude Code, branch `claude/snow-planet-torus`). `DESIGN.md` makes both
+Snow Planet and Dark Forest T² × ℝ (the user called Dark Forest "the toroidal setup"); the user's W-120 (Snow Planet
+demo) words don't ask for it. Snow Planet's period is 112 m (u) × 72 m (v). The devin branch S10 names
+(`devin/snow-planet-torus`) was never pushed, so nothing of it is reused. Whatever is built here should serve Dark
+Forest too.
+
+**Geometry (option G):**
+- **G1, wrap in today's nearly flat H³ (recommended).** Keep the renderer, physics and lensing. Glue the cell's edges
+  in Fermi coordinates: crossing u = ±56 is a boost along u, an exact isometry; crossing v = ±36 keeps (u, h) and the
+  direction's parts along the Fermi axes. Measured on the ground plane (`fermi_glue_lens.py`, scratch): copies seen
+  across v look 1.7% bigger than on a flat torus, at every distance; copies along u shrink as in H³ today (8% at
+  112 m, 26% at 224 m); a laser 1 m from the v seam drifts 0.44 m in 25 m, as one does anywhere today. About 6 PRs.
+- **G2, a Euclidean renderer, physics and laser.** Exact, but rewrites every Minkowski formula in
+  `render_voxel.metal`, `voxel_world.rs`, the minimap and the map page: 15 or more PRs.
+
+**How each thing wraps (G1):**
+- **Walking:** after each step, a body past a seam is moved by the glue (one function, `wrap_frame`). The ellipse
+  boundary goes: the torus has no edge. Remote players aren't interpolated, so they jump across with no streak.
+- **Lasers:** a shot's path is cut where it crosses a seam and goes on from the other side, like a throat (a new
+  piece). A 480 m shot goes around 4 to 6 times, so the shooter's own copy must not be hit.
+- **Light rays (shader):** the camera is wrapped into the cell; each straight chord also stops at the nearest seam
+  and goes on from the other side. Inside a warp's reach the ray isn't wrapped; it is wrapped when it leaves.
+  Shadow rays (80 m) wrap the same way.
+- **Ghosts:** everything within a margin of a seam (structures, avatars, warps, thrown mouths, dust puffs, beam
+  pieces) gets a copy past the opposite seam, so a chord near the seam sees it and lenses that straddle a seam work
+  (the north black hole's 11 m reach crosses the v seam). Static ghosts are made once, moving ones each frame. A hit
+  on a ghost counts as a hit on its original.
+- **Blizzard:** fog and flakes for each copy the first ray piece passes; the fog's length becomes the ray's travelled
+  distance, not the straight Fermi distance.
+- **Black holes and wormholes:** as today, per copy; a mouth's exit is its partner's own place.
+
+**What players see (option V):** the level repeats every 112 m along the teams' axis and every 72 m across. The snow
+fog never passes 82% (`SNOW_FOG_MAX_FRAC`), so copies never fade out: without a limit, the horizon fills with black
+holes, pylons and green beacon beams, 400 m high and at least a pixel wide.
+- **V1, copies out to 224 m, then today's empty snowfield (recommended).**
+- **V2, copies to the horizon:** the costliest, and the busiest.
+- **V3, V1 with the fog reaching 100% at the limit:** hides where copies end, but whitens the far ground a little
+  (visuals are frozen).
+
+**Layout (option L):** as it stands, the torus breaks the level: blue's spawn (u = −48) is 16 m from red's (u = 48)
+across the u seam, red's pylons stand 30 m behind blue's spawn, and the wormhole's mouths are 28 m apart through the
+corner, nearer than through the throat is worth. `DESIGN.md`'s "paired bands" puts each spawn half a period from
+the other.
+- **L1, spawns, pylons and zones at the quarter points (u = ±28), period kept (recommended):** both routes 56 m.
+- **L2, a 192 m period, layout kept:** both routes 96 m; the half beyond the seam needs new content.
+- **L3, a ridge at the u seam:** the world loops only across v.
+- Any of them: the mouths move so walking between them is long (at most 67 m on this torus), the black holes'
+  seeded scatter uses wrapped distances (the north hole is 23.1 m from the south-west one across the seam, 1.1 m
+  clear), placements stay slightly random, seeded and mirrored per team, and zones wrap.
+
+**Cost in frame time:** counted per pixel (`ray_stats.py`, scratch; straight rays): today a pixel enters 0 to 0.33
+reaches; with V1, it crosses 0.4 to 1.0 seams and enters 0.35 to 0.6 reaches, about 1.3 to 1.7 times today's work
+(the spawn view 1.3×, the view back across the seam 1.7×); to the horizon (V2), 1.5 to 2.1×. Today's 7 to 16 ms GPU
+views (Apple VM) would become about 10 to 25 ms, so views across a seam pass 16.7 ms unless far copies skip the lens
+(only their black disk past about 120 m). The mock-up, which draws 25 copies by brute force (175 warps and 250
+structures, each ray testing all), took 82 to 178 ms GPU against 14 to 27 ms without copies, on this Mac at load 40
+to 60: an upper bound only. The first renderer layer measures it for real.
+
+**Edge cases:**
+- Seams: the snow's grain noise and the flake hashes aren't periodic, so a straight line shows in the snow at each
+  seam unless the noise's lattice fits the periods (a tiny visible change everywhere).
+- Fog: the far ground and the copies' fog must match, or a band shows where copies end (V1).
+- Shooting: your own back (a shot along v at eye height comes back after 72 m); console reach, shot noise and the
+  bot's aim use the nearest copy of each player.
+- Players: the respawn ring's "never on top of another player", freezing in the blizzard, and the robot's walking
+  speed (`avatar_animation.rs` takes the distance between two places, so a seam crossing reads as 100 m in one frame
+  and the robot runs) all need the nearest-copy distance.
+- Placing: thrown mouths near a seam, and their clearance from other warps, by wrapped distance.
+- Views: the third-person camera across a seam; the minimap and map page (marks wrapped, the picture tiled); zone
+  walls where zones wrap; a dust puff or beam cut at a seam without its ghost.
+- Precision: wrapping keeps every position within 66 m of the middle, better than today.
+- Compatibility (`compatible-changes`): the map changes (layout, no boundary, wrapping zones); `torus_periods_m` is in
+  the schema but not yet in `common/maps/README.md`. The match runs Snow Planet as its own program, so only its map
+  picture changes.
+- Bench views: every view at a seam changes; new views look along each axis.
+
+**Stacked PRs (G1, V1, L1), each under 200 lines:**
+1. Layout L1: `tools/make_map.py`, the generated map, its picture, `common/maps/README.md` on torus periods. Still
+   bounded, so it plays on its own.
+2. Torus maths: `wrap_frame`, the nearest-copy offset and distance, with unit tests; nothing changes in play.
+3. Ghosts: static and per-frame copies near the seams; a ghost's hits count for its original.
+4. Rays wrap in the shader: camera, chords, shadows, blizzard copies, copy distance V1, no lens for far copies.
+5. Walking and shooting wrap: steps, laser pieces, nearest-copy distances (respawn, bot, robot, consoles, freezing),
+   no boundary on the torus.
+6. Views: minimap, map page, third-person camera, seam-periodic snow noise.
+
+**Mock-up:** WIP on `claude/snow-planet-torus`, never to merge: `TEMP_TORUS_MOCKUP_COPIES=<n>` (`map.rs`) copies the
+level n periods each way, without wrapping, and `--bench-views` then renders seven views along the axes. Copies
+along v are a little stretched (H³ placement); copies along u are what G1 would show. Pictures:
+`.artifacts/bench_views/20261108-154239-torus-copies2/torus_mockup_{1,2}_of_2.png`.
+
 ## S12. Same play as Lunar Surface, W-126 (same play in every level) (User: the mouths' move, the blizzard's look)
 
 Checked against Lunar Surface (`../hyperbolic_wormholes_rust/`), the reference, on 2026-11-08 (Claude Code, branch
@@ -143,7 +241,25 @@ Checked against Lunar Surface (`../hyperbolic_wormholes_rust/`), the reference, 
   **User:** keep that, or make freezing pulse once per hit's worth of health, or keep the blizzard at half speed.
 - **One blizzard.** The map has exactly one, the white-out (`points_find_their_blizzard`); the README and the map's
   description said three.
-- **Scripted play** (`play_tests` in `src/voxel_world.rs`): eight players a team spawn on open snow facing 20 m of
+- **Scripted play** (`play_tests` in `src/voxel_world.rs`): eight players a team spawn on open snow facing 8 m of
   clear view; walking, sprinting, jumping and crouching for 15 s in twelve directions from each spawn never sticks,
   sinks or leaves the level; both level mouths and a thrown pair carry walkers and lasers from twelve directions;
   every console is reachable on foot and `E` reaches it from eight sides (`every_console_can_be_turned_off_on_foot`).
+
+## S13. Paired-band layout, the looping world's layer 1 (User: the layout, chosen for you as L1)
+
+Built on `claude/snow-planet-torus-layout`, 2026-11-08 (Claude Code), the first layer of S11's stack. The level still
+ends at its edge; only the layout changes, so the looping world can join it later without the spawns meeting at the
+seam.
+
+- **Spawns** at a quarter of the u period, u = ∓28 m (were ∓48 m): both ways around to the other team will be 56 m.
+- **Pylons** at (∓30, ±8) m (were (∓34, ±16) m), beside their spawn, so a team defends both routes from one place.
+  They stand 2 m toward the seam band, so pylon to pylon is 52 m through the seam band and 60 m through the middle.
+- **Zones** in paired bands: blue from u = −42 to −14 m, red from 14 to 42 m, and the middle in two bands, around
+  u = 0 (the white-out and the black holes) and around the u seam (the wormhole and two mounds).
+- **Mounds:** the mound by blue's spawn (and red's, turned half a turn) moved behind it, to (∓40, ∓6) m before its
+  seeded scatter: in front of the new spawn it stood 4 m from a spawning player's face. The other mounds, the black
+  holes and the mouths stay where they were; the scatter now measures distances the shortest way around the torus
+  (`get_torus_distance`), and it still draws the same black holes.
+- **Not yet:** walking, seeing and shooting across the seams (S11's layers 2 to 6). The bench views keep their old
+  viewpoints, so `blue_spawn` and `red_spawn` no longer stand at the spawns.
