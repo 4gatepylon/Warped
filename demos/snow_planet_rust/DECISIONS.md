@@ -162,3 +162,8 @@ The same code as Lunar Surface's renderer (its D116) without its half-resolution
 smoothing): outside the sharp centre tone mapping shows a cubic B-spline of the half- or quarter-resolution pixels,
 blended in over 48 px, so the soft edges show no steps, and FXAA 3.11 anti-aliases the whole image. At 3440x1440:
 0.3-1.3 ms more per view. (S14 is #465's half-resolution lens.)
+
+## S16. Option E is the default sharp centre, W-136 (sharp centre, soft edges)
+
+As Lunar Surface's D117: the middle half of the width sharp, half resolution out to three quarters, a quarter beyond,
+all smoothed (S15). At 3440x1440: up to 2.4 ms faster than B (`wormhole` 20.2 → 17.8 ms, `laser_open` 20.2 → 18.4).

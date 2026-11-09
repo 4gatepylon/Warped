@@ -167,11 +167,12 @@ pub const ALL_SHARP: SharpCentre = SharpCentre {
     half_width_frac: f64::INFINITY,
 };
 
-/// `DEFAULT_SHARP_CENTRE` is what the window and the bench views draw unless told otherwise: the
-/// middle two thirds of the width sharp, the rest at half resolution.
+/// `DEFAULT_SHARP_CENTRE` is what the window and the bench views draw unless told otherwise
+/// (option E of W-136, sharp centre, soft edges): the middle half of the width sharp, half
+/// resolution out to three quarters of it, and a quarter beyond, all smoothed (W-138, no aliasing).
 pub const DEFAULT_SHARP_CENTRE: SharpCentre = SharpCentre {
-    sharp_width_frac: 0.66,
-    half_width_frac: f64::INFINITY,
+    sharp_width_frac: 0.5,
+    half_width_frac: 0.75,
 };
 
 impl SharpCentre {
