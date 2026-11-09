@@ -322,10 +322,10 @@ constant float LENS_FADE_FRAC = 0.6;
 constant float LENS_PROXY_M = 12.0;
 constant int LENS_MAX_STEP_COUNT = 64;
 /**
- * @brief From inside a mouth's visible sphere, a ray that doesn't cross the throat shows the lens only as far as
- * it bends: none below `LENS_INSIDE_BEND_MIN_RAD`, fully from `LENS_INSIDE_BEND_FULL_RAD`, so the rays that leave
- * the lens almost straight show the direct view instead of a second picture of it; this takes over across the
- * last `LENS_INSIDE_BLEND_M` inside the sphere.
+ * @brief From inside a mouth's visible sphere, how much a ray shows the lens depends on how much it bends, not on
+ * how near it passes the centre: none below `LENS_INSIDE_BEND_MIN_RAD`, fully from `LENS_INSIDE_BEND_FULL_RAD`
+ * (and fully through the throat), so no ray shows a faint lens picture over the direct view; this takes over
+ * across the last `LENS_INSIDE_BLEND_M` inside the sphere.
  */
 constant float LENS_INSIDE_BEND_MIN_RAD = 0.02;
 constant float LENS_INSIDE_BEND_FULL_RAD = 0.07;
@@ -667,7 +667,7 @@ static int find_lens_mouth(constant FrameUniforms& frame, constant LensUniforms&
  * floor or a `LENS_PROXY_M` sphere) and how much it covers the scene, before any depth test.
  * Where the ray ends near a mouth with a live slot, it also shows the first robot on its way (bent
  * or straight, unless the static world hides it) and the lasers drawn there. From inside a mouth's visible
- * sphere, a ray that doesn't cross the throat covers the scene only as far as the lens bends it.
+ * sphere, the lens covers the scene as far as it bends the ray (fully through the throat).
  * @par Example
  * @code
  * float4 lensed = get_lens_color(frame, lens, atlas, live_color, live_depth, in.uv);
@@ -750,7 +750,7 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
                                    length(oc));
     float bend_frac = has_crossed ? 1.0 : smoothstep(LENS_INSIDE_BEND_MIN_RAD, LENS_INSIDE_BEND_FULL_RAD,
                                                      acos(clamp(dot(dir, v), -1.0, 1.0)));
-    return float4(color, weight * mix(1.0, bend_frac, inside_frac));
+    return float4(color, mix(weight, bend_frac, inside_frac));
 }
 
 /**
