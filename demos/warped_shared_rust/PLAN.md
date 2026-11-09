@@ -7,11 +7,13 @@ for review; nothing here is built yet.
 
 ## Where each part is today
 
+Dark Forest's column is as of #439 (merged 2026-11-08), which ported Lunar's guns and hits into it.
+
 | Part | Lunar Surface, Dust, Snow Planet, the match | City Sphere | Dark Forest |
 | --- | --- | --- | --- |
-| Walking, sprinting, crouching, jumping, sprint energy, head bob | `VoxelPlayer::step` in `voxel_world.rs` (H³, voxels and shapes), settings `movement`, `sprint_energy`, `view.head_bob` | `CityWorld::move_player` in `city_world.rs` (inside a sphere, gravity outward), the same settings, its own code | `Player::update` in `src/game/player.rs` (flat, f32, boxes), its own constants (walk 4.4 m/s, jump 5.4 m/s, gravity 16 m/s²), Lunar's sprint energy copied as constants |
-| The two guns: fire, reload (sniper), heat and overheat (rifle), recoil, aim zoom, shot noise, the gun's motion | `Session` in `main.rs` (`update_gun`, `update_rifle`, `switch_gun`, `can_shoot`, `get_zoom`, `make_wand`, `get_sway`), `shot_noise.rs`, settings `sniper`, `rifle`, `aim`, `beam_speckle` | the same copy | one revolver (`src/game/weapon.rs`: 12-shot magazine, reload, hip and aimed spread), fps_demo viewmodel |
-| Health, damage, respawn | the server counts `damage_frac += 1 / hits_to_kill` (`net.rs`); the shooter picks `hits_to_kill` (`take_hit_weight`: sniper 1, rifle 2 to the head or 12 to the body); `respawn.delay_s` 3 s; `when_hit` slows for 1 s | the same copy | online: the same `net.rs` copy; offline against bots: 100 HP, head and body damage, regeneration after 5 s |
+| Walking, sprinting, crouching, jumping, sprint energy, head bob | `VoxelPlayer::step` in `voxel_world.rs` (H³, voxels and shapes), settings `movement`, `sprint_energy`, `view.head_bob` | `CityWorld::move_player` in `city_world.rs` (inside a sphere, gravity outward), the same settings, its own code | `Player::update` in `src/game/player.rs` (flat, f32, boxes, ladders): Lunar's jump (1.25 m, 0.58 s) and sprint energy as constants, its own speeds (walk 4.4 m/s, sprint 7 m/s, crouch 2.2 m/s) |
+| The two guns: fire, reload (sniper), heat and overheat (rifle), recoil, aim zoom, shot noise, the gun's motion | `Session` in `main.rs` (`update_gun`, `update_rifle`, `switch_gun`, `can_shoot`, `get_zoom`, `make_wand`, `get_sway`), `shot_noise.rs`, settings `sniper`, `rifle`, `aim`, `beam_speckle` | the same copy | `src/game/guns.rs`: Lunar's `main.rs` gun code ported out of the `Session` (`Guns::update(&GunInput, &settings, can_shoot, &GunStep, dt_s)`, `Tracer`, `take_hit_weight`, `get_aim_zoom`), `shot_noise.rs` and most of `dust.rs` copied line for line, a `settings.rs` holding the subset of Lunar's settings it uses (same names and values), f32 and glam 0.30 |
+| Health, damage, respawn | the server counts `damage_frac += 1 / hits_to_kill` (`net.rs`); the shooter picks `hits_to_kill` (`take_hit_weight`: sniper 1, rifle 2 to the head or 12 to the body); `respawn.delay_s` 3 s; `when_hit` slows for 1 s | the same copy | Lunar's hits and 3 s respawn (online through the same `net.rs` copy; offline, a bot loses `1 / hits_to_kill` of its health per hit); the player's own 100 HP still regenerates after 5 s |
 | Hit effects | `HitEffect` (red edges, blur, shake) from `hit_effects` | the same | its own copy of `HitEffect` in `render/overlay.rs` |
 | HUD: bars, crosshair, console bar, "YOU DIED" | `Session::get_overlay_rects`, `get_crosshair_rects`, `get_hud_lines`, `get_banner_lines` in `main.rs`; `hud_bars.rs` (shared now) | the same | `src/game/hud.rs` with copies of `hud_bars.rs` and the overlay rect types (DECISIONS.md D16) |
 
@@ -48,10 +50,13 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
    `collision.rs` for its forest (boxes, and its ladders as a contact kind of its own). The map's own speeds
    (`walk_speed_per_map_speed` times the map's) stay per map, as now.
 3. **`weapons`**: `Gun` (sniper, rifle) and `Weapons`: the gun in hand, the sniper's reload, the rifle's heat and
-   overheat, recoil and its settling, the aim's zoom, `shot_noise` (moved here), and the gun's pose (`make_wand`,
-   `get_sway`). `Weapons::update(&mut self, input: &WeaponInput, intent: &MoveIntent, settings, dt_s) ->
-   Vec<ShotRequest>`; each `ShotRequest` is a gun, an aim offset and a speckle. The level traces each shot in its
-   own space (`trace_laser`, City's glass reflections, Dark Forest's lenses) and gives back what it hit.
+   overheat, recoil and its settling, the aim's zoom, `shot_noise` (moved here), the gun's pose (`make_wand`,
+   `get_sway`) and the beam's flight (`Tracer`). Dark Forest's `guns.rs` (#439) is already Lunar's `main.rs` gun
+   code taken out of a `Session`, so its interface is the starting point: `Weapons::update(&mut self, input:
+   &GunInput, settings, can_shoot, step: &GunStep, dt_s) -> Vec<ShotRequest>`, each `ShotRequest` a gun, an aim
+   offset and a speckle. It is built from Lunar's code (f64 times and angles, as Lunar computes them, so the four
+   copies keep their exact numbers), with the camera-space pose in f32. The level traces each shot in its own
+   space (`trace_laser`, City's glass reflections, Dark Forest's lenses) and gives back what it hit.
 4. **`health`**: `Health` with Lunar's model: `take_hit(gun, is_head) -> HitOutcome` (the weight from
    `take_hit_weight`, one rifle hit per shot), `damage_frac`, `is_eliminated`, `respawn_in_s`, the slow after a hit,
    and the `HitEffect` timing. The server's `damage_frac` bookkeeping in `net.rs` calls the same code, so a window
@@ -75,9 +80,11 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
 3. `movement` with the `Ground` trait: `VoxelWorld` first (four levels at once, since they share `voxel_world.rs`'s
    walking code), then City Sphere's `CityWorld`.
 4. Dark Forest, in this order: raise its `glam` from 0.30 to 0.34 (this crate's); depend on `warped_shared`; replace
-   its copies of `hud_bars.rs`, the overlay rect types and `HitEffect` with the shared ones; then `hud`, `health`
-   (Lunar's hits instead of 100 HP and regeneration, offline too), `weapons` (both guns and their numbers; its own
-   PBR renderer keeps drawing the guns, posed by the shared gun pose), and last `movement` with its `Ground`.
+   its copies with the shared modules, each a deletion plus a few call-site changes since #439 copied them from
+   Lunar: `hud_bars.rs`, the overlay rect types and `HitEffect`, `shot_noise.rs`, its `settings.rs` subset (by
+   `play_settings`), `guns.rs` (by `weapons`; its own PBR renderer keeps drawing the guns, posed by the shared gun
+   pose), then `hud` and `health` (the player's 100 HP and regeneration replaced by Lunar's `damage_frac`), and
+   last `movement` with its `Ground` (its box collisions and ladders).
 5. The files that only waited for these (`thrown_wormholes`, `third_person`, `minimap`, `console_reach`), once a
    level-specific part of each is a parameter.
 
@@ -110,7 +117,5 @@ touched only where a call moves to the shared crate, one level per commit, after
 - Lunar's walking speed is 10 m/s (2 × the map's 5 m/s) and Dark Forest's is 4.4 m/s, in a maze of 1.5-3 m
   corridors. Should Dark Forest take Lunar's speeds as they are, or keep a per-map speed (as every voxel map has)
   with Lunar's rules?
-- Dark Forest's single revolver becomes Lunar's two guns (sniper and rifle): keep its revolver model for one of
-  them, or draw Lunar's wand and block?
-- Dark Forest's health regenerates (after 5 s at 12 HP/s); Lunar's doesn't. Drop regeneration everywhere, as Lunar
-  plays?
+- Dark Forest's player health regenerates (after 5 s at 12 HP/s); Lunar's doesn't. Drop regeneration there, as
+  Lunar plays?
