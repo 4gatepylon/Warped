@@ -125,6 +125,8 @@ is in [`AGENTS.md`](AGENTS.md).
   beyond, all smoothed), 0.3-2.4 ms faster than B at 3440x1440.
   #471: City Sphere: 4x MSAA on its rasterized pass.
   #465: Snow Planet's half-resolution lens, smoothed the same way, with lasers kept sharp in it.
+  #476: Dark Forest: the half-resolution wormhole lens upsampled with a smooth B-spline, 16x anisotropic filtering
+  (its FXAA was already on).
 - [?] **W-136 Sharp centre, soft edges.** The user, 2026-11-09: "if you need to lower resolution in different places, you can just like blur things. One thing you could also consider doing is having like a narrower field of view where like the center of the screen is clear and fully, you know, full resolution, everything, but the edges are blurry or something like that." And: "Try to at least have the ability to see a nice, good resolution for the important things that are right in front of you." Applies to every level's speed work (60 FPS).
   #464: the middle 66% of the width drawn as before and the rest at half resolution, blended (option B, the
   default; options A-E with timings in the PR for the user), in Lunar Surface, the match, Dust and Snow Planet.
@@ -361,6 +363,10 @@ are here too, since the user hadn't confirmed them.
   with options for the lens (half resolution, longer bent steps) in the PR for the user.
   #462: the user's option D (half-resolution lens, Dust's longer bent steps, D114): at 3440x1440 `wormhole_exit` 57.7
   → 24.5 ms and `laser_into_wormhole` 18.6 → 13.1 ms; 20 of 21 views under 16.7 ms.
+  Mouth B over the red landing pad is what keeps `wormhole_exit` slow (its rays test the pad's 14 shapes at every bent
+  step); moving it beside the pad (branch `claude/lunar-mouth-b`, not merged) measured 24.1 → 15.5 ms. The user kept
+  mouth B on the pad (2026-11-09) rather than move it: "you can allow that specific location to be a little bit
+  slower, its fine".
 
 ## Done
 

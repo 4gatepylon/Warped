@@ -205,6 +205,12 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   crosshair covers (at most 0.6 rad off the eye's way, as on Lunar). `--third-person` starts in it, for pictures.
   **Not done here:** thrown wormholes (`Q`). The forest captures its wormholes' lenses once, when the level loads, so
   thrown mouths need the renderer to capture lenses while playing; that is render work, left for its own change.
+- **D39. Smooth wormhole lenses and 16x anisotropic filtering** (W-138, no aliasing). The lens picture is drawn at
+  half resolution; tone mapping now reads it through a cubic B-spline in four bilinear taps (`sample_spline`) instead
+  of one bilinear tap, so a lens's content and rim show no 2-pixel steps. Materials sample with 16x anisotropy (was
+  8x), which calms planks and decks seen edge-on a little; the bridge plank's grain still shows a faint zig-zag at a
+  grazing angle. FXAA was already on and covers the rest; `--photo --photo-hud` captures the frame as the player
+  sees it (after FXAA), `--photo` alone before it. Cost at 3440x1440: within 0.2 ms per view.
 
 ## Follow-ups for the next agent
 
