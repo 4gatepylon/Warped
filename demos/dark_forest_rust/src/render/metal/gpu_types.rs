@@ -43,7 +43,8 @@ pub struct GpuFrameUniforms {
 /// partner, floor height) each, and (mouth count, 1 while capturing, atlas rows, unused); then
 /// what it shows live: each mouth's live slot plus 1 (0 for none, negative when a robot is within
 /// the mouth's reach; four mouths a vector), the robots' bounding spheres (centre, radius), and
-/// (unused, sphere count, near plane, unused).
+/// (unused, sphere count, near plane, glow segment count); then the lasers' and other glows'
+/// segments, each a start and an end (w: the glow's radius on both).
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct GpuLensUniforms {
@@ -53,6 +54,8 @@ pub struct GpuLensUniforms {
     pub live_slots: [Vec4; 4],
     pub movers: [Vec4; 16],
     pub live_params: Vec4,
+    pub glow_starts: [Vec4; crate::render::MAX_LENS_GLOW_SEGMENT_COUNT],
+    pub glow_ends: [Vec4; crate::render::MAX_LENS_GLOW_SEGMENT_COUNT],
 }
 
 /// `GpuPassUniforms` is the projection that one pass draws with.
