@@ -54,7 +54,8 @@ is in [`AGENTS.md`](AGENTS.md).
     Shared code: #447 (`demos/warped_shared_rust/`, the files identical in Lunar Surface, Dust, Snow Planet, City
     Sphere and the match, moved into one library they all use, no change in play or pictures;
     `claude/shared-level-code`, merged); its `PLAN.md` is the next step, one movement, guns, health, HUD and robots
-    for all five levels: #449 (the settings sections and `shot_noise` shared, `claude/shared-play-settings`, open).
+    for all five levels: #449 (the settings sections and `shot_noise` shared, `claude/shared-play-settings`,
+    merged), #452 (the guns' state and helpers shared, `claude/shared-weapons`, open).
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":

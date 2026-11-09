@@ -29,9 +29,11 @@ use super::{
     HEAT_BAR_OVERHEATED_RGB, HEAT_BAR_RGB, MAP_AREA_MAX_EXCL_MASK_PX, MAP_AREA_MIN_MASK_PX,
     MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX, MS_PER_S, OverlayText, PICTURE_PX_PER_MASK_PX,
     PLAYER_SETTINGS_HOME_PATH, Picture, Renderer, RendererKind, Result, RouteKind, WINDOW_TITLE,
-    find_lan_address, get_aim_zoom, get_crosshair_rects, get_lobby_lines, get_server_address,
-    get_sway, load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
+    find_lan_address, get_crosshair_rects, get_lobby_lines, get_server_address, get_sway,
+    load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
 };
+use warped_shared::weapons::get_aim_zoom;
+
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::city_world::{
     CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,

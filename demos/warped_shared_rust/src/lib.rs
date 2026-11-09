@@ -14,7 +14,9 @@
 //! - `spaceships`: the spaceships in the sky.
 //! - `key_bindings`, `exit_prompt`: a player's controls, and the "leave the game?" prompt.
 //! - `texture_arrays`, `render_mesh`, `viewmodel`: Metal textures, models and the gun held in hand.
-//! - `overlay`, `hud_bars`: what is drawn over a frame, and the HUD's bars.
+//! - `overlay`, `hud_bars`, `hud`: what is drawn over a frame, the HUD's bars and its
+//!   crosshair.
+//! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
 //!
 //! Example: `use warped_shared::geometry::{AXIS_W, make_boost};`
 //!
@@ -28,6 +30,8 @@ pub mod avatar_model;
 pub mod exit_prompt;
 pub mod fps_demo_assets;
 pub mod geometry;
+#[cfg(target_os = "macos")]
+pub mod hud;
 #[cfg(target_os = "macos")]
 pub mod hud_bars;
 #[cfg(target_os = "macos")]
@@ -45,3 +49,5 @@ pub mod spaceships;
 pub mod texture_arrays;
 #[cfg(target_os = "macos")]
 pub mod viewmodel;
+#[cfg(target_os = "macos")]
+pub mod weapons;

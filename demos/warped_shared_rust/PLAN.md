@@ -88,9 +88,12 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
    level still composes its own `ServerSettings` and `PerPlayerSettings` and embeds its own two files, since the
    levels' W-126 tests compare those files with Lunar's; one built-in `player_settings.yaml` waits until those tests
    read the shared one.
-2. `health`, then `weapons` (with `shot_noise`), then `hud`, each moved out of the Lunar copies' `main.rs` and
-   called from there and from City Sphere's. These also move the last files that only waited for `settings`
-   (`shot_noise`, `menu` once `credits` and `net::Score` are parameters).
+2. `health`, then `weapons` (with `shot_noise`), then `hud`. Done in part (`claude/shared-weapons`): `Weapons`
+   holds the guns' state with Lunar's gun logic, and `Gun`, `make_wand`, `get_sway`, `take_hit_weight`,
+   `get_aim_zoom` and the crosshair are shared; the HUD's bars and lines, health and `Tracer` still wait, and
+   City Sphere's `CitySession` still has its own guns. Then the rest, each moved out of the Lunar copies'
+   `main.rs` and called from there and from City Sphere's. These also move the last files that only waited for
+   `settings` (`menu` once `credits` and `net::Score` are parameters).
 3. `movement` with the `Ground` trait: `VoxelWorld` first (four levels at once, since they share `voxel_world.rs`'s
    walking code), then City Sphere's `CityWorld`.
 4. Dark Forest, in this order: raise its `glam` from 0.30 to 0.34 (this crate's); depend on `warped_shared`; replace
