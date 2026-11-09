@@ -58,6 +58,7 @@ use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, HudBars, HudPulses, describe_gun,
     get_crosshair_rects, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
+    make_respawn_bar_rects,
 };
 use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 use warped_shared::{
@@ -2670,13 +2671,14 @@ fn add_dust_burst(
 }
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
-/// started with `--host`, whether this player was hit and waits to rejoin, the number of the game
+/// started with `--host`, whether this player was hit and waits to rejoin (the server's wait and the time left), the number of the game
 /// it plays, the console this player holds `E` on, with the seconds held, and the team `--team`
 /// asked for, joined once the window has loaded (`join_after_loading`).
 struct Multiplayer {
     client: net::Client,
     server: Option<Child>,
     is_eliminated: bool,
+    respawn_wait_s: f64,
     respawn_in_s: f64,
     game_number: u32,
     disabling: Option<(u8, f64)>,
@@ -2775,6 +2777,7 @@ impl Session {
                 )?,
                 server,
                 is_eliminated: false,
+                respawn_wait_s: 0.0,
                 respawn_in_s: 0.0,
                 game_number: 0,
                 disabling: None,
@@ -3758,10 +3761,12 @@ impl Session {
                     victim_id,
                     shooter_id,
                     is_self,
+                    respawn_wait_s,
                 } => {
                     if is_self {
                         multiplayer.is_eliminated = true;
-                        multiplayer.respawn_in_s = self.settings.respawn.delay_s;
+                        multiplayer.respawn_wait_s = respawn_wait_s;
+                        multiplayer.respawn_in_s = respawn_wait_s;
                         multiplayer.disabling = None;
                         self.weapons.is_laser_on = false;
                         self.weapons.shot_time_s = 0.0;
@@ -3908,7 +3913,7 @@ impl Session {
             poses.truncate(players.len() + usize::from(own_body.is_some()));
             let corpses: Vec<(DMat4, usize, (avatar_model::AvatarClip, f64))> = self
                 .avatars
-                .get_corpses(now_s, self.settings.respawn.delay_s)
+                .get_corpses(now_s, self.settings.respawn.start_s)
                 .into_iter()
                 .map(|(corpse, pose)| (corpse.feet, corpse.team as usize, pose))
                 .collect();
@@ -4458,7 +4463,7 @@ impl Session {
     /// one block, empty while it reloads; no pulses), and on a voxel map the sprint energy. Health
     /// and energy carry pulses that run over their filled part while they change
     /// (`update_bar_pulses`). Below the middle, the progress of turning off a console (while
-    /// holding `E` on one).
+    /// holding `E` on one), and under "YOU DIED" the respawn bar filling over the server's wait.
     ///
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
@@ -4472,6 +4477,16 @@ impl Session {
             &self.settings.rifle,
             &self.hud_pulses,
         ));
+        if let Some(multiplayer) = &self.multiplayer
+            && self.menu.is_none()
+            && multiplayer.is_eliminated
+            && self.get_banner_lines() == Some(get_death_lines(multiplayer.respawn_in_s))
+        {
+            rects.extend(make_respawn_bar_rects(
+                multiplayer.respawn_in_s,
+                multiplayer.respawn_wait_s,
+            ));
+        }
         rects
     }
 
