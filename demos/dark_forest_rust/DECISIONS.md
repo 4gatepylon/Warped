@@ -161,6 +161,14 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   of `f32` (the shake differs by under a millionth of a pixel). Kept as the forest's own: `WormholeSettings` (the
   shared one adds the thrown wormholes, which the forest doesn't have yet), the frame-time readout and the dark tint
   while dead.
+- **D35. The forest's guns are the shared `Weapons`** (W-126 (same play in every level)). `guns.rs` no longer keeps
+  its own copy of Lunar's gun code: `update_weapons` plays a frame's controls on the shared `Weapons` in the order the
+  copy did (pick or swap, the sniper's click, the timers, aiming, the gun's steps and pose, the rifle), and the gun in
+  hand is placed by the shared `make_wand` and `get_sway` (`make_wand_camera_from_muzzle` turns the wand into the
+  muzzle's frame the forest's gun models are drawn at). A script of 600 steps (both guns, clicks while reloading,
+  swaps, aiming, sprinting steps, moments it may not shoot) gives the same state, view kicks, gun poses and muzzle
+  points before and after, byte for byte. Kept as the forest's own: its controls (`GunInput`, `GunStep`) and the
+  beams' flight (`Tracer`), which traces in the forest's own space.
 
 ## Follow-ups for the next agent
 

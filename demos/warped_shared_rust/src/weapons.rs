@@ -6,7 +6,7 @@
 //!
 //! Interface: `Gun`, `Weapons` (`New`, `switch_gun`, `is_firing`, `fire_sniper`, `tick`,
 //! `update_aim`, `get_zoom`, `update_rifle`), `get_aim_zoom`, `take_hit_weight`, `make_wand`,
-//! `get_sway`, `ease_frac`, `MUZZLE_M`.
+//! `make_wand_camera_from_muzzle`, `get_sway`, `ease_frac`, `MUZZLE_M`.
 //!
 //! Example: `let recoil: Option<[f64; 2]> = weapons.update_rifle(&settings.rifle, can_shoot, dt_s);`
 //!
@@ -14,7 +14,7 @@
 //! - Gotchas: `Weapons` only keeps time and state; the level traces each shot in its own space,
 //!   turns the view by a shot's recoil, and decides whether this player may shoot (`can_shoot`).
 
-use glam::{DVec3, EulerRot, Mat3, Vec3};
+use glam::{DVec3, EulerRot, Mat3, Mat4, Vec3};
 
 use crate::overlay::OverlayWand;
 use crate::play_settings::{AimSettings, HeadBobSettings, RifleSettings, SniperSettings};
@@ -47,7 +47,7 @@ pub const WAND_RED_TIP_COLOR: [f32; 4] = [1.0, 0.28, 0.14, 1.0];
 /// `Gun` is the weapon a player holds: gun 1, the laser (a quarter-second shot per click; one
 /// hit eliminates), or gun 2, the design's rifle (fires while the button is held, its beam
 /// pulsing; two hits to the head or twelve to the body eliminate; overheats).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Gun {
     Laser,
     Rifle,
@@ -319,6 +319,22 @@ pub fn make_wand(
     }
 }
 
+/// `make_wand_camera_from_muzzle` gives the frame of `wand`'s muzzle, the front of its tip, in
+/// camera space (its barrel along -z), for a level that draws a gun model there instead of the
+/// wand.
+///
+/// Example: `let camera_from_muzzle = make_wand_camera_from_muzzle(&make_wand(0.0, 1.2, 0.0, 1, Gun::Laser, (0.0, 0.0)));`
+pub fn make_wand_camera_from_muzzle(wand: &OverlayWand) -> Mat4 {
+    let rotation: Mat3 = Mat3::from_cols(
+        Vec3::from_slice(&wand.axes[0][..3]),
+        Vec3::from_slice(&wand.axes[1][..3]),
+        Vec3::from_slice(&wand.axes[2][..3]),
+    );
+    let reach_m: f32 = wand.shaft_half_m[2] + 2.0 * wand.tip_half_m[2];
+    let center: Vec3 = Vec3::from_slice(&wand.center_m[..3]);
+    Mat4::from_mat3_translation(rotation, center - rotation.z_axis * reach_m)
+}
+
 /// `ease_frac` eases a fraction from 0 to 1 (smoothstep): slow at both ends.
 ///
 /// Example: `let jog: f64 = ease_frac(0.5);`
@@ -372,6 +388,7 @@ mod tests {
     //! | Rifle trigger | held (fires at its rate, recoil alternating sides, overheats after its shots, cools), released (no shot) | `rifle_fires_overheats_and_cools` |
     //! | May shoot | yes, no (no shot) | `rifle_fires_overheats_and_cools`, `sniper_shoots_reloads_and_switches` |
     //! | Sniper | fired (its shot and reload), ticking down, switching guns (ends the shot) | `sniper_shoots_reloads_and_switches` |
+    //! | The wand's muzzle frame, at rest | each gun: at `MUZZLE_M`, its barrel toward the crosshair | `the_muzzle_frame_is_at_the_muzzle` |
 
     use super::*;
     use serde::Deserialize;
@@ -587,5 +604,15 @@ mod tests {
             sway(revolver, 1.0, 1.0, right_rad),
             (sprint_m, sprint_rad * length_frac)
         ));
+    }
+
+    #[test]
+    fn the_muzzle_frame_is_at_the_muzzle() {
+        for gun in [Gun::Laser, Gun::Rifle] {
+            let frame: Mat4 =
+                make_wand_camera_from_muzzle(&make_wand(0.0, 0.0, 0.0, 0, gun, (0.0, 0.0)));
+            assert!(frame.w_axis.truncate().distance(MUZZLE_M.as_vec3()) < 1e-5);
+            assert!(frame.z_axis.truncate().dot(Vec3::Z) > 0.99);
+        }
     }
 }

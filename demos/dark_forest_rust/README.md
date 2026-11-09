@@ -185,7 +185,7 @@ started or the frame before it ended, whichever is later, to when it ended.
 - `src/game/world.rs`: turns the map into collision boxes, drawable shapes, ladders, consoles and pylons.
 - `src/game/warps.rs`: the wormholes' lens, throat crossing and laser paths (and black holes, unused here).
 - `src/game/player.rs`: walking, jumping and climbing.
-- `src/game/guns.rs`, `src/game/dust.rs`, and the shared `shot_noise`: the Lunar Surface demo's two guns, their beams'
+- `src/game/guns.rs` (on the shared `Weapons`), `src/game/dust.rs`, and the shared `shot_noise`: the Lunar Surface demo's two guns, their beams'
   flight and ground dust, and each shot's stray.
 - `src/console_reach.rs`: who may hold `E` on a console (in reach and aimed at), for the server and the windows.
 - `src/game/console_bot.rs`: the bots' walking, along `src/game/nav.rs`'s paths and up and down the ladders.
@@ -194,7 +194,8 @@ started or the frame before it ended, whichever is later, to when it ended.
 - `src/net.rs`, `src/server.rs`, `src/bin/dark_forest_server.rs`: the UDP server and protocol, copied from the
   hyperbolic demo.
 - `../warped_shared_rust/` (a library this crate depends on): the HUD's bars, crosshair and hit effect, the overlay
-  rectangles, each shot's stray (`shot_noise`) and the settings sections, the same code every level uses (D34).
+  rectangles, the two guns (`weapons`), each shot's stray (`shot_noise`) and the settings sections, the same code
+  every level uses (D34, D35).
 - `src/render/camera_math.rs`: the view and projection matrices, with glam 0.30's arithmetic (D34).
 - Everything else (renderer, assets, robots, audio) is the FPS demo's.
 
