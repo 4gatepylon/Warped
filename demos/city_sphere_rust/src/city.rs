@@ -35,6 +35,7 @@ use warped_shared::hud::{
 };
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
 use warped_shared::shot_noise::ShotNoise;
+use warped_shared::third_person::{ThirdPersonCamera, place_camera_flat};
 use warped_shared::weapons::{Weapons, take_hit_weight};
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
@@ -1567,39 +1568,20 @@ impl CitySession {
             .clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
     }
 
-    /// `place_camera` puts the camera for the eye frame `eye`, as Lunar Surface's
-    /// `third_person::place_camera` does: out along its boom by the view switch (`V`, eased, and
-    /// back to the eye while aiming), up `PIVOT_UP_M` toward the centre to a pivot over the head,
-    /// then back `BOOM_BACK_M` along the pivot's own back axis, each leg stopping `WALL_GAP_M` short
-    /// of the street, the glass or a box. It gives the camera's frame and whether this player's own
-    /// body shows from there (the pivot cleared `MIN_PIVOT_UP_M`) rather than the gun.
+    /// `place_camera` puts the camera for the eye frame `eye` on the shared third-person boom
+    /// (`warped_shared::third_person::place_camera_flat`): out by the view switch (`V`, eased, and
+    /// back to the eye while aiming), up toward the centre to a pivot over the head, then back,
+    /// each leg stopping short of the street, the glass or a box. It gives the camera's frame and
+    /// whether this player's own body shows from there rather than the gun.
     fn place_camera(&self, eye: DMat4) -> (DMat4, bool) {
         let boom_frac: f64 = self.view_switch.get_boom_frac(self.weapons.aim_frac);
-        let along_m: f64 = boom_frac * (third_person::PIVOT_UP_M + third_person::BOOM_BACK_M);
-        if along_m <= 0.0 {
-            return (eye, false);
-        }
-        let clear_m = |from: DVec3, direction: DVec3, wanted_m: f64| -> f64 {
-            let shot: Shot = self.world.trace_shot(
-                from,
-                direction,
-                wanted_m + third_person::WALL_GAP_M,
-                0,
-                &[],
-                None,
-            );
-            let reach_m: f64 = (shot.points[1] - from).length();
-            (reach_m - third_person::WALL_GAP_M).clamp(0.0, wanted_m)
+        let get_clear_m = |from: DVec3, direction: DVec3, max_m: f64| -> f64 {
+            let shot: Shot = self.world.trace_shot(from, direction, max_m, 0, &[], None);
+            (shot.points[1] - from).length()
         };
-        let at: DVec3 = eye.w_axis.truncate();
-        let up: DVec3 = self.player.get_up();
-        let up_m: f64 = clear_m(at, up, along_m.min(third_person::PIVOT_UP_M));
-        let pivot: DVec3 = at + up * up_m;
-        let back: DVec3 = eye.z_axis.truncate();
-        let back_m: f64 = clear_m(pivot, back, (along_m - third_person::PIVOT_UP_M).max(0.0));
-        let mut camera: DMat4 = eye;
-        camera.w_axis = (pivot + back * back_m).extend(1.0);
-        (camera, up_m >= third_person::MIN_PIVOT_UP_M)
+        let placed: ThirdPersonCamera =
+            place_camera_flat(eye, self.player.get_up(), boom_frac, get_clear_m);
+        (placed.frame, placed.is_body_shown)
     }
 
     /// `get_shot_eye` gives the frame shots and `E` leave from, as Lunar Surface's

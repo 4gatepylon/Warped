@@ -271,6 +271,9 @@ struct Args {
     /// Hold `F` (the flashlight), for pictures of it.
     #[arg(long)]
     hold_flashlight: bool,
+    /// Start in the third-person view (`V`), for pictures of it.
+    #[arg(long)]
+    third_person: bool,
     /// How many simulated seconds --video-frames records.
     #[arg(long, default_value_t = 8.0)]
     video_seconds: f32,
@@ -989,6 +992,9 @@ fn main() {
     if args.rifle {
         session.weapons.switch_gun(Gun::Rifle);
     }
+    if args.third_person {
+        session.view_switch.toggle();
+    }
     if !session.arena.warps.mouths.is_empty() && !args.bot {
         let capture_start: Instant = Instant::now();
         let lens: render::WormholeLens = capture_wormhole_lens(
@@ -1124,6 +1130,7 @@ fn main() {
                         mouse.set_relative_mouse_mode(&platform.window, false);
                     }
                     Scancode::Space => is_jump_pressed = true,
+                    Scancode::V => session.view_switch.toggle(),
                     Scancode::_1 => picked_gun = Some(Gun::Laser),
                     Scancode::_2 => picked_gun = Some(Gun::Rifle),
                     Scancode::F1 => settings.is_ssao_enabled = !settings.is_ssao_enabled,

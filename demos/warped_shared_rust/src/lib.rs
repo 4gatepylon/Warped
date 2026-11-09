@@ -20,6 +20,7 @@
 //! - `overlay`, `hud_bars`, `hud`: what is drawn over a frame, the HUD's bars, its pulses, its
 //!   crosshair, the hit effect and the banner's lobby and "YOU DIED" lines.
 //! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
+//! - `third_person`: the third-person view's switch, and its boom in flat space.
 //!
 //! Example: `use warped_shared::geometry::{AXIS_W, make_boost};`
 //!
@@ -53,6 +54,7 @@ pub mod shot_noise;
 pub mod spaceships;
 #[cfg(target_os = "macos")]
 pub mod texture_arrays;
+pub mod third_person;
 #[cfg(target_os = "macos")]
 pub mod viewmodel;
 #[cfg(target_os = "macos")]

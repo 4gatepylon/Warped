@@ -65,7 +65,10 @@ is in [`AGENTS.md`](AGENTS.md).
     glam 0.34; `claude/dark-forest-shared-hud`, merged), #468 (Dark Forest's guns on the shared `Weapons`,
     `claude/dark-forest-shared-guns`, merged), #473 (Dark Forest's robots are Lunar's teal robot,
     animated by the shared gait rules; `claude/dark-forest-teal-robots`, merged), #474 (Dark Forest's player
-    moves by the shared rules through a `Ground`; `claude/dark-forest-shared-movement`, open).
+    moves by the shared rules through a `Ground`; `claude/dark-forest-shared-movement`, merged), #475 (the
+    third-person view on `V` in Dark Forest, from the shared `third_person`, which City Sphere uses too;
+    `claude/shared-level-modules`, open). Dark Forest's thrown wormholes still need its renderer to capture lenses
+    while playing.
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":

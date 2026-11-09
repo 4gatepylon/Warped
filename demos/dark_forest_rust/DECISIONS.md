@@ -197,6 +197,14 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   speeds part where Lunar meets its terrain and structures; the speeds themselves are Lunar's
   (`test_movement_matches_lunar_surface`), and a unit test checks every step's rules state is the shared
   `MoveState`'s, bit for bit.
+- **D38. `V` switches to the third-person view, Lunar Surface's** (W-61 (third-person view), W-126 (same play in
+  every level)). The camera eases out (0.3 s) on the shared boom (`warped_shared::third_person::place_camera_flat`,
+  which City Sphere uses too): 0.6 m up to a pivot over the head, then 3 m back, each leg 0.25 m short of the forest's
+  boxes; aiming brings it back to the eye. From there this player's own teal robot shows, in its team's colour and
+  moving by the shared gait, instead of the gun in hand, and a shot leaves the eye turned toward the point the
+  crosshair covers (at most 0.6 rad off the eye's way, as on Lunar). `--third-person` starts in it, for pictures.
+  **Not done here:** thrown wormholes (`Q`). The forest captures its wormholes' lenses once, when the level loads, so
+  thrown mouths need the renderer to capture lenses while playing; that is render work, left for its own change.
 
 ## Follow-ups for the next agent
 

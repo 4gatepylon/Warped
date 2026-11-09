@@ -44,6 +44,7 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | `WASD` | move; walk into a ladder to climb it (`W` up, `S` or `Ctrl` down, or look down and `W`) |
 | `Shift` / `Ctrl` or `C` / `Space` | sprint (any direction, while the energy bar lasts) / crouch (half speed, eye lowered) / jump (`Space` lets go of a ladder) |
 | `F` (hold) | flashlight |
+| `V` | third person (the camera eases out behind and above your robot; aiming brings it back) |
 | Left mouse | fire: the sniper (gun 1) once a click, then 2 s to reload; the rifle (gun 2) while held, until it overheats |
 | Right mouse | aim: zoom in 2.5 times (sniper) or 1.5 times (rifle); the mouse turns the view more slowly by as much |
 | `1` / `2` / wheel | take the sniper / take the rifle / swap guns |

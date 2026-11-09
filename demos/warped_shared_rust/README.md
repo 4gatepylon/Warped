@@ -16,8 +16,8 @@ was byte for byte the same in every level before it moved.
 | Dark Forest | [`../dark_forest_rust/`](../dark_forest_rust/README.md) | `dark-forest` |
 
 Dark Forest runs on the `fps_demo` engine; it uses the HUD, the hit effect, the overlay rectangles, `shot_noise`,
-the settings sections and `weapons` so far, and [`PLAN.md`](PLAN.md) is the plan for the rest (its robots and its
-movement).
+the settings sections, `weapons`, `movement` (through `Ground`), `gait`, `avatar_model`'s clip names and
+`third_person`; [`PLAN.md`](PLAN.md) has what is left.
 
 ## What is in it
 
@@ -40,6 +40,8 @@ movement).
 | `overlay` | what is drawn over a frame: HUD rectangles, the wand, the minimap, the text mask, a hit's effect | no (Metal) |
 | `hud_bars` | the HUD's bars: health, ammo, sprint energy, the console bar, and their glows | no (Metal) |
 | `hud` | the HUD: the crosshair, the bars (health, ammo or heat, sprint energy, the console being turned off; `HudBars`, `make_bar_rects`) and their pulses (`HudPulses`), the hit effect's look (`make_hit_effect`), the banner's lobby and "YOU DIED" lines, the HUD line's gun | no (Metal) |
+| `gait` | which of the robot's clips another player shows, and where in it, from their speed over the ground and take-off (Lunar's `avatar_animation` rules; every level's) | yes |
+| `third_person` | the third-person view's switch (`ViewSwitch`: `V`, eased, back to the eye while aiming) and its boom in flat space (`place_camera_flat`, City Sphere's and Dark Forest's); Lunar Surface's copies place it in their curved space themselves | yes |
 | `weapons` | the two guns' state (`Weapons`: fire, reload, heat and overheat, recoil, aim, each shot's noise), `Gun`, how much a hit weighs, the gun in hand's place and sway (`make_wand`, `get_sway`; `make_wand_camera_from_muzzle` for a level that draws a gun model there), `MUZZLE_M` | no (Metal) |
 
 `overlay` and `texture_arrays` are parts of files that differ per level, taken out verbatim: the overlay types of
