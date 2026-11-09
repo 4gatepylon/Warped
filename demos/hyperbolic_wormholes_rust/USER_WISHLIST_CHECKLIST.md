@@ -375,11 +375,12 @@ are here too, since the user hadn't confirmed them.
 
 ## Done
 
+Confirmed by the user after testing.
+
 - [x] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
   together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
   Mac over loopback.
   Confirmed by the user, 2026-11-09: "it ahs been tested between multiple players on mac and it owrks".
-Confirmed by the user after testing.
 
 - [x] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
   get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
