@@ -1818,15 +1818,15 @@ impl MetalRenderer {
             if let Some(drawable) = &drawable {
                 let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
                     ProtocolObject::from_ref(&**drawable);
-                let presented_times: Option<Arc<Mutex<Vec<(usize, f64)>>>> = self
-                    .is_tracing_frames
-                    .then(|| Arc::clone(&self.presented_times));
+                let is_tracing_frames: bool = self.is_tracing_frames;
+                let presented_times: Arc<Mutex<Vec<(usize, f64)>>> =
+                    Arc::clone(&self.presented_times);
                 let shown_s: Arc<Mutex<Vec<f64>>> = Arc::clone(&self.shown_s_since_cadence);
                 let handler =
                     RcBlock::new(move |shown: NonNull<ProtocolObject<dyn MTLDrawable>>| {
                         let presented_s: f64 = unsafe { shown.as_ref() }.presentedTime();
-                        if let Some(times) = &presented_times {
-                            times
+                        if is_tracing_frames {
+                            presented_times
                                 .lock()
                                 .expect("the frame trace's lock is poisoned")
                                 .push((frame_index, presented_s));
