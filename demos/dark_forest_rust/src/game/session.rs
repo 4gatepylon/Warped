@@ -62,6 +62,18 @@ const BEAM_HDR_SCALE: f32 = 1.8;
 /// would show only there.
 const BEAM_DASH_SPACING_M: f32 = 0.15;
 const BEAM_DASH_OVERLAP: f32 = 2.0;
+/// `FLASHLIGHT_RGB` is the flashlight's colour, a warm white; `FLASHLIGHT_REACH_PER_RANGE` how far
+/// it reaches, in its half-light ranges; `FLASHLIGHT_SPOT_STANDOFF_M` and
+/// `FLASHLIGHT_SPOT_MARGIN_M` how far before the lit surface its spot light sits and how much wider
+/// than the cone it reaches; and `FLASHLIGHT_NEAR_M`, `FLASHLIGHT_NEAR_RADIUS_M` and
+/// `FLASHLIGHT_NEAR_FRAC` place, size and dim the light for what is close.
+const FLASHLIGHT_RGB: Vec3 = Vec3::new(1.0, 0.95, 0.85);
+const FLASHLIGHT_REACH_PER_RANGE: f32 = 2.0;
+const FLASHLIGHT_SPOT_STANDOFF_M: f32 = 0.5;
+const FLASHLIGHT_SPOT_MARGIN_M: f32 = 0.5;
+const FLASHLIGHT_NEAR_M: f32 = 1.0;
+const FLASHLIGHT_NEAR_RADIUS_M: f32 = 4.0;
+const FLASHLIGHT_NEAR_FRAC: f32 = 0.15;
 /// `GRAIN_SPRITE_PER_RADIUS` is how much larger than a dust grain its smoke sprite is.
 const GRAIN_SPRITE_PER_RADIUS: f32 = 1.5;
 /// `LUNAR_TEAM_BEAM_RGB` are Lunar Surface's laser colours per team (blue, red), linear, for a map
@@ -80,6 +92,7 @@ const BOT_GROUND_HIT_M: f32 = 0.05;
 pub struct Controls {
     pub player: PlayerInput,
     pub gun: GunInput,
+    pub is_flashlight_held: bool,
 }
 
 /// `RobotHold` holds robot 0 for pictures and benchmarks: it stands at `feet_m` facing `yaw_rad`,
@@ -237,6 +250,7 @@ pub struct Session {
     pub is_console_objective: bool,
     pub bot_console: Option<usize>,
     pub is_team_known: bool,
+    pub is_flashlight_on: bool,
     bar_pulses: BarPulsePair,
     robot_hold: Option<RobotHold>,
     robot_hold_s: f32,
@@ -345,6 +359,7 @@ impl Session {
             is_console_objective: false,
             bot_console: None,
             is_team_known: true,
+            is_flashlight_on: false,
             bar_pulses: BarPulsePair::New(),
             robot_hold: None,
             robot_hold_s: 0.0,
@@ -797,6 +812,7 @@ impl Session {
             return Controls {
                 player: walk.input,
                 gun: GunInput::default(),
+                is_flashlight_held: false,
             };
         }
         let eye_m: Vec3 = self.player.eye_position_m();
@@ -851,6 +867,7 @@ impl Session {
             return Controls {
                 player,
                 gun: GunInput::default(),
+                is_flashlight_held: false,
             };
         }
         let look_direction: Vec3 = match visible_bot {
@@ -890,6 +907,7 @@ impl Session {
                 is_aim_held: should_aim,
                 ..GunInput::default()
             },
+            is_flashlight_held: false,
         }
     }
 
@@ -972,6 +990,7 @@ impl Session {
             self.shoot_player_laser(scene, audio);
         }
         self.was_firing = is_firing;
+        self.is_flashlight_on = controls.is_flashlight_held && self.player.is_alive();
         self.is_trigger_down = is_firing;
         if self.player.should_respawn() {
             self.death_count += 1;
@@ -1158,6 +1177,40 @@ impl Session {
             .zip(&current)
             .map(|(a, b)| a.lerp(b, animation.blend_frac))
             .collect()
+    }
+
+    /// `get_flashlight_lights` lights what the player looks at as Lunar Surface's flashlight does,
+    /// with point lights since this renderer has no spot lights: one where the view meets the
+    /// world (up to `FLASHLIGHT_REACH_PER_RANGE` times the settings' `range_m`), as wide as the
+    /// cone there, as bright as the settings' share of sunlight, halved at `range_m`; and a dim one
+    /// just ahead of the eye for what is close.
+    ///
+    /// Example: `point_lights.extend(self.get_flashlight_lights(scene));`
+    fn get_flashlight_lights(&self, scene: &Scene) -> [PointLight; 2] {
+        let flashlight = &self.settings.flashlight;
+        let eye_m: Vec3 = self.player.eye_position_m();
+        let ahead: Vec3 = self.player.rotation() * Vec3::NEG_Z;
+        let range_m: f32 = flashlight.range_m as f32;
+        let reach_m: f32 = range_m * FLASHLIGHT_REACH_PER_RANGE;
+        let distance_m: f32 = cast_ray(&scene.solids, eye_m, ahead, reach_m)
+            .map_or(reach_m, |(_, hit)| hit.distance_m);
+        let cone_rad: f32 = (flashlight.cone_half_angle_rad + flashlight.soft_edge_rad) as f32;
+        let spot_radius_m: f32 = distance_m * cone_rad.tan() + FLASHLIGHT_SPOT_MARGIN_M;
+        let falloff: f32 = 1.0 / (1.0 + (distance_m / range_m).powi(2));
+        let color_rgb: Vec3 =
+            FLASHLIGHT_RGB * scene.light_scale * flashlight.brightness_frac as f32;
+        [
+            PointLight {
+                position_m: eye_m + ahead * (distance_m - FLASHLIGHT_SPOT_STANDOFF_M).max(0.0),
+                radius_m: spot_radius_m + FLASHLIGHT_SPOT_STANDOFF_M,
+                color_rgb: color_rgb * falloff,
+            },
+            PointLight {
+                position_m: eye_m + ahead * FLASHLIGHT_NEAR_M,
+                radius_m: FLASHLIGHT_NEAR_RADIUS_M,
+                color_rgb: color_rgb * FLASHLIGHT_NEAR_FRAC,
+            },
+        ]
     }
 
     /// `get_hit_effect` is what the last hit on the player still does to the view, as the Lunar
@@ -1351,6 +1404,9 @@ impl Session {
                 radius_m: flash.radius_m,
                 color_rgb: flash.color_rgb * frac * frac,
             });
+        }
+        if self.is_flashlight_on {
+            point_lights.extend(self.get_flashlight_lights(scene));
         }
         let lens_draws: Range<usize> = scene.static_draws.len()..world_draws.len();
         let robot_particle_count: usize = world_particles.len();

@@ -13,6 +13,7 @@ mod asset_manifest;
 mod assets;
 mod console_reach;
 mod credits;
+mod exit_prompt;
 mod forest_layout;
 mod game;
 mod hud_bars;
@@ -46,6 +47,7 @@ use sdl3::keyboard::Scancode;
 use sdl3::mouse::MouseButton;
 use shot_noise::ShotNoise;
 
+use exit_prompt::{ExitOutcome, ExitPrompt};
 use game::audio::Audio;
 use game::console_bot::BotWalker;
 use game::guns::{Gun, GunInput, Guns};
@@ -261,6 +263,9 @@ struct Args {
     /// Hold `E` (turning off a console within reach), for pictures of the console bar.
     #[arg(long)]
     hold_console: bool,
+    /// Hold `F` (the flashlight), for pictures of it.
+    #[arg(long)]
+    hold_flashlight: bool,
     /// How many simulated seconds --video-frames records.
     #[arg(long, default_value_t = 8.0)]
     video_seconds: f32,
@@ -999,6 +1004,7 @@ fn main() {
     minimap.load_photo(&Path::new(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
     let mut marks: Vec<Mark> = Vec::new();
     let mut menu: Option<Menu> = None;
+    let mut exit_prompt: ExitPrompt = ExitPrompt::New();
     if args.photo_hud {
         renderer.set_is_capturing_hud(true);
     }
@@ -1052,6 +1058,15 @@ fn main() {
                     scancode: Some(scancode),
                     repeat: false,
                     ..
+                } if exit_prompt.is_shown() => {
+                    if exit_prompt.answer(scancode) == ExitOutcome::Exit {
+                        break 'running;
+                    }
+                }
+                Event::KeyDown {
+                    scancode: Some(scancode),
+                    repeat: false,
+                    ..
                 } if menu.is_some() => {
                     match menu
                         .as_mut()
@@ -1074,7 +1089,15 @@ fn main() {
                     repeat: false,
                     ..
                 } => match scancode {
-                    Scancode::Escape | Scancode::Tab => {
+                    Scancode::Escape => {
+                        if exit_prompt.press_release_mouse(is_mouse_captured)
+                            == ExitOutcome::ReleaseMouse
+                        {
+                            is_mouse_captured = false;
+                            mouse.set_relative_mouse_mode(&platform.window, false);
+                        }
+                    }
+                    Scancode::Tab => {
                         menu = Some(Menu::New());
                         menu_settings.render_scale_frac = settings.render_scale_frac;
                         is_mouse_captured = false;
@@ -1110,7 +1133,9 @@ fn main() {
                     }
                     _ => {}
                 },
-                Event::MouseButtonDown { .. } if !is_mouse_captured && menu.is_none() => {
+                Event::MouseButtonDown { .. }
+                    if !is_mouse_captured && menu.is_none() && !exit_prompt.is_shown() =>
+                {
                     is_mouse_captured = true;
                     mouse.set_relative_mouse_mode(&platform.window, true);
                 }
@@ -1170,8 +1195,10 @@ fn main() {
                 picked_gun,
                 is_swap_pressed,
             },
+            is_flashlight_held: args.hold_flashlight
+                || (is_mouse_captured && keys.is_scancode_pressed(Scancode::F)),
         };
-        let controls: Controls = if menu.is_some() {
+        let controls: Controls = if menu.is_some() || exit_prompt.is_shown() {
             Controls::default()
         } else {
             controls
@@ -1336,7 +1363,15 @@ fn main() {
             minimap.draw_minimap(session.player.feet_m, session.player.yaw_rad, &marks);
             hud_images.push(minimap.get_minimap_image(window_width_px, window_height_px));
         }
-        if menu.is_none()
+        if exit_prompt.is_shown() {
+            let [question, keys] = exit_prompt::get_lines();
+            death_picture.draw(&[(question, true), (keys, false)], true);
+            hud_images.push(death_picture.get_image(
+                window_width_px,
+                window_height_px,
+                BANNER_HEIGHT_FRAC,
+            ));
+        } else if menu.is_none()
             && let Some(respawn_in_s) = session.player.get_respawn_in_s()
         {
             death_picture.draw(
