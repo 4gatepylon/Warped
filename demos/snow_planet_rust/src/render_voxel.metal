@@ -2512,6 +2512,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float4x4 wraps = float4x4(1.0);
     int seam_count = 0;
     int2 cell = int2(0);
+    bool is_bent = false;
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         if (inside < 0) {
             float s_end = FAR_S, disk_s = NO_HIT_S;
@@ -2531,7 +2532,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             int seam_axis = -1;
             bool is_above_scene = x.y > sinh(SCENE_TOP_M / r) && v.y > 0.0;
             float copy_s = is_fog_wall_on(scene) ? min(u.torus.z, FOG_END_M / r) : u.torus.z;
-            if (u.torus.w > 0.5 && travelled < copy_s && !is_above_scene) {
+            if (u.torus.w > 0.5 && !is_bent && travelled < copy_s && !is_above_scene) {
                 float seam_s = find_seam_s(scene, x, v, seam_axis);
                 if (seam_s < s_end) { s_end = seam_s; entering = -1; } else seam_axis = -1;
             }
@@ -2577,6 +2578,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             x = xn;
             travelled += s_end;
             inside = entering;
+            is_bent = true;
             continue;
         }
         if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho, local);
@@ -2610,7 +2612,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         }
         if (rho > prm.z) {
             last_warp = inside; inside = -1; has_gradient = false;
-            if (u.torus.w > 0.5 && travelled < u.torus.z) {
+            if (u.torus.w > 0.5 && !is_bent && travelled < u.torus.z) {
                 float4 x_before = x;
                 wraps = wrap_into_cell(scene, x, v, cell) * wraps;
                 if (any(x != x_before)) last_warp = -1;
