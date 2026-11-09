@@ -1,7 +1,8 @@
 # Plan: one way to move, shoot, get hit and see it, in every level
 
 The user wants the health bars, the guns, and running, crouching, jumping and the rest shared by all five levels,
-Dark Forest and City Sphere included. Step 1 (this crate) moved the files that were already the same; this plan is
+Dark Forest and City Sphere included, and the same health bars, weapons and sprites (the players' robots, the guns
+in hand, the HUD) everywhere. Step 1 (this crate) moved the files that were already the same; this plan is
 step 2: make the play itself one implementation, with Lunar Surface's numbers, that every level calls. It is a plan
 for review; nothing here is built yet.
 
@@ -66,7 +67,15 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
    the bars (`hud_bars`), the crosshair, the console bar, "YOU DIED" and the countdown, moved out of `main.rs`.
    Each renderer draws `rects` with its overlay shader (every Lunar copy's `render_metal.metal`, and Dark Forest's
    `overlay.metal`, already draw this struct) and `lines` with its own text.
-6. **`overlay` split**: the rect types (`OverlayRect`, `RectStyle`, `RectPulse` and their constants) go into a module
+6. **Players' look** (`avatar_model`, shared now, and `avatar_animation`): every level draws the other players as
+   the same `teal_robot` body with the same clips (idle, walk, run, crouch, jump, eliminated), and the gun in hand
+   with the same models (`viewmodel`'s revolver and bolt-action rifle). `avatar_animation` needs `voxel_world` only
+   for a `VoxelPlayer`'s state, so it takes an `AvatarState` instead (feet frame, speed, crouch fraction, on the
+   ground, eliminated, the gun), built from `MoveState`, and moves here; each renderer draws the posed triangles
+   (`AvatarModel::make_posed`). City Sphere already draws `teal_robot` through `avatar_model`; Dark Forest draws the
+   fps_demo's `RobotExpressive` (`asset_manifest::ROBOT_MODEL`) and switches to `teal_robot` posed by the shared
+   code, its PBR renderer drawing the posed mesh as it draws the forest's glTFs.
+7. **`overlay` split**: the rect types (`OverlayRect`, `RectStyle`, `RectPulse` and their constants) go into a module
    that needs nothing else, so Dark Forest can use them without `viewmodel`'s `GunModel`; `Overlay` itself stays
    with the Lunar renderers.
 
@@ -83,10 +92,11 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
    its copies with the shared modules, each a deletion plus a few call-site changes since #439 copied them from
    Lunar: `hud_bars.rs`, the overlay rect types and `HitEffect`, `shot_noise.rs`, its `settings.rs` subset (by
    `play_settings`), `guns.rs` (by `weapons`; its own PBR renderer keeps drawing the guns, posed by the shared gun
-   pose), then `hud` and `health` (the player's 100 HP and regeneration replaced by Lunar's `damage_frac`), and
-   last `movement` with its `Ground` (its box collisions and ladders).
-5. The files that only waited for these (`thrown_wormholes`, `third_person`, `minimap`, `console_reach`), once a
-   level-specific part of each is a parameter.
+   pose), then `hud` and `health` (the player's 100 HP and regeneration replaced by Lunar's `damage_frac`), the
+   players' look (`teal_robot` and its clips instead of `RobotExpressive`), and last `movement` with its `Ground`
+   (its box collisions and ladders).
+5. The files that only waited for these (`avatar_animation` with its `AvatarState`, `thrown_wormholes`,
+   `third_person`, `minimap`, `console_reach`), once a level-specific part of each is a parameter.
 
 The other agents' areas (each level's `main.rs`, `net.rs`, `multiplayer.rs`, Snow Planet's looping world) are
 touched only where a call moves to the shared crate, one level per commit, after merging their latest work.
@@ -109,8 +119,9 @@ touched only where a call moves to the shared crate, one level per commit, after
   sprinting and crouched speeds, jump height and time in the air, crouch time, sprint drain and refill times, fire
   rate, heat, recoil, zoom, hits to eliminate and respawn delay, within 1e-9 (the spaces differ, the rules don't).
 - A W-126 test in Dark Forest like City Sphere's `measure_city_jump`: its jump and settings files against Lunar's.
-- HUD pictures of Dark Forest and Lunar side by side (bars, crosshair, console bar, "YOU DIED"), and a playtest by
-  the user (`interactive-review` skill), since feel can't be proven by tests.
+- Pictures of Dark Forest and Lunar side by side: the HUD (bars, crosshair, console bar, "YOU DIED"), the guns in
+  hand, and another player's robot walking, running and crouching; and a playtest by the user
+  (`interactive-review` skill), since feel can't be proven by tests.
 
 ## Questions for the user
 
