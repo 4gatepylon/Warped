@@ -46,6 +46,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 use crate::console_reach::ConsolePlace;
+use crate::health::{add_damage, get_hit_damage_frac};
 use crate::settings::ServerSettings;
 use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
@@ -64,7 +65,6 @@ const TEAM_BIT: u8 = 2;
 const SPECKLE_FIRST_BIT: u8 = 3;
 const ANY_TEAM: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
-const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
 const DISCOVERY_PORT: u16 = 47_801;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
 const SCORES_PERIOD_S: f64 = 0.25;
@@ -652,8 +652,10 @@ impl Server {
                 if shooter_team.is_none() || self.game.winner.is_some() || hits_to_kill == 0 {
                     return Ok(());
                 }
-                self.slots[victim].damage_frac += 1.0 / f64::from(hits_to_kill);
-                if self.slots[victim].damage_frac < 1.0 - DAMAGE_TOLERANCE_FRAC {
+                if !add_damage(
+                    &mut self.slots[victim].damage_frac,
+                    get_hit_damage_frac(hits_to_kill),
+                ) {
                     return Ok(());
                 }
                 let victim_slot: Slot = self.slots.remove(victim);
@@ -1635,6 +1637,7 @@ mod tests {
     //! | Server silent to a welcomed client | shorter than its timeout (stays), longer (the server dropped it: joins the same team again) | `clients_the_server_dropped_join_again` |
 
     use super::*;
+    use crate::health::DAMAGE_TOLERANCE_FRAC;
     use crate::geometry::{AXIS_X, AXIS_Z, make_boost, make_rotation};
     use crate::shapes::{Shape, ShapeKind};
     use glam::DVec3;
