@@ -147,3 +147,11 @@ Checked against Lunar Surface (`../hyperbolic_wormholes_rust/`), the reference, 
   clear view; walking, sprinting, jumping and crouching for 15 s in twelve directions from each spawn never sticks,
   sinks or leaves the level; both level mouths and a thrown pair carry walkers and lasers from twelve directions;
   every console is reachable on foot and `E` reaches it from eight sides (`every_console_can_be_turned_off_on_foot`).
+
+## S13. A sharp centre with softer edges, W-136 (sharp centre, soft edges)
+
+The same code as Lunar Surface's renderer (its D114): the middle 66% of the width is drawn exactly as before and the
+rest at half resolution (the even pixels shaded, the rest blended), by default in the window and the bench views
+(`--sharp-width-frac`, `--half-width-frac`). At 3440x1440, median GPU ms: `wormhole` 23.1 → 19.3, `laser_open` 20.7 →
+18.7, `black_hole` 18.3 → 17.6, the spawns 15.0 → 13.5; at 2560x1440 every view is now under 16.7 ms (`wormhole`
+17.2 → 14.6). The centre is the same picture (at most 2 of 255, through the bloom).
