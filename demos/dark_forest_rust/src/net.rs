@@ -1302,9 +1302,11 @@ mod remote_pose_tests {
             DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2),
             glam::DVec3::new(1.0, 1.7, 0.0),
         );
-        let poses: VecDeque<(Instant, DMat4)> = make_poses(start + Duration::from_secs(1), &[from, to]);
+        let poses: VecDeque<(Instant, DMat4)> =
+            make_poses(start + Duration::from_secs(1), &[from, to]);
         assert_eq!(get_pose_at(&poses, start), from);
-        let middle: DMat4 = get_pose_at(&poses, start + Duration::from_secs_f64(1.0 + STEP_S * 0.5));
+        let middle: DMat4 =
+            get_pose_at(&poses, start + Duration::from_secs_f64(1.0 + STEP_S * 0.5));
         assert!((middle.w_axis.x - 0.5).abs() < 1e-9, "{middle:?}");
         let middle_yaw_rad: f64 = DQuat::from_mat4(&middle).to_euler(glam::EulerRot::YXZ).0;
         assert!((middle_yaw_rad - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
@@ -1319,8 +1321,14 @@ mod remote_pose_tests {
         let from: DMat4 = DMat4::from_translation(glam::DVec3::new(0.0, 1.7, 24.0));
         let to: DMat4 = DMat4::from_translation(glam::DVec3::new(0.0, 1.7, 4.0));
         let poses: VecDeque<(Instant, DMat4)> = make_poses(start, &[from, to]);
-        assert_eq!(get_pose_at(&poses, start + Duration::from_secs_f64(STEP_S * 0.9)), from);
-        assert_eq!(get_pose_at(&poses, start + Duration::from_secs_f64(STEP_S * 1.1)), to);
+        assert_eq!(
+            get_pose_at(&poses, start + Duration::from_secs_f64(STEP_S * 0.9)),
+            from
+        );
+        assert_eq!(
+            get_pose_at(&poses, start + Duration::from_secs_f64(STEP_S * 1.1)),
+            to
+        );
     }
 }
 

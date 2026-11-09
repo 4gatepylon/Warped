@@ -3,7 +3,11 @@
 //! the average to whole display refreshes when it is close to one, and pays time it held back or
 //! ran ahead into later steps, so game time stays within half a step of the wall clock.
 //!
-//! Interface: `FrameClock`.
+//! It also picks how many display refreshes each frame stays on screen
+//! (`choose_refreshes_per_frame`), so frames that the GPU can't finish within one refresh are
+//! shown at an even cadence (every second refresh, say) instead of a mix of one and two.
+//!
+//! Interface: `FrameClock`, `choose_refreshes_per_frame`, `MIN_GPU_SAMPLE_COUNT`.
 //!
 //! Example:
 //!     let mut clock: FrameClock = FrameClock::default();
@@ -23,6 +27,43 @@ const PAYBACK_FRAC: f32 = 0.1;
 const OWED_SLACK_FRAC: f32 = 0.5;
 /// `MAX_PAYBACK_FRAC` of the step is the most that one frame pays back.
 const MAX_PAYBACK_FRAC: f32 = 0.25;
+
+/// `MIN_GPU_SAMPLE_COUNT` is how many frames' GPU times `choose_refreshes_per_frame` needs since
+/// the cadence last changed before it changes it again.
+pub const MIN_GPU_SAMPLE_COUNT: usize = 30;
+/// `MAX_REFRESHES_PER_FRAME` is the slowest cadence: every fourth refresh (25 fps at 100 Hz).
+const MAX_REFRESHES_PER_FRAME: u32 = 4;
+/// `FIT_FRAC` of a frame's time on screen is what its GPU work must fit in (the 90th percentile).
+const FIT_FRAC: f64 = 0.95;
+/// `SPEED_UP_FRAC` of one refresh fewer is what the GPU work must fit in before the cadence
+/// speeds up, so it doesn't flip back and forth.
+const SPEED_UP_FRAC: f64 = 0.75;
+
+/// `choose_refreshes_per_frame` is how many refreshes of `refresh_ms` each frame should stay on
+/// screen, given the current cadence and the GPU times of the frames since it was set (at least
+/// `MIN_GPU_SAMPLE_COUNT`): slower at once when the 90th percentile doesn't fit in `FIT_FRAC` of
+/// the frame's time, one step faster when it fits in `SPEED_UP_FRAC` of one refresh fewer.
+///
+/// Example: `let refreshes: u32 = choose_refreshes_per_frame(1, &gpu_ms, 10.0);`
+pub fn choose_refreshes_per_frame(current: u32, gpu_ms: &[f64], refresh_ms: f64) -> u32 {
+    assert!(
+        gpu_ms.len() >= MIN_GPU_SAMPLE_COUNT,
+        "the cadence needs {MIN_GPU_SAMPLE_COUNT} GPU times, not {}",
+        gpu_ms.len()
+    );
+    let mut sorted_ms: Vec<f64> = gpu_ms.to_vec();
+    sorted_ms.sort_by(f64::total_cmp);
+    let p90_ms: f64 = sorted_ms[(sorted_ms.len() - 1) * 9 / 10];
+    let needed: u32 =
+        ((p90_ms / (refresh_ms * FIT_FRAC)).ceil() as u32).clamp(1, MAX_REFRESHES_PER_FRAME);
+    if needed > current {
+        needed
+    } else if current > 1 && p90_ms < f64::from(current - 1) * refresh_ms * SPEED_UP_FRAC {
+        current - 1
+    } else {
+        current
+    }
+}
 
 /// `FrameClock` remembers the last measured frame times and the time owed to the game.
 #[derive(Default)]
@@ -79,6 +120,7 @@ impl FrameClock {
 /// | measured times | one long stall | `test_a_stall_is_spread_and_paid_back` |
 /// | refresh interval | known, unknown (no vsync) | `test_jitter_around_the_refresh_gives_even_steps`, `test_without_a_refresh_the_average_is_used` |
 /// | game time vs wall time | equal in the long run | `test_a_stall_is_spread_and_paid_back`, `test_jitter_around_the_refresh_gives_even_steps` |
+/// | GPU time vs cadence | fits one refresh, needs two, fits one again (with and without margin) | `test_cadence_follows_the_gpu` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,6 +178,20 @@ mod tests {
             drift_s.abs() <= REFRESH_S * OWED_SLACK_FRAC + 1e-5,
             "{drift_s}"
         );
+    }
+
+    /// `test_cadence_follows_the_gpu` checks that 8 ms of GPU work shows every refresh at 100 Hz,
+    /// 13 ms every second refresh, and that it speeds up again only well inside one refresh.
+    #[test]
+    fn test_cadence_follows_the_gpu() {
+        let refresh_ms: f64 = 10.0;
+        let times = |ms: f64| vec![ms; MIN_GPU_SAMPLE_COUNT];
+        assert_eq!(choose_refreshes_per_frame(1, &times(8.0), refresh_ms), 1);
+        assert_eq!(choose_refreshes_per_frame(1, &times(13.0), refresh_ms), 2);
+        assert_eq!(choose_refreshes_per_frame(2, &times(13.0), refresh_ms), 2);
+        assert_eq!(choose_refreshes_per_frame(2, &times(9.0), refresh_ms), 2);
+        assert_eq!(choose_refreshes_per_frame(2, &times(7.0), refresh_ms), 1);
+        assert_eq!(choose_refreshes_per_frame(1, &times(100.0), refresh_ms), 4);
     }
 
     /// `test_without_a_refresh_the_average_is_used` checks that without vsync the step is the

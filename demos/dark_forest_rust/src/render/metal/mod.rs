@@ -50,6 +50,7 @@ use self::resources::{
     upload_texture_2d,
 };
 use crate::render::culling::{CASCADE_COUNT, CascadeCamera, Cascades, Frustum, fit_cascades};
+use crate::render::frame_clock::{MIN_GPU_SAMPLE_COUNT, choose_refreshes_per_frame};
 use crate::render::frame_trace::CompletedFrame;
 use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
@@ -274,6 +275,9 @@ pub struct MetalRenderer {
     in_flight: VecDeque<(usize, CommandBuffer)>,
     last_gpu_ms: f64,
     is_tracing_frames: bool,
+    refresh_interval_s: Option<f64>,
+    refreshes_per_frame: u32,
+    gpu_ms_since_cadence: Vec<f64>,
     gpu_times: Vec<CompletedFrame>,
     presented_times: Arc<Mutex<Vec<(usize, f64)>>>,
     drawable_size_px: (u32, u32),
@@ -453,6 +457,9 @@ impl MetalRenderer {
             in_flight: VecDeque::new(),
             last_gpu_ms: 0.0,
             is_tracing_frames: false,
+            refresh_interval_s: None,
+            refreshes_per_frame: 1,
+            gpu_ms_since_cadence: Vec::new(),
             gpu_times: Vec::new(),
             presented_times: Arc::new(Mutex::new(Vec::new())),
             drawable_size_px: (0, 0),
@@ -465,6 +472,24 @@ impl MetalRenderer {
     ///     println!("{}", renderer.device_name());
     pub fn device_name(&self) -> String {
         self.device.name().to_string()
+    }
+
+    /// `set_refresh_interval_s` tells the renderer the display's refresh interval when frames wait
+    /// for the display (None when they don't), so it shows each frame for a whole number of
+    /// refreshes.
+    ///
+    /// Example: `renderer.set_refresh_interval_s(Some(0.01));`
+    pub fn set_refresh_interval_s(&mut self, refresh_interval_s: Option<f32>) {
+        self.refresh_interval_s = refresh_interval_s.map(f64::from);
+    }
+
+    /// `get_frame_interval_s` is how long each frame stays on screen when frames wait for the
+    /// display (a whole number of refreshes, chosen from the GPU's recent times), None otherwise.
+    ///
+    /// Example: `let dt_s: f32 = clock.step_s(measured_s, renderer.get_frame_interval_s());`
+    pub fn get_frame_interval_s(&self) -> Option<f32> {
+        self.refresh_interval_s
+            .map(|interval_s| (interval_s * f64::from(self.refreshes_per_frame)) as f32)
     }
 
     /// `set_is_tracing_frames` starts or stops keeping every frame's GPU times and the time it
@@ -511,6 +536,10 @@ impl MetalRenderer {
         let gpu_s: f64 = command_buffer.GPUEndTime() - command_buffer.GPUStartTime();
         if gpu_s > 0.0 {
             self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
+            self.gpu_ms_since_cadence.push(self.last_gpu_ms);
+            if self.gpu_ms_since_cadence.len() > MIN_GPU_SAMPLE_COUNT {
+                self.gpu_ms_since_cadence.remove(0);
+            }
         }
         if self.is_tracing_frames {
             self.gpu_times.push(CompletedFrame {
@@ -1759,7 +1788,26 @@ impl MetalRenderer {
                         });
                     unsafe { metal_drawable.addPresentedHandler(RcBlock::as_ptr(&handler)) };
                 }
-                command_buffer.presentDrawable(metal_drawable);
+                match self.refresh_interval_s {
+                    Some(refresh_s) => {
+                        if self.gpu_ms_since_cadence.len() >= MIN_GPU_SAMPLE_COUNT {
+                            let refreshes_per_frame: u32 = choose_refreshes_per_frame(
+                                self.refreshes_per_frame,
+                                &self.gpu_ms_since_cadence,
+                                refresh_s * SECONDS_TO_MS,
+                            );
+                            if refreshes_per_frame != self.refreshes_per_frame {
+                                self.refreshes_per_frame = refreshes_per_frame;
+                                self.gpu_ms_since_cadence.clear();
+                            }
+                        }
+                        command_buffer.presentDrawable_afterMinimumDuration(
+                            metal_drawable,
+                            refresh_s * f64::from(self.refreshes_per_frame),
+                        );
+                    }
+                    None => command_buffer.presentDrawable(metal_drawable),
+                }
             }
         }
         command_buffer.commit();

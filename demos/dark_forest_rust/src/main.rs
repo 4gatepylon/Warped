@@ -1163,7 +1163,8 @@ fn main() {
         let dt_s: f32 = if is_recording {
             RECORDING_DT_S
         } else {
-            frame_clock.step_s(frame_s.min(MAX_FRAME_S), refresh_interval_s)
+            renderer.set_refresh_interval_s(refresh_interval_s);
+            frame_clock.step_s(frame_s.min(MAX_FRAME_S), renderer.get_frame_interval_s())
         };
         let keys = event_pump.keyboard_state();
         let mouse_state = event_pump.mouse_state();
