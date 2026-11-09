@@ -156,6 +156,25 @@ rest at half resolution (the even pixels shaded, the rest blended), by default i
 18.7, `black_hole` 18.3 → 17.6, the spawns 15.0 → 13.5; at 2560x1440 every view is now under 16.7 ms (`wormhole`
 17.2 → 14.6). The centre is the same picture (at most 2 of 255, through the bloom).
 
+## S14. Lunar Surface's half-resolution lens, for 60 fps at 3440x1440
+
+With S13's sharp centre, three views were still over 16.7 ms at 3440x1440 (`wormhole` 19.3, `laser_open` 18.7,
+`black_hole` 17.7 ms median): refinement inside the lenses took about 5 ms of each (refined pixels painted, and
+skipping refinement altogether: 13.8, 13.7, 12.7 ms). The renderer now uses the half-resolution lens the user chose
+for Lunar Surface (its D114, option D's part B): rays count their bent steps (`BENT_STEPS_FIRST_BIT` in `surface.w`;
+the speckle share is now read through `BEAM_SPECKLE_MASK`), and a refined cell whose four samples all took 8 or more
+bent steps blends its even pixels' colours instead of tracing its three odd pixels. Snow Planet keeps its own bent
+steps (`BEND_STEP_FRAC` 0.2, S10), so Lunar's longer steps (option C) aren't needed.
+
+- **Measured** (median GPU ms, best of 3 alternating rounds under the exclusive lock): at 3440x1440 every view is
+  under 16.7 ms (`wormhole` 19.3 → 14.2, `laser_open` 18.7 → 15.6, `black_hole` 17.7 → 12.9; the rest 1-2 ms
+  faster); at 2560x1440 every view is under 12.2 ms. The warp tour in a real window (3456x1996, automatic render
+  scale): 63.4 → 71.4 fps, frames over 16.7 ms 30.4% → 1.3%.
+- **Look:** only pixels deep in a lens change (at most 0.73% of a view's pixels past 8 of 255): edges inside a lens
+  are a little stepped, and a thin laser seen through a lens is dotted.
+- **Tried and not taken:** the beam's haze between samples (Lunar's D111): the same pictures but no faster here.
+- **For the user:** like Lunar's option D, a visible trade-off; the lead takes it to the user.
+
 ## S15. No aliasing, W-138 (no aliasing)
 
 The same code as Lunar Surface's renderer (its D116) without its half-resolution lens (#465 adds that, with its
