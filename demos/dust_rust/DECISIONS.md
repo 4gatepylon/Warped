@@ -112,3 +112,7 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
     fine samples that are all fully lit with no structure near their shadow rays). The look is the same (the PR's
     difference table). At render scale 1, 2560×1440, every view but `laser_into_wormhole` is now about 16.5 ms or
     less; the default render scale stays 0.6 (item 17), for the user to raise. **User?** default render scale 1.
+21. **Safe terrain steps, the beam's haze between samples, lamp cutoffs once** (W-131, Lunar wormhole_exit slow at
+    full size; Lunar Surface's D111), shared with Lunar Surface's renderer. At render scale 1 and 2560x1440:
+    `laser_into_wormhole` 21.0 → 20.2 ms, the other views 0 to 4% faster; at most 0.1% of pixels change by more than
+    8 of 255.

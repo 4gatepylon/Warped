@@ -2019,6 +2019,23 @@
   same. `wormhole_exit` (4 m from a mouth, the lens filling the view) stays far over 16.7 ms: its rays take a hundred
   or more bent steps each; in play the window's automatic render scale keeps it fast there.
 
+### D111. Safe terrain steps, the beam's haze between samples, lamp cutoffs once, W-131 (Lunar wormhole_exit slow at full size)
+
+- **Choice:** three more changes to `render_voxel.*` (Lunar Surface, the match's copy and Dust):
+  - **Safe terrain steps:** a camera ray's terrain march also steps `TERRAIN_SAFE_STEP_FRAC` (0.8) of its gap over
+    its descent plus the steepest slope near its 4 m block (`make_slope_bound_grid`, read by `get_safe_step_m`), when
+    that is longer than the old step; a Fermi coordinate moves no faster than the ray, so the step can't pass under
+    the ground. Shadow rays keep their steps, so the penumbra is unchanged.
+  - **Beam haze:** adaptive sampling interpolates pixels whose four samples see the same beam's haze, within 0.02,
+    with no core (`HALO_SMOOTH_DEPTH`), instead of tracing each.
+  - **Lamp cutoffs:** each lamp's cutoff cosh is packed once per frame.
+- **Look:** ground hits move within the bisection's tolerance, which moves the regolith's fine texture by a pixel here
+  and there (`red_spawn`: 3% of pixels past 8 of 255, as with the bake); elsewhere under 0.05%.
+- **Alternatives tried and not taken:** a grid of the highest ground near each block (steps over clear air only):
+  slower; growing terrain steps with the whole path, as Dust does: no gain on Lunar Surface.
+- **Rationale:** 2 to 6% off every view but `wormhole_exit`; `laser_into_wormhole` 17.5 → 16.6 ms at 2560×1440
+  (p99 17.0). The 3440×1440 views over 16.7 ms (16.9 to 21 ms) and `wormhole_exit` need more than this.
+
 ## Workload
 
 ### D7. Eight fixed views

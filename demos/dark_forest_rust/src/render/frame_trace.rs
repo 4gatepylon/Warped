@@ -57,7 +57,8 @@ impl FrameTrace {
     }
 
     /// `write` joins the CPU rows with `completed` by frame index, writes one CSV row per frame
-    /// to `path`, and returns a one-line summary of the display intervals and of how far each
+    /// to `path` (its GPU time is the frame's own: from when it started or the frame before it
+    /// ended, whichever is later), and returns a one-line summary of the display intervals and of how far each
     /// frame's simulated step was from the interval it was shown for.
     ///
     /// Example: `println!("{}", trace.write(&path, &completed)?);`
@@ -72,6 +73,7 @@ impl FrameTrace {
             "frame,loop_start_s,frame_ms,dt_ms,sim_ms,build_ms,slot_wait_ms,drawable_wait_ms,render_ms,gpu_ms,gpu_end_s,presented_s,present_interval_ms"
         )?;
         let mut previous_presented_s: Option<f64> = None;
+        let mut previous_gpu_end_s: f64 = 0.0;
         let mut intervals_ms: Vec<f64> = Vec::new();
         let mut step_errors_ms: Vec<f64> = Vec::new();
         for row in &self.rows {
@@ -87,6 +89,9 @@ impl FrameTrace {
             if gpu.presented_s > 0.0 {
                 previous_presented_s = Some(gpu.presented_s);
             }
+            let own_gpu_ms: f64 =
+                (gpu.gpu_end_s - gpu.gpu_start_s.max(previous_gpu_end_s)).max(0.0) * MS_PER_S;
+            previous_gpu_end_s = previous_gpu_end_s.max(gpu.gpu_end_s);
             writeln!(
                 file,
                 "{},{:.6},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.6},{:.6},{:.3}",
@@ -99,7 +104,7 @@ impl FrameTrace {
                 row.slot_wait_ms,
                 row.drawable_wait_ms,
                 row.render_ms,
-                (gpu.gpu_end_s - gpu.gpu_start_s) * MS_PER_S,
+                own_gpu_ms,
                 gpu.gpu_end_s,
                 gpu.presented_s,
                 interval_ms

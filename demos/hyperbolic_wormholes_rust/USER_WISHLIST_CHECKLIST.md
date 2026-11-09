@@ -328,6 +328,7 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-131 Lunar wormhole_exit slow at full size.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lunar Surface's `wormhole_exit` bench view takes about 109 ms of GPU time at full 2560x1440 (the reference and the match's copy alike); in play the window's render scale drops to keep frames fast, but the view itself is far over 16.7 ms.
   #450: Lunar Surface's ground is baked and each ray tests less; 19 of 21 bench views now take at most 16.6 ms at
   2560x1440 at full resolution (`wormhole_exit` 109 → 49.5 ms, still over; in play the render scale drops there).
+  #454: safe terrain steps and the beam's haze between samples, 2-6% more; `laser_into_wormhole` 16.6 ms.
 
 ## Done
 

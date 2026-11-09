@@ -67,6 +67,9 @@ const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
 const TERRAIN_HEIGHTS_TEXTURE_INDEX: usize = 16;
 const TERRAIN_SLOPES_TEXTURE_INDEX: usize = 17;
+const TERRAIN_SLOPE_BOUNDS_TEXTURE_INDEX: usize = 18;
+const TERRAIN_CEILING_CELLS: usize = 16;
+const LIGHT_CUTOFF_FRAC: f64 = 3.0;
 const BYTES_PER_FLOAT: usize = 4;
 const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
 const MILKY_WAY_TEXTURE_INDEX: usize = 3;
@@ -208,6 +211,7 @@ struct GpuWarp {
 struct GpuLight {
     position: [f32; 4],
     color_radius: [f32; 4],
+    cutoff: [f32; 4],
 }
 
 /// `GpuBeam` is the shader's `BeamSegment`: its ends, its midpoint and its length, glow and code.
@@ -597,6 +601,12 @@ impl VoxelFrame {
             .map(|&(x, color, radius_m)| GpuLight {
                 position: to_f32(x),
                 color_radius: [color[0], color[1], color[2], radius_m as f32],
+                cutoff: [
+                    (LIGHT_CUTOFF_FRAC * radius_m / r).cosh() as f32,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
             })
             .collect();
         let mut gpu_beams: Vec<GpuBeam> = beams
@@ -936,6 +946,11 @@ fn make_library(
             &VOXEL_BYTES_PER_RAY_END.to_string(),
         )
         .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
+        .replace(
+            "__TERRAIN_CEILING_CELLS__",
+            &TERRAIN_CEILING_CELLS.to_string(),
+        )
+        .replace("__LIGHT_CUTOFF_FRAC__", &format!("{LIGHT_CUTOFF_FRAC:?}"))
         .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
         .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
         .replace(
@@ -997,6 +1012,59 @@ fn make_height_texture(
         )
     };
     Ok(texture)
+}
+
+/// `make_slope_bound_grid` gives, for each block of `TERRAIN_CEILING_CELLS` x
+/// `TERRAIN_CEILING_CELLS` cells of the baked `grid`, a bound on the ground's slope over that block
+/// and the eight around it: the steepest rise between neighbouring baked points there, along u or
+/// v, times the square root of 2 (a bilinear cell's slope in any direction is at most that), on a
+/// grid with the same origin.
+///
+/// Example: `let slopes = make_slope_bound_grid(&grid);`
+fn make_slope_bound_grid(grid: &HeightGrid) -> HeightGrid {
+    let n: usize = TERRAIN_CEILING_CELLS;
+    let size: [usize; 2] = [0, 1].map(|a| (grid.size[a] - 1).div_ceil(n));
+    let at = |i: usize, j: usize| grid.heights[i + grid.size[0] * j];
+    let block_slope = |bi: usize, bj: usize| -> f32 {
+        let mut steepest: f32 = 0.0;
+        let (i_end, j_end) = (
+            ((bi + 1) * n).min(grid.size[0] - 1),
+            ((bj + 1) * n).min(grid.size[1] - 1),
+        );
+        for j in bj * n..=j_end {
+            for i in bi * n..=i_end {
+                if i < i_end {
+                    steepest = steepest.max((at(i + 1, j) - at(i, j)).abs());
+                }
+                if j < j_end {
+                    steepest = steepest.max((at(i, j + 1) - at(i, j)).abs());
+                }
+            }
+        }
+        steepest * std::f32::consts::SQRT_2 / grid.cell_m as f32
+    };
+    let blocks: Vec<f32> = (0..size[1])
+        .flat_map(|j| (0..size[0]).map(move |i| (i, j)))
+        .map(|(i, j)| block_slope(i, j))
+        .collect();
+    let heights: Vec<f32> = (0..size[1])
+        .flat_map(|j| (0..size[0]).map(move |i| (i, j)))
+        .map(|(i, j)| {
+            let mut steepest: f32 = 0.0;
+            for nj in j.saturating_sub(1)..=(j + 1).min(size[1] - 1) {
+                for ni in i.saturating_sub(1)..=(i + 1).min(size[0] - 1) {
+                    steepest = steepest.max(blocks[ni + size[0] * nj]);
+                }
+            }
+            steepest
+        })
+        .collect();
+    HeightGrid {
+        origin_m: grid.origin_m,
+        cell_m: grid.cell_m * n as f64,
+        size,
+        heights,
+    }
 }
 
 /// `make_slope_texture` makes the texture `bake_terrain_slopes` fills with the terrain's slopes
@@ -1064,6 +1132,7 @@ pub struct VoxelGpu {
     textures: SurfaceTextures,
     meshes: Option<(*const Vec<MeshModel>, MeshGpu)>,
     terrain_heights: (*const HeightGrid, Texture),
+    terrain_slope_bounds: Texture,
     terrain_slopes: Texture,
     are_slopes_baked: bool,
     post: Option<PostTextures>,
@@ -1103,6 +1172,7 @@ impl VoxelGpu {
             textures,
             meshes: None,
             terrain_heights: (std::ptr::null(), make_height_texture(device, None)?),
+            terrain_slope_bounds: make_height_texture(device, None)?,
             terrain_slopes: make_slope_texture(device, None)?,
             are_slopes_baked: false,
             post: None,
@@ -1185,12 +1255,19 @@ impl VoxelGpu {
         let grid_key: *const HeightGrid = grid.map_or(std::ptr::null(), std::ptr::from_ref);
         if self.terrain_heights.0 != grid_key {
             self.terrain_heights = (grid_key, make_height_texture(device, grid)?);
+            self.terrain_slope_bounds =
+                make_height_texture(device, grid.map(make_slope_bound_grid).as_ref())?;
             self.terrain_slopes = make_slope_texture(device, grid)?;
             self.are_slopes_baked = false;
         }
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURE WILL HAPPEN
         unsafe {
-            encoder.setTexture_atIndex(Some(&self.terrain_heights.1), TERRAIN_HEIGHTS_TEXTURE_INDEX)
+            encoder
+                .setTexture_atIndex(Some(&self.terrain_heights.1), TERRAIN_HEIGHTS_TEXTURE_INDEX);
+            encoder.setTexture_atIndex(
+                Some(&self.terrain_slope_bounds),
+                TERRAIN_SLOPE_BOUNDS_TEXTURE_INDEX,
+            );
         };
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN

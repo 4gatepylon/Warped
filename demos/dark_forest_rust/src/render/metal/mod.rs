@@ -26,11 +26,11 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
 use objc2_metal::{
-    MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
-    MTLCreateSystemDefaultDevice, MTLCullMode, MTLDevice, MTLDrawable, MTLIndexType, MTLLoadAction,
-    MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLResourceOptions, MTLScissorRect, MTLStoreAction, MTLTexture, MTLTextureType,
-    MTLTextureUsage, MTLViewport, MTLWinding,
+    MTLBlitCommandEncoder, MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder,
+    MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLCullMode, MTLDevice, MTLDrawable,
+    MTLIndexType, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder,
+    MTLRenderPassDescriptor, MTLResourceOptions, MTLScissorRect, MTLStoreAction, MTLTexture,
+    MTLTextureType, MTLTextureUsage, MTLViewport, MTLWinding,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
@@ -271,6 +271,9 @@ pub struct MetalRenderer {
     white_texture: Texture,
     flat_normal_texture: Texture,
     shadow_map: Texture,
+    static_shadow_map: Texture,
+    static_shadow_keys: [Option<(Mat4, usize)>; CASCADE_COUNT],
+    previous_cascades: Option<Cascades>,
     environment: Option<EnvironmentState>,
     sky_visibility: Option<SkyVisibility>,
     targets: Option<Targets>,
@@ -278,6 +281,7 @@ pub struct MetalRenderer {
     frame_index: usize,
     in_flight: VecDeque<(usize, CommandBuffer)>,
     last_gpu_ms: f64,
+    last_gpu_end_s: f64,
     is_tracing_frames: bool,
     refresh_interval_s: Option<f64>,
     refreshes_per_frame: u32,
@@ -369,6 +373,73 @@ fn draw_fullscreen(
     encoder.endEncoding();
 }
 
+/// `LENS_SCISSOR_PAD_PX` widens the lens pass's rectangle so the tone map's filtered reads near its
+/// edge stay inside what was drawn.
+const LENS_SCISSOR_PAD_PX: f32 = 2.0;
+
+/// `get_lens_scissor` is the rectangle of a `width_px` by `height_px` target that holds every
+/// mouth's reach on screen: None when no mouth is in `frustum`, the whole target when the camera is
+/// within a reach (a corner of its box is behind the camera).
+///
+/// Example: `let rect: Option<MTLScissorRect> = get_lens_scissor(&mouths, view_proj, &frustum, 1280, 720);`
+fn get_lens_scissor(
+    mouths: &[LensMouth],
+    view_proj: Mat4,
+    frustum: &Frustum,
+    width_px: usize,
+    height_px: usize,
+) -> Option<MTLScissorRect> {
+    let whole: MTLScissorRect = MTLScissorRect {
+        x: 0,
+        y: 0,
+        width: width_px,
+        height: height_px,
+    };
+    let mut low_ndc: Vec2 = Vec2::splat(f32::MAX);
+    let mut high_ndc: Vec2 = Vec2::splat(f32::MIN);
+    let mut is_any_in_view: bool = false;
+    for mouth in mouths
+        .iter()
+        .filter(|mouth| frustum.contains_sphere(mouth.centre_m, mouth.reach_m))
+    {
+        is_any_in_view = true;
+        for corner in 0..8 {
+            let sign: Vec3 = Vec3::new(
+                if corner & 1 == 0 { -1.0 } else { 1.0 },
+                if corner & 2 == 0 { -1.0 } else { 1.0 },
+                if corner & 4 == 0 { -1.0 } else { 1.0 },
+            );
+            let clip: Vec4 = view_proj * (mouth.centre_m + sign * mouth.reach_m).extend(1.0);
+            if clip.w <= f32::EPSILON {
+                return Some(whole);
+            }
+            let ndc: Vec2 = clip.truncate().truncate() / clip.w;
+            low_ndc = low_ndc.min(ndc);
+            high_ndc = high_ndc.max(ndc);
+        }
+    }
+    if !is_any_in_view {
+        return None;
+    }
+    let size_px: Vec2 = Vec2::new(width_px as f32, height_px as f32);
+    let to_px = |ndc: Vec2| Vec2::new(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * size_px;
+    let corner_a: Vec2 = to_px(low_ndc);
+    let corner_b: Vec2 = to_px(high_ndc);
+    let left_top: Vec2 = (corner_a.min(corner_b) - LENS_SCISSOR_PAD_PX)
+        .floor()
+        .clamp(Vec2::ZERO, size_px);
+    let right_bottom: Vec2 = (corner_a.max(corner_b) + LENS_SCISSOR_PAD_PX)
+        .ceil()
+        .clamp(Vec2::ZERO, size_px);
+    let extent: Vec2 = right_bottom - left_top;
+    (extent.x > 0.0 && extent.y > 0.0).then_some(MTLScissorRect {
+        x: left_top.x as usize,
+        y: left_top.y as usize,
+        width: extent.x as usize,
+        height: extent.y as usize,
+    })
+}
+
 /// `gpu_particles` converts particles to their GPU layout.
 fn gpu_particles(particles: &[Particle]) -> Vec<GpuParticle> {
     particles
@@ -414,19 +485,17 @@ impl MetalRenderer {
             pixel_texture(MTLPixelFormat::RGBA8Unorm, &[255, 255, 255, 255], "white");
         let flat_normal_texture: Texture =
             pixel_texture(MTLPixelFormat::RG8Unorm, &[128, 128], "flat_normal");
-        let shadow_map: Texture = create_texture(
-            &device,
-            &TextureSpec {
-                texture_type: MTLTextureType::Type2DArray,
-                array_length: CASCADE_COUNT,
-                ..TextureSpec::render_target(
-                    DEPTH_FORMAT,
-                    SHADOW_MAP_SIZE_PX as usize,
-                    SHADOW_MAP_SIZE_PX as usize,
-                )
-            },
-            "shadow_map",
-        );
+        let shadow_spec: TextureSpec = TextureSpec {
+            texture_type: MTLTextureType::Type2DArray,
+            array_length: CASCADE_COUNT,
+            ..TextureSpec::render_target(
+                DEPTH_FORMAT,
+                SHADOW_MAP_SIZE_PX as usize,
+                SHADOW_MAP_SIZE_PX as usize,
+            )
+        };
+        let shadow_map: Texture = create_texture(&device, &shadow_spec, "shadow_map");
+        let static_shadow_map: Texture = create_texture(&device, &shadow_spec, "static shadow_map");
         let dynamic_buffers: Vec<DynamicBuffer> = (0..FRAMES_IN_FLIGHT)
             .map(|_| DynamicBuffer {
                 buffer: device
@@ -454,6 +523,9 @@ impl MetalRenderer {
             is_capturing: false,
             flat_normal_texture,
             shadow_map,
+            static_shadow_map,
+            static_shadow_keys: [None; CASCADE_COUNT],
+            previous_cascades: None,
             environment: None,
             sky_visibility: None,
             targets: None,
@@ -461,6 +533,7 @@ impl MetalRenderer {
             frame_index: 0,
             in_flight: VecDeque::new(),
             last_gpu_ms: 0.0,
+            last_gpu_end_s: 0.0,
             is_tracing_frames: false,
             refresh_interval_s: None,
             refreshes_per_frame: 1,
@@ -572,12 +645,16 @@ impl MetalRenderer {
             .collect()
     }
 
-    /// `complete_oldest_frame` waits for the oldest frame in flight, recording its GPU time.
+    /// `complete_oldest_frame` waits for the oldest frame in flight, recording its own GPU time:
+    /// from when it started or the frame before it ended, whichever is later, to when it ended,
+    /// since a frame's work overlaps the end of the one before it.
     fn complete_oldest_frame(&mut self) {
         let (frame_index, command_buffer) =
             self.in_flight.pop_front().expect("a frame is in flight");
         command_buffer.waitUntilCompleted();
-        let gpu_s: f64 = command_buffer.GPUEndTime() - command_buffer.GPUStartTime();
+        let own_start_s: f64 = command_buffer.GPUStartTime().max(self.last_gpu_end_s);
+        let gpu_s: f64 = command_buffer.GPUEndTime() - own_start_s;
+        self.last_gpu_end_s = command_buffer.GPUEndTime();
         if gpu_s > 0.0 {
             self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
             self.gpu_ms_since_cadence.push(self.last_gpu_ms);
@@ -1278,20 +1355,40 @@ impl MetalRenderer {
             environment.sun_direction.truncate(),
             settings.shadow_distance_m.min(frame.camera.far_m),
             SHADOW_MAP_SIZE_PX,
+            self.previous_cascades.as_ref(),
         );
-        let frame_uniforms: GpuFrameUniforms =
+        self.previous_cascades = Some(cascades);
+        let mut should_redraw_static: [bool; CASCADE_COUNT] = [false; CASCADE_COUNT];
+        for (cascade, should_redraw) in should_redraw_static.iter_mut().enumerate() {
+            let key: (Mat4, usize) = (cascades.view_proj[cascade], frame.static_draw_count);
+            *should_redraw = self.static_shadow_keys[cascade] != Some(key);
+            self.static_shadow_keys[cascade] = Some(key);
+        }
+        let mut frame_uniforms: GpuFrameUniforms =
             self.frame_uniforms(frame, settings, targets, &cascades, proj, viewmodel_proj);
+        let view_frustum: Frustum = Frustum::from_view_proj(frame_uniforms.view_proj);
+        let to_gpu_light = |light: &crate::render::PointLight| GpuPointLight {
+            position_radius: light.position_m.extend(light.radius_m),
+            color: light.color_rgb.extend(0.0),
+        };
+        let mut all_point_lights: Vec<GpuPointLight> = frame
+            .point_lights
+            .iter()
+            .take(MAX_POINT_LIGHT_COUNT)
+            .map(to_gpu_light)
+            .collect();
         let mut point_lights: Vec<GpuPointLight> = frame
             .point_lights
             .iter()
             .take(MAX_POINT_LIGHT_COUNT)
-            .map(|light| GpuPointLight {
-                position_radius: light.position_m.extend(light.radius_m),
-                color: light.color_rgb.extend(0.0),
-            })
+            .filter(|light| view_frustum.contains_sphere(light.position_m, light.radius_m))
+            .map(to_gpu_light)
             .collect();
-        if point_lights.is_empty() {
-            point_lights.push(GpuPointLight::default());
+        frame_uniforms.post_params.w = point_lights.len() as f32;
+        for lights in [&mut all_point_lights, &mut point_lights] {
+            if lights.is_empty() {
+                lights.push(GpuPointLight::default());
+            }
         }
 
         let frame_index: usize = self.frame_index;
@@ -1350,12 +1447,22 @@ impl MetalRenderer {
             frame: &frame_uniforms,
             point_lights: &point_lights,
         };
+        let all_light_buffers: FrameBuffers = FrameBuffers {
+            point_lights: &all_point_lights,
+            ..buffers
+        };
 
         let command_buffer: CommandBuffer = self
             .queue
             .commandBuffer()
             .expect("command buffer creation failed");
-        self.encode_shadows(&command_buffer, frame, &cascades, &buffers);
+        self.encode_shadows(
+            &command_buffer,
+            frame,
+            &cascades,
+            &buffers,
+            should_redraw_static,
+        );
 
         let camera_frustum: Frustum = Frustum::from_view_proj(frame_uniforms.view_proj);
         let visible: Vec<&DrawItem> = frame
@@ -1655,7 +1762,16 @@ impl MetalRenderer {
         } else {
             &targets.hdr
         };
-        if let Some((lens_atlas, lens_uniforms)) = &self.lens {
+        let lens_scissor: Option<MTLScissorRect> = self.lens_live.as_ref().and_then(|live| {
+            get_lens_scissor(
+                &live.mouths,
+                frame_uniforms.view_proj,
+                &camera_frustum,
+                targets.lens.width(),
+                targets.lens.height(),
+            )
+        });
+        if let (Some((lens_atlas, lens_uniforms)), Some(scissor)) = (&self.lens, lens_scissor) {
             let live: &LensLive = self.lens_live.as_ref().expect("a lens has live slots");
             let frame_lens_uniforms: gpu_types::GpuLensUniforms = self.encode_lens_live(
                 &command_buffer,
@@ -1663,7 +1779,7 @@ impl MetalRenderer {
                 settings,
                 targets,
                 &cascades,
-                &buffers,
+                &all_light_buffers,
                 &camera_frustum,
                 (lens_particles_offset_bytes, lens_particles.len()),
                 live,
@@ -1675,6 +1791,7 @@ impl MetalRenderer {
                 &self.pipelines.lens,
                 MTLLoadAction::DontCare,
                 |encoder: &Encoder| {
+                    encoder.setScissorRect(scissor);
                     set_fragment_bytes(encoder, as_bytes(&frame_uniforms), 1);
                     set_fragment_bytes(encoder, as_bytes(&frame_lens_uniforms), 2);
                     unsafe {
@@ -1699,6 +1816,9 @@ impl MetalRenderer {
                         *uniforms
                     });
                 lens_uniforms.params.y = if self.is_capturing { 1.0 } else { 0.0 };
+                if lens_scissor.is_none() {
+                    lens_uniforms.params.x = 0.0;
+                }
                 set_fragment_bytes(encoder, as_bytes(&lens_uniforms), 2);
                 unsafe {
                     encoder.setFragmentTexture_atIndex(Some(&targets.hdr), 0);
@@ -1881,61 +2001,135 @@ impl MetalRenderer {
         }
     }
 
-    /// `encode_shadows` renders the shadow casters into each cascade.
+    /// `encode_shadows` renders the shadow casters into each cascade: the static ones (the first
+    /// `frame.static_draw_count` draws) into the static cache only where `should_redraw_static`
+    /// says the cascade moved, then copies the cache into the shadow map and draws the moving
+    /// casters on top.
     fn encode_shadows(
         &self,
         command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
         frame: &FrameDescription,
         cascades: &Cascades,
         buffers: &FrameBuffers,
+        should_redraw_static: [bool; CASCADE_COUNT],
     ) {
-        for cascade in 0..CASCADE_COUNT {
-            let descriptor: Retained<MTLRenderPassDescriptor> = MTLRenderPassDescriptor::new();
-            let depth_attachment = descriptor.depthAttachment();
-            depth_attachment.setTexture(Some(&self.shadow_map));
-            depth_attachment.setSlice(cascade);
-            depth_attachment.setLoadAction(MTLLoadAction::Clear);
-            depth_attachment.setStoreAction(MTLStoreAction::Store);
-            depth_attachment.setClearDepth(1.0);
-            let encoder = command_buffer
-                .renderCommandEncoderWithDescriptor(&descriptor)
-                .expect("render encoder creation failed");
-            encoder.setDepthStencilState(Some(&self.pipelines.depth_states.less_write));
-            encoder.setCullMode(MTLCullMode::None);
-            encoder.setDepthBias_slopeScale_clamp(SHADOW_DEPTH_BIAS, SHADOW_SLOPE_BIAS, 0.0);
-            let pass: GpuPassUniforms = GpuPassUniforms {
-                view_proj: cascades.view_proj[cascade],
-                flags: Vec4::ZERO,
-            };
-            set_vertex_bytes(&encoder, as_bytes(buffers.frame), 1);
-            set_vertex_bytes(&encoder, as_bytes(&pass), 2);
+        let casters_in = |cascade: usize, is_static: bool| -> Vec<&DrawItem> {
             let frustum: Frustum = Frustum::from_view_proj(cascades.view_proj[cascade]);
-            let (masked_casters, opaque_casters): (Vec<&DrawItem>, Vec<&DrawItem>) = frame
+            frame
                 .world_draws
                 .iter()
-                .filter(|draw| {
-                    draw.does_cast_shadow
+                .enumerate()
+                .filter(|&(index, draw)| {
+                    (index < frame.static_draw_count) == is_static
+                        && draw.does_cast_shadow
                         && self.materials[draw.material.0 as usize].alpha_mode != AlphaMode::Blend
                         && frustum.contains_sphere(draw.bounds_center_m, draw.bounds_radius_m)
                 })
-                .partition(|draw| {
-                    self.materials[draw.material.0 as usize].alpha_mode == AlphaMode::Mask
-                });
-            for (pipeline_pair, casters) in [
-                (&self.pipelines.shadow, &opaque_casters),
-                (&self.pipelines.shadow_masked, &masked_casters),
-            ] {
-                self.draw_meshes(
-                    &encoder,
-                    pipeline_pair,
-                    casters,
-                    ScenePass::Shadow,
-                    buffers,
-                    false,
+                .map(|(_, draw)| draw)
+                .collect()
+        };
+        for cascade in (0..CASCADE_COUNT).filter(|&cascade| should_redraw_static[cascade]) {
+            self.encode_shadow_casters(
+                command_buffer,
+                &self.static_shadow_map,
+                cascade,
+                MTLLoadAction::Clear,
+                &casters_in(cascade, true),
+                cascades,
+                buffers,
+            );
+        }
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .expect("blit encoder creation failed");
+        let size: objc2_metal::MTLSize = objc2_metal::MTLSize {
+            width: SHADOW_MAP_SIZE_PX as usize,
+            height: SHADOW_MAP_SIZE_PX as usize,
+            depth: 1,
+        };
+        let origin: objc2_metal::MTLOrigin = objc2_metal::MTLOrigin { x: 0, y: 0, z: 0 };
+        for cascade in 0..CASCADE_COUNT {
+            unsafe {
+                blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                    &self.static_shadow_map,
+                    cascade,
+                    0,
+                    origin,
+                    size,
+                    &self.shadow_map,
+                    cascade,
+                    0,
+                    origin,
                 );
             }
-            encoder.endEncoding();
         }
+        blit.endEncoding();
+        for cascade in 0..CASCADE_COUNT {
+            let moving: Vec<&DrawItem> = casters_in(cascade, false);
+            if !moving.is_empty() {
+                self.encode_shadow_casters(
+                    command_buffer,
+                    &self.shadow_map,
+                    cascade,
+                    MTLLoadAction::Load,
+                    &moving,
+                    cascades,
+                    buffers,
+                );
+            }
+        }
+    }
+
+    /// `encode_shadow_casters` draws `casters` into one cascade's slice of `target`, after
+    /// clearing or keeping (`load`) what it holds.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_shadow_casters(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        target: &Texture,
+        cascade: usize,
+        load: MTLLoadAction,
+        casters: &[&DrawItem],
+        cascades: &Cascades,
+        buffers: &FrameBuffers,
+    ) {
+        let descriptor: Retained<MTLRenderPassDescriptor> = MTLRenderPassDescriptor::new();
+        let depth_attachment = descriptor.depthAttachment();
+        depth_attachment.setTexture(Some(target));
+        depth_attachment.setSlice(cascade);
+        depth_attachment.setLoadAction(load);
+        depth_attachment.setStoreAction(MTLStoreAction::Store);
+        depth_attachment.setClearDepth(1.0);
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&descriptor)
+            .expect("render encoder creation failed");
+        encoder.setDepthStencilState(Some(&self.pipelines.depth_states.less_write));
+        encoder.setCullMode(MTLCullMode::None);
+        encoder.setDepthBias_slopeScale_clamp(SHADOW_DEPTH_BIAS, SHADOW_SLOPE_BIAS, 0.0);
+        let pass: GpuPassUniforms = GpuPassUniforms {
+            view_proj: cascades.view_proj[cascade],
+            flags: Vec4::ZERO,
+        };
+        set_vertex_bytes(&encoder, as_bytes(buffers.frame), 1);
+        set_vertex_bytes(&encoder, as_bytes(&pass), 2);
+        let (masked_casters, opaque_casters): (Vec<&DrawItem>, Vec<&DrawItem>) =
+            casters.iter().partition(|draw| {
+                self.materials[draw.material.0 as usize].alpha_mode == AlphaMode::Mask
+            });
+        for (pipeline_pair, pass_casters) in [
+            (&self.pipelines.shadow, &opaque_casters),
+            (&self.pipelines.shadow_masked, &masked_casters),
+        ] {
+            self.draw_meshes(
+                &encoder,
+                pipeline_pair,
+                pass_casters,
+                ScenePass::Shadow,
+                buffers,
+                false,
+            );
+        }
+        encoder.endEncoding();
     }
 }
 
@@ -1944,5 +2138,68 @@ impl Drop for MetalRenderer {
         for (_, command_buffer) in self.in_flight.drain(..) {
             command_buffer.waitUntilCompleted();
         }
+    }
+}
+
+/// `tests` checks the lens pass's rectangle.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | mouths vs view | none in view, one in view, the camera within one's reach | `test_lens_scissor_covers_the_mouths_in_view` |
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `mouth_at` is a ground gate's mouth at `centre_m`.
+    fn mouth_at(centre_m: Vec3) -> LensMouth {
+        LensMouth {
+            centre_m,
+            lens_throat_m: 0.8,
+            reach_m: 5.0,
+            lambda_squared: 0.25,
+            floor_m: 0.0,
+            partner: 0,
+        }
+    }
+
+    /// `test_lens_scissor_covers_the_mouths_in_view` checks that a mouth behind the camera gives
+    /// no rectangle, a mouth ahead gives one around the screen's centre inside the target, and a
+    /// mouth around the camera gives the whole target.
+    #[test]
+    fn test_lens_scissor_covers_the_mouths_in_view() {
+        let view_proj: Mat4 = Mat4::perspective_infinite_reverse_rh(1.2, 16.0 / 9.0, 0.05);
+        let frustum: Frustum = Frustum::from_view_proj(view_proj);
+        let (width_px, height_px) = (1280, 720);
+        let behind: Option<MTLScissorRect> = get_lens_scissor(
+            &[mouth_at(Vec3::new(0.0, 0.0, 30.0))],
+            view_proj,
+            &frustum,
+            width_px,
+            height_px,
+        );
+        assert!(behind.is_none());
+        let ahead: MTLScissorRect = get_lens_scissor(
+            &[mouth_at(Vec3::new(0.0, 0.0, -40.0))],
+            view_proj,
+            &frustum,
+            width_px,
+            height_px,
+        )
+        .expect("a mouth ahead is in view");
+        assert!(ahead.x < width_px / 2 && ahead.x + ahead.width > width_px / 2);
+        assert!(ahead.y < height_px / 2 && ahead.y + ahead.height > height_px / 2);
+        assert!(ahead.width < width_px && ahead.x + ahead.width <= width_px);
+        let around: MTLScissorRect = get_lens_scissor(
+            &[mouth_at(Vec3::new(0.0, 0.0, -2.0))],
+            view_proj,
+            &frustum,
+            width_px,
+            height_px,
+        )
+        .expect("a mouth around the camera is in view");
+        assert_eq!(
+            (around.x, around.y, around.width, around.height),
+            (0, 0, width_px, height_px)
+        );
     }
 }

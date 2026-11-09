@@ -15,6 +15,10 @@ const CASCADE_SPLIT_LAMBDA_FRAC: f32 = 0.82;
 const CASCADE_NEAR_M: f32 = 0.1;
 /// `CASCADE_CASTER_MARGIN_M` extends each cascade toward the sun, to catch tall casters.
 const CASCADE_CASTER_MARGIN_M: f32 = 120.0;
+/// `EARLY_MOVE_FRAC` of a cascade's spare margin is how far the camera may walk before the
+/// cascade moves early, on a frame when no other cascade moves, so that two cascades rarely redraw
+/// their static casters in the same frame.
+const EARLY_MOVE_FRAC: f32 = 0.6;
 /// `DEGENERATE_PLANE_LENGTH` is the plane-normal length below which a plane is ignored.
 const DEGENERATE_PLANE_LENGTH: f32 = 1e-6;
 
@@ -65,14 +69,19 @@ impl Frustum {
     }
 }
 
-/// `Cascades` is the fitted set of shadow cascades for one frame.
+/// `Cascades` is the fitted set of shadow cascades for one frame, with each cascade's centre in
+/// the light's space and its half size, which the next frame's fit keeps while they still cover
+/// its slice.
 ///
 /// Example:
-///     let cascades: Cascades = fit_cascades(&camera_info, sun_direction, 120.0, 2048);
+///     let cascades: Cascades = fit_cascades(&camera_info, sun_direction, 120.0, 2048, None);
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cascades {
     pub view_proj: [Mat4; CASCADE_COUNT],
     pub split_far_m: [f32; CASCADE_COUNT],
     pub texel_size_m: [f32; CASCADE_COUNT],
+    pub center_light_m: [Vec3; CASCADE_COUNT],
+    pub radius_m: [f32; CASCADE_COUNT],
 }
 
 /// `CascadeCamera` is the part of the camera that cascade fitting needs.
@@ -101,18 +110,24 @@ pub fn cascade_split_far_m(shadow_distance_m: f32) -> [f32; CASCADE_COUNT] {
     splits
 }
 
-/// `fit_cascades` fits one orthographic sun projection around each slice of the view frustum.
+/// `fit_cascades` fits one orthographic sun projection for each slice of the view frustum.
 ///
-/// Each cascade is a sphere around its slice, so its size doesn't change when the camera turns,
-/// and its origin snaps to whole shadow texels, so shadow edges don't shimmer when it moves.
+/// Each cascade is a square, in the sun's view, centred on the camera, as wide as the sphere around
+/// its slice (so its texels are that sphere's size whichever way the camera turns), and its centre
+/// snaps to whole shadow texels, so shadow edges don't shimmer when it moves. A cascade of
+/// `previous` with the same size is kept while it still covers everything within its slice's far
+/// distance of the camera, so turning never moves it and walking moves it only now and then: the
+/// renderer can keep its static casters' depth between frames. A cascade past `EARLY_MOVE_FRAC`
+/// of its margin moves early on a frame when no other cascade has to, one at a time.
 ///
 /// Example:
-///     let cascades: Cascades = fit_cascades(&camera, Vec3::Y, 120.0, 2048);
+///     let cascades: Cascades = fit_cascades(&camera, Vec3::Y, 120.0, 2048, Some(&last_cascades));
 pub fn fit_cascades(
     camera: &CascadeCamera,
     sun_direction: Vec3,
     shadow_distance_m: f32,
     resolution_px: u32,
+    previous: Option<&Cascades>,
 ) -> Cascades {
     let split_far_m: [f32; CASCADE_COUNT] = cascade_split_far_m(shadow_distance_m);
     let tan_half_y: f32 = (camera.fov_y_rad * 0.5).tan();
@@ -123,9 +138,17 @@ pub fn fit_cascades(
         Vec3::Y
     };
     let light_view: Mat4 = Mat4::look_to_rh(Vec3::ZERO, -sun_direction, up);
-    let mut view_proj: [Mat4; CASCADE_COUNT] = [Mat4::IDENTITY; CASCADE_COUNT];
-    let mut texel_size_m: [f32; CASCADE_COUNT] = [0.0; CASCADE_COUNT];
+    let camera_light: Vec3 = light_view.transform_point3(camera.inverse_view.w_axis.truncate());
+    let mut cascades: Cascades = Cascades {
+        view_proj: [Mat4::IDENTITY; CASCADE_COUNT],
+        split_far_m,
+        texel_size_m: [0.0; CASCADE_COUNT],
+        center_light_m: [Vec3::ZERO; CASCADE_COUNT],
+        radius_m: [0.0; CASCADE_COUNT],
+    };
     let mut near_m: f32 = CASCADE_NEAR_M;
+    let mut kept_centers: [Option<Vec3>; CASCADE_COUNT] = [None; CASCADE_COUNT];
+    let mut walked_fracs: [f32; CASCADE_COUNT] = [f32::MAX; CASCADE_COUNT];
     for index in 0..CASCADE_COUNT {
         let far_m: f32 = split_far_m[index];
         let center_depth_m: f32 = (near_m + far_m) * 0.5;
@@ -135,29 +158,51 @@ pub fn fit_cascades(
         let radius_m: f32 = far_corner
             .distance(center_view)
             .max(near_corner.distance(center_view))
+            .max(far_m)
             .ceil();
-        let center_world: Vec3 = camera.inverse_view.transform_point3(center_view);
         let texel_m: f32 = 2.0 * radius_m / resolution_px as f32;
-        let center_light: Vec3 = light_view.transform_point3(center_world);
-        let snapped_x: f32 = (center_light.x / texel_m).floor() * texel_m;
-        let snapped_y: f32 = (center_light.y / texel_m).floor() * texel_m;
+        let slack_m: f32 = (radius_m - far_m - texel_m).max(0.0);
+        if let Some(previous) = previous.filter(|previous| previous.radius_m[index] == radius_m) {
+            let center: Vec3 = previous.center_light_m[index];
+            kept_centers[index] = Some(center);
+            walked_fracs[index] =
+                (center - camera_light).abs().max_element() / slack_m.max(f32::MIN_POSITIVE);
+        }
+        cascades.texel_size_m[index] = texel_m;
+        cascades.radius_m[index] = radius_m;
+        near_m = far_m;
+    }
+    let is_any_forced: bool = walked_fracs.iter().any(|&frac| frac > 1.0);
+    let early: Option<usize> = (!is_any_forced)
+        .then(|| {
+            (0..CASCADE_COUNT)
+                .filter(|&index| walked_fracs[index] > EARLY_MOVE_FRAC)
+                .max_by(|&a, &b| walked_fracs[a].total_cmp(&walked_fracs[b]))
+        })
+        .flatten();
+    for index in 0..CASCADE_COUNT {
+        let (radius_m, texel_m) = (cascades.radius_m[index], cascades.texel_size_m[index]);
+        let is_moving: bool = walked_fracs[index] > 1.0 || early == Some(index);
+        let center_light: Vec3 = match kept_centers[index] {
+            Some(center) if !is_moving => center,
+            _ => Vec3::new(
+                (camera_light.x / texel_m).floor() * texel_m,
+                (camera_light.y / texel_m).floor() * texel_m,
+                camera_light.z,
+            ),
+        };
         let projection: Mat4 = Mat4::orthographic_rh(
-            snapped_x - radius_m,
-            snapped_x + radius_m,
-            snapped_y - radius_m,
-            snapped_y + radius_m,
+            center_light.x - radius_m,
+            center_light.x + radius_m,
+            center_light.y - radius_m,
+            center_light.y + radius_m,
             -center_light.z - radius_m - CASCADE_CASTER_MARGIN_M,
             -center_light.z + radius_m,
         );
-        view_proj[index] = projection * light_view;
-        texel_size_m[index] = texel_m;
-        near_m = far_m;
+        cascades.view_proj[index] = projection * light_view;
+        cascades.center_light_m[index] = center_light;
     }
-    Cascades {
-        view_proj,
-        split_far_m,
-        texel_size_m,
-    }
+    cascades
 }
 
 /// `tests` checks frustum culling and the shadow cascades.
@@ -169,6 +214,8 @@ pub fn fit_cascades(
 /// | sphere position | beside the frustum | `test_frustum_contains_sphere` |
 /// | cascade | split distances, first to last | `test_cascade_splits_increase` |
 /// | cascade | a point inside the first cascade's slice | `test_cascades_cover_their_slice` |
+/// | camera move vs last fit | a turn, a step within the slack, a step past the first cascade's slack | `test_cascades_stay_until_the_camera_leaves_them` |
+/// | point vs cascade | at its slice's far distance in any direction, after a turn and a step | `test_cascades_cover_their_far_distance_all_round` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,10 +248,82 @@ mod tests {
             aspect: 1.6,
         };
         let sun: Vec3 = Vec3::new(0.3, 0.8, 0.2).normalize();
-        let cascades: Cascades = fit_cascades(&camera, sun, 120.0, 2048);
+        let cascades: Cascades = fit_cascades(&camera, sun, 120.0, 2048, None);
         let point: Vec3 = Vec3::new(0.0, 0.0, -cascades.split_far_m[0] * 0.5);
         let ndc: Vec3 = cascades.view_proj[0].project_point3(point);
         assert!(ndc.x.abs() < 1.0 && ndc.y.abs() < 1.0);
         assert!(ndc.z > 0.0 && ndc.z < 1.0);
+    }
+
+    /// `camera_at` is a 75° camera at `position_m` turned `yaw_rad` about the vertical.
+    fn camera_at(position_m: Vec3, yaw_rad: f32) -> CascadeCamera {
+        CascadeCamera {
+            inverse_view: Mat4::from_translation(position_m) * Mat4::from_rotation_y(yaw_rad),
+            fov_y_rad: 75.0_f32.to_radians(),
+            aspect: 2.4,
+        }
+    }
+
+    /// `SUN` is a sun high in the south-west.
+    const SUN: Vec3 = Vec3::new(-0.4, 0.8, 0.3);
+
+    /// `test_cascades_stay_until_the_camera_leaves_them` checks that a turn and a short step keep
+    /// every cascade, and that a step past the first cascade's slack (on every axis of the sun's
+    /// view, since the step is √3 times it) moves it but not the last.
+    #[test]
+    fn test_cascades_stay_until_the_camera_leaves_them() {
+        let sun: Vec3 = SUN.normalize();
+        let first: Cascades = fit_cascades(&camera_at(Vec3::ZERO, 0.0), sun, 110.0, 2048, None);
+        let turned: Cascades =
+            fit_cascades(&camera_at(Vec3::ZERO, 2.0), sun, 110.0, 2048, Some(&first));
+        assert_eq!(turned.view_proj, first.view_proj);
+        let stepped: Cascades = fit_cascades(
+            &camera_at(Vec3::new(0.3, 0.0, 0.2), 2.0),
+            sun,
+            110.0,
+            2048,
+            Some(&turned),
+        );
+        assert_eq!(stepped.view_proj, first.view_proj);
+        let slack_m: f32 = first.radius_m[0] - first.split_far_m[0];
+        let walked: Cascades = fit_cascades(
+            &camera_at(Vec3::new((slack_m + 1.0) * 3.0_f32.sqrt(), 0.0, 0.0), 2.0),
+            sun,
+            110.0,
+            2048,
+            Some(&stepped),
+        );
+        assert_ne!(walked.view_proj[0], first.view_proj[0]);
+        assert_eq!(
+            walked.view_proj[CASCADE_COUNT - 1],
+            first.view_proj[CASCADE_COUNT - 1]
+        );
+    }
+
+    /// `test_cascades_cover_their_far_distance_all_round` checks that, after a turn and a step
+    /// that keep the cascades, points at each slice's far distance in 26 directions around the
+    /// camera land inside that cascade's map and depth range.
+    #[test]
+    fn test_cascades_cover_their_far_distance_all_round() {
+        let sun: Vec3 = SUN.normalize();
+        let first: Cascades = fit_cascades(&camera_at(Vec3::ZERO, 0.0), sun, 110.0, 2048, None);
+        let position_m: Vec3 = Vec3::new(0.4, 0.1, -0.3);
+        let moved: Cascades =
+            fit_cascades(&camera_at(position_m, 1.0), sun, 110.0, 2048, Some(&first));
+        for index in 0..CASCADE_COUNT {
+            for (x, y, z) in (-1..=1)
+                .flat_map(|x| (-1..=1).flat_map(move |y| (-1..=1).map(move |z| (x, y, z))))
+                .filter(|&direction| direction != (0, 0, 0))
+            {
+                let direction: Vec3 = Vec3::new(x as f32, y as f32, z as f32).normalize();
+                let point: Vec3 = position_m + direction * moved.split_far_m[index];
+                let ndc: Vec3 = moved.view_proj[index].project_point3(point);
+                assert!(
+                    ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0,
+                    "{index} {direction} {ndc}"
+                );
+                assert!((0.0..=1.0).contains(&ndc.z), "{index} {direction} {ndc}");
+            }
+        }
     }
 }
