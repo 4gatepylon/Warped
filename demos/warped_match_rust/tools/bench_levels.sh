@@ -15,7 +15,10 @@
 #
 # Must know:
 #     Limitations:
-#         - Dark Forest draws in a window sized in points, so the main display must have 2 pixels per point.
+#         - Dark Forest draws in a window of half the image size in points, at render scale 2 when the main display
+#           has 1 pixel per point, so its last pass (FXAA and the HUD) runs at half the image size there.
+#     Gotchas:
+#         - A level that fails or times no views gets a row saying so, and the run carries on to the next level.
 #     Side effects:
 #         - Each ray-marched level also keeps its own run folder in `demos/<level>_rust/.artifacts/bench_views/`.
 #     Performance:
@@ -25,7 +28,7 @@ set -euo pipefail
 COMMAND_LINE="$0 $*"
 MATCH_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DEMOS_DIR="$(dirname "$MATCH_DIR")"
-PIXELS_PER_POINT=2
+IMAGE_PX_PER_WINDOW_PT=2
 WINDOWED_MAP=-
 LEVELS=(
   "Dust dust_rust hyperbolic-wormholes dust"
@@ -59,15 +62,22 @@ done
 for pair in "--width-px $width_px" "--height-px $height_px" "--frame-count $frame_count" "--view-s $view_s"; do
   [[ "${pair#* }" =~ ^[1-9][0-9]*$ ]] || { echo "$pair must be a positive whole number; $EXAMPLE" >&2; exit 2; }
 done
-(( width_px % PIXELS_PER_POINT == 0 && height_px % PIXELS_PER_POINT == 0 )) ||
+(( width_px % IMAGE_PX_PER_WINDOW_PT == 0 && height_px % IMAGE_PX_PER_WINDOW_PT == 0 )) ||
   { echo "--width-px and --height-px must be even, got $width_px x $height_px; $EXAMPLE" >&2; exit 2; }
 [[ "$label" =~ ^[A-Za-z0-9_-]*$ ]] || { echo "--label must be letters, digits, - and _, got $label; $EXAMPLE" >&2; exit 2; }
 
 run_dir="$MATCH_DIR/.artifacts/bench_levels/$(date -u +%Y%m%d-%H%M%S)${label:+-$label}"
 voxel_flags=(--bench-views --json --width-px "$width_px" --height-px "$height_px" --frame-count "$frame_count"
   --label bench-levels)
-window_flags=(--bench-views "$view_s" --width-pt $((width_px / PIXELS_PER_POINT))
-  --height-pt $((height_px / PIXELS_PER_POINT)))
+display_px_per_pt="$(system_profiler SPDisplaysDataType | awk -F': ' '
+  /Resolution:/ {split($2, size, " "); pixels = size[1]}
+  /UI Looks like:/ {split($2, size, " "); points = size[1]}
+  /Main Display: Yes/ {print pixels / points; exit}')"
+[[ "$display_px_per_pt" =~ ^[12]$ ]] ||
+  { echo "the main display has $display_px_per_pt pixels per point; Dark Forest's timing needs 1 or 2" >&2; exit 1; }
+window_flags=(--bench-views "$view_s" --width-pt $((width_px / IMAGE_PX_PER_WINDOW_PT))
+  --height-pt $((height_px / IMAGE_PX_PER_WINDOW_PT)) --render-scale $((IMAGE_PX_PER_WINDOW_PT / display_px_per_pt)))
+window_px="$((width_px / IMAGE_PX_PER_WINDOW_PT * display_px_per_pt))x$((height_px / IMAGE_PX_PER_WINDOW_PT * display_px_per_pt))"
 if (( is_dry_run )); then
   echo "would build and run these, each in its demos/<folder>/, and write $run_dir:"
   for level in "${LEVELS[@]}"; do
@@ -103,14 +113,22 @@ rows=()
 for level in "${LEVELS[@]}"; do
   read -r name folder binary map <<< "$level"
   echo "Timing $name..." >&2
+  level_rows=""
   if [ "$map" = "$WINDOWED_MAP" ]; then
-    (cd "$DEMOS_DIR/$folder" && "./.build/release/$binary" "${window_flags[@]}") > "$run_dir/$name.txt" 2>&1
-    level_rows="$(sed -nE "s/^view ([A-Za-z]+) at ${width_px}x${height_px} px: .*GPU median ([0-9.]+) ms.*GPU p99 ([0-9.]+) ms.*/| ${name/-/ } | \1 | \2 | \3 |/p" "$run_dir/$name.txt")"
-    [ -n "$level_rows" ] || { echo "$name timed no views at ${width_px}x${height_px} px; see $run_dir/$name.txt" >&2; exit 1; }
+    log="$run_dir/$name.txt"
+    if (cd "$DEMOS_DIR/$folder" && "./.build/release/$binary" "${window_flags[@]}") > "$log" 2>&1; then
+      level_rows="$(sed -nE "s/^view ([A-Za-z]+) at ${window_px} px: .*GPU median ([0-9.]+) ms.*GPU p99 ([0-9.]+) ms.*/| ${name/-/ } | \1 | \2 | \3 |/p" "$log")"
+    fi
   else
-    (cd "$DEMOS_DIR/$folder" && "./.build/release/$binary" --map "$map" "${voxel_flags[@]}") \
-      > "$run_dir/$name.json" 2> "$run_dir/$name.log"
-    level_rows="$(jq -r --arg level "${name/-/ }" "$JQ_ROWS" "$run_dir/$name.json")"
+    log="$run_dir/$name.log"
+    if (cd "$DEMOS_DIR/$folder" && "./.build/release/$binary" --map "$map" "${voxel_flags[@]}") \
+      > "$run_dir/$name.json" 2> "$log"; then
+      level_rows="$(jq -r --arg level "${name/-/ }" "$JQ_ROWS" "$run_dir/$name.json" || true)"
+    fi
+  fi
+  if [ -z "$level_rows" ]; then
+    echo "warning: $name timed no views; see $log" >&2
+    level_rows="| ${name/-/ } | no views timed (see \`$(basename "$log")\`) | - | - |"
   fi
   rows+=("$level_rows")
 done
