@@ -91,7 +91,6 @@ is in [`AGENTS.md`](AGENTS.md).
   play but has a dashboard where they can change or reset those settings.
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
-- [ ] **W-127 Dark Forest canopy flicker.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): In about one fixed-step capture in three or four, a few thousand canopy pixels differ, also on the base build before any of the 2026-11-08 work; it looks like a GPU race in the FPS-demo renderer.
 - [ ] **W-128 Dark Forest double lens.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Standing within 4 m of a gate shows a faint second image of the wormhole's lens over the direct view.
 - [ ] **W-129 Dark Forest lasers off in the lens.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lasers seen through a wormhole lens are drawn in the lens atlas's direction: exact for shots through the throat, slightly off their true place otherwise (#426).
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
@@ -101,6 +100,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
+- [?] **W-127 Dark Forest canopy flicker.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): In about one fixed-step capture in three or four, a few thousand canopy pixels differ, also on the base build before any of the 2026-11-08 work; it looks like a GPU race in the FPS-demo renderer.
+  #444: the forest is drawn in 8 m tiles, and repeat captures no longer differ in thousands of canopy pixels (8 of 20 differ in at most 28 pixels by 1-2/255, against 4 of 20 by up to 4,173 pixels and 23/255 before).
 - [?] **W-132 City Sphere stairs hole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): The stairs' hole in the glass (#429) is wider than a lift hole: shots pass through it, and players on the glass level can fall in onto the steps.
   #437: the hole opens only as wide as the stairs (a visible change to the hole's outline, awaiting the user's OK).
 - [?] **W-124 Four map demos.** "Have a team of sub-agents each try to make a demo analogous to the Rust wormholes
