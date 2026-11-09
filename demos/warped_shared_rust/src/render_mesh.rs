@@ -23,7 +23,7 @@ use objc2_metal::{MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLResourceOpt
 use rayon::prelude::*;
 
 use crate::mesh::MeshModel;
-use crate::voxel_textures::{make_array, make_mips};
+use crate::texture_arrays::{make_array, make_mips};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;

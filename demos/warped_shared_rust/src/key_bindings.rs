@@ -339,7 +339,7 @@ mod tests {
 
     use super::*;
 
-    const PLAYER_YAML: &str = include_str!("../player_settings.yaml");
+    const PLAYER_YAML: &str = include_str!("../../hyperbolic_wormholes_rust/player_settings.yaml");
 
     /// `read_keys` reads the key bindings in the `keys` section of a player settings file.
     ///

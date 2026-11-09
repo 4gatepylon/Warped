@@ -1,7 +1,8 @@
 //! `app_bundle.rs` finds the folders of files the game reads while it runs, the fps_demo's assets
 //! and the maps' models: inside `Warped.app` when the game runs from it, else in the checkout.
 //!
-//! Interface: `ResourceFolder` (`get_path`), `ASSETS`, `MODELS`, `get_app_resources_folder`.
+//! Interface: `ResourceFolder` (`get_path`), `ASSETS`, `MODELS`, `get_model_path`,
+//! `get_app_resources_folder`.
 //!
 //! Example: `let rifle: PathBuf = ASSETS.get_path().join("models/bolt_action_rifle_7_62");`
 //!
@@ -41,6 +42,14 @@ impl ResourceFolder {
             None => Path::new(env!("CARGO_MANIFEST_DIR")).join(self.checkout_folder),
         }
     }
+}
+
+/// `get_model_path` gives the `scene.gltf` of the model folder `model` in `common/maps/models/`, or in
+/// the app's copy of it when the game runs from `Warped.app`.
+///
+/// Example: `let path: PathBuf = get_model_path("hesco_barrier");`
+pub fn get_model_path(model: &str) -> PathBuf {
+    MODELS.get_path().join(model).join("scene.gltf")
 }
 
 /// `get_app_resources_folder` gives the app's `Contents/Resources/` when this program runs from an

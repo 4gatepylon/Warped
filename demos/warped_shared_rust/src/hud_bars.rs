@@ -13,9 +13,9 @@
 //! Must know:
 //! - Gotchas: the CPU renderer's window draws these rectangles flat, without their style or pulses.
 
-use crate::render_metal::{MAX_RECT_PULSE_COUNT, NO_RECT_PULSE, OverlayRect, RectPulse, RectStyle};
+use crate::overlay::{MAX_RECT_PULSE_COUNT, NO_RECT_PULSE, OverlayRect, RectPulse, RectStyle};
 
-pub(crate) const BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.016];
+pub const BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.016];
 const MAX_SEGMENT_COUNT: u32 = 20;
 const SEGMENT_GAP_FRAC: f32 = 0.0035;
 const FILL_TOLERANCE: f64 = 0.05;
@@ -39,7 +39,7 @@ const WHITE_RGB: [f32; 3] = [1.0, 1.0, 1.0];
 
 /// `PULSE_TUNING` is how the HUD's bars pulse, the `PulseTuning` the user picked (D94's variant D):
 /// wide, soft swells whose speed, frequency and strength grow with the value's smoothed rate.
-pub(crate) const PULSE_TUNING: PulseTuning = PulseTuning {
+pub const PULSE_TUNING: PulseTuning = PulseTuning {
     smoothing_s: 0.3,
     full_rate_frac_per_s: 0.15,
     use_opacity: 0.5,
@@ -59,7 +59,7 @@ pub(crate) const PULSE_TUNING: PulseTuning = PulseTuning {
 /// them, at zero and at full strength (in between, in proportion); their half width (of the
 /// screen's width) and their half height (of the bar's height).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PulseTuning {
+pub struct PulseTuning {
     pub smoothing_s: f64,
     pub full_rate_frac_per_s: f64,
     pub use_opacity: f32,
@@ -86,7 +86,7 @@ enum PulseKind {
 /// pulses running, the time until the next one starts, and where each runs along the bar (0 its
 /// start, 1 its end; none for a free slot).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct BarPulses {
+pub struct BarPulses {
     smoothed_frac: f64,
     rate_frac_per_s: f64,
     kind: Option<PulseKind>,
@@ -99,7 +99,7 @@ impl BarPulses {
     ///
     /// Example: `let pulses = BarPulses::New(1.0);`
     #[allow(non_snake_case)]
-    pub(crate) fn New(value_frac: f64) -> BarPulses {
+    pub fn New(value_frac: f64) -> BarPulses {
         BarPulses {
             smoothed_frac: value_frac,
             rate_frac_per_s: 0.0,
@@ -117,13 +117,7 @@ impl BarPulses {
     /// A change of kind drops the pulses of the old one.
     ///
     /// Example: `self.energy_pulses.update(dt_s, energy_frac, 10, &PULSE_TUNING);`
-    pub(crate) fn update(
-        &mut self,
-        dt_s: f64,
-        value_frac: f64,
-        segment_count: u32,
-        tuning: &PulseTuning,
-    ) {
+    pub fn update(&mut self, dt_s: f64, value_frac: f64, segment_count: u32, tuning: &PulseTuning) {
         self.smoothed_frac +=
             (value_frac - self.smoothed_frac) * (1.0 - (-dt_s / tuning.smoothing_s).exp());
         self.rate_frac_per_s = (value_frac - self.smoothed_frac) / tuning.smoothing_s;
@@ -186,7 +180,7 @@ impl BarPulses {
     /// `bar_rgb` lightened while it rises; `NO_RECT_PULSE` when none runs.
     ///
     /// Example: `let pulse = pulses.make_rect_pulse([0.03, 0.87], 12, 0.75, use_rgb, rgb, &PULSE_TUNING);`
-    pub(crate) fn make_rect_pulse(
+    pub fn make_rect_pulse(
         &self,
         bar_min_frac: [f32; 2],
         segment_count: u32,
@@ -261,7 +255,7 @@ fn get_filled_end_frac(segment_count: u32, filled_frac: f64) -> f32 {
 /// (`make_glass_rect`), the first carrying the bar's `pulse`.
 ///
 /// Example: `let rects = make_segmented_bar([0.03, 0.87], 12, 0.5, [0.35, 0.95, 0.45], pulse);`
-pub(crate) fn make_segmented_bar(
+pub fn make_segmented_bar(
     min_frac: [f32; 2],
     segment_count: u32,
     filled_frac: f64,
@@ -290,7 +284,7 @@ pub(crate) fn make_segmented_bar(
 /// segments' look (`make_glass_rect`).
 ///
 /// Example: `let rects = make_progress_bar([0.4, 0.62], [0.2, 0.02], 0.5, [1.0, 0.85, 0.3]);`
-pub(crate) fn make_progress_bar(
+pub fn make_progress_bar(
     min_frac: [f32; 2],
     size_frac: [f32; 2],
     filled_frac: f32,

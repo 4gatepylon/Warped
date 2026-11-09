@@ -28,8 +28,8 @@ use objc2_metal::{
 use rayon::prelude::*;
 
 use crate::fps_demo_assets::{check_asset, get_asset_path, import_gltf};
-use crate::render_metal::OverlayWand;
-use crate::voxel_textures::{make_array, make_mips};
+use crate::overlay::OverlayWand;
+use crate::texture_arrays::{make_array, make_mips};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
@@ -191,7 +191,7 @@ struct HandLight {
 }
 
 /// `HAND_LIGHT_BYTES` is the size of a `HandLight`, for the buffer `probe_hand_light` writes.
-pub(crate) const HAND_LIGHT_BYTES: usize = std::mem::size_of::<HandLight>();
+pub const HAND_LIGHT_BYTES: usize = std::mem::size_of::<HandLight>();
 
 /// `FIXED_HAND_LIGHT` lights the gun model on maps whose renderer doesn't probe their light (the
 /// house): a key light from the upper left, lit regolith below and black space above.

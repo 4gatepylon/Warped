@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use glam::{DVec3, Mat3, Mat4, Vec2, Vec3};
 
+use crate::app_bundle::get_model_path;
 use crate::fps_demo_assets::import_gltf;
-use crate::map::get_model_path;
 
 const LEAF_TRIANGLE_COUNT: usize = 4;
 const PARALLEL_DET: f64 = 1e-12;

@@ -3,16 +3,28 @@
 //! geodesics, and distances there are at most the hyperbolic ones). Each shape gives a lower bound
 //! on the distance from q to it, so a chord can be sphere-traced, as `render_voxel.metal` does.
 //!
-//! Interface: `Shape`, `ShapeKind`, `get_distance_m`, `find_hit_mu`.
+//! Interface: `MapShape`, `Shape`, `ShapeKind`, `get_distance_m`, `find_hit_mu`.
 //!
 //! Example: `let (d_m, i) = get_distance_m(&shapes, DVec3::ZERO);`
 
 use glam::DVec3;
-
-use crate::map::MapShape;
+use serde::Deserialize;
 
 const HIT_M: f64 = 0.002;
 const MAX_STEPS: usize = 160;
+
+/// `MapShape` is one smooth solid of a structure, in its local chart (meters): a kind (`box`,
+/// `cylinder` or `ellipsoid`), centre, half sizes, edge rounding, a cylinder's axis and a material.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapShape {
+    pub kind: String,
+    pub centre_m: [f64; 3],
+    pub half_m: [f64; 3],
+    pub round_m: Option<f64>,
+    pub axis: Option<u8>,
+    pub material: u8,
+}
 
 /// `ShapeKind` is a shape's form; its value is the kind `render_voxel.metal` reads.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

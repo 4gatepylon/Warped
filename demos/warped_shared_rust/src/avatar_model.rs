@@ -19,8 +19,8 @@ use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use gltf::animation::Property;
 use gltf::animation::util::ReadOutputs;
 
+use crate::app_bundle::get_model_path;
 use crate::fps_demo_assets::import_gltf;
-use crate::map::get_model_path;
 use crate::mesh::{MeshMaterial, MeshModel, MeshTriangle, read_materials};
 
 /// `BODY_MODEL` is the folder of the players' body model in `common/maps/models/`.
