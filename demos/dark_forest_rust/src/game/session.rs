@@ -16,7 +16,7 @@ use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::audio::{Audio, Sound};
 use super::bots::{
-    BOT_HEIGHT_M, BOT_MAX_HEALTH, Bot, BotClip, BotContext, BotShot, RESPAWN_DELAY_S,
+    BOT_HEIGHT_M, BOT_MAX_HEALTH, Bot, BotContext, BotShot, RESPAWN_DELAY_S,
 };
 use super::collision::{Aabb, cast_ray};
 use super::console_bot::{BotWalker, WalkStep};
@@ -30,6 +30,7 @@ use super::nav::NavGraph;
 use super::player::{MAX_HEALTH, Movement, Player, PlayerInput};
 use super::world::{Arena, Surface};
 use crate::assets::gltf_model::Trs;
+use warped_shared::avatar_model::AvatarClip;
 use crate::console_reach::ConsolePlace;
 use crate::render::overlay::{HitEffect, OverlayRect};
 use crate::render::{Beam, Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
@@ -271,8 +272,18 @@ pub struct RemoteBot {
     pub beam_speckle_frac: f64,
 }
 
-/// `TEAM_TINTS` are the robots' main colours per team (blue, red).
-const TEAM_TINTS: [Vec3; 2] = [Vec3::new(0.12, 0.25, 0.75), Vec3::new(0.75, 0.14, 0.1)];
+/// `TEAM_BODY_RGB` are the teams' colours (blue, red) that a robot's teal turns into: Lunar
+/// Surface's `minimap::TEAM_COLORS`, which its bodies take.
+const TEAM_BODY_RGB: [Vec3; 2] = [Vec3::new(0.35, 0.6, 1.0), Vec3::new(1.0, 0.35, 0.3)];
+/// `ROBOT_SCREEN_MATERIAL` is the body model's see-through face glass, left out as Lunar Surface
+/// leaves it out (it would hide the glowing eyes).
+const ROBOT_SCREEN_MATERIAL: &str = "Screen";
+/// `MIN_CLIP_S` is the shortest a clip is taken to last, so a clip without keys doesn't divide by 0.
+const MIN_CLIP_S: f64 = 1e-3;
+/// `GROUND_PROBE_M` is how far below a robot's feet something must be for it to stand on it, and
+/// `GROUND_PROBE_START_M` how far above its feet the probe starts.
+const GROUND_PROBE_M: f32 = 0.1;
+const GROUND_PROBE_START_M: f32 = 0.05;
 
 /// `GROUND_PATROL` is the loop the autopilot walks by default, on the ground.
 const GROUND_PATROL: [Vec3; 6] = [
@@ -1071,7 +1082,6 @@ impl Session {
             })
             .collect();
         for remote in &mut self.remote_bots {
-            remote.bot.animation.advance(dt_s, 1.0);
             remote.was_firing = remote.is_firing;
         }
         for (frame, is_rifle, speckle_frac, team) in starting {
@@ -1110,6 +1120,37 @@ impl Session {
         self.kill_marker_s = (self.kill_marker_s - dt_s).max(0.0);
         self.hit_effect_frac =
             fade_effect_frac(self.hit_effect_frac, f64::from(dt_s), HIT_EFFECTS.effect_s);
+        self.follow_robot_gaits(scene, f64::from(dt_s));
+    }
+
+    /// `follow_robot_gaits` moves every robot's gait on (`Bot::follow_gait`), the enemies' and the
+    /// other players', each supported while on a ladder or with something under its feet.
+    fn follow_robot_gaits(&mut self, scene: &Scene, dt_s: f64) {
+        let run_from_m_per_s: f32 = self.get_run_from_m_per_s();
+        let now_s: f64 = f64::from(self.time_s);
+        let ladders = &self.arena.ladders;
+        for bot in self
+            .bots
+            .iter_mut()
+            .chain(self.remote_bots.iter_mut().map(|remote| &mut remote.bot))
+        {
+            let is_on_ground: bool = bot.is_climbing()
+                || ladders.iter().any(|ladder| ladder.aabb.overlaps(&bot.body()))
+                || cast_ray(
+                    &scene.solids,
+                    bot.feet_m + Vec3::Y * GROUND_PROBE_START_M,
+                    Vec3::NEG_Y,
+                    GROUND_PROBE_START_M + GROUND_PROBE_M,
+                )
+                .is_some();
+            bot.follow_gait(is_on_ground, run_from_m_per_s, now_s, dt_s);
+        }
+    }
+
+    /// `get_run_from_m_per_s` is the speed from which a robot runs rather than walks: halfway
+    /// between walking and sprinting, as Lunar Surface's `avatar_animation` takes it.
+    fn get_run_from_m_per_s(&self) -> f32 {
+        (self.movement.walk_m_per_s + self.movement.sprint_m_per_s) / 2.0
     }
 
     /// `add_remote_flight` starts the beam of another player's shot as Lunar Surface draws it: traced
@@ -1157,44 +1198,29 @@ impl Session {
         );
     }
 
-    /// `bot_pose` samples a bot's blended animation pose.
-    fn bot_pose(bot: &Bot, scene: &Scene) -> Vec<Trs> {
+    /// `bot_pose` gives a bot's pose: once dead, its death clip from when it fell (held at the
+    /// end); otherwise the clip and time its gait gives (`Gait::get_pose`, Lunar Surface's rules
+    /// for which clip and at what speed), looping a looping clip and holding the others' last pose.
+    fn bot_pose(bot: &Bot, scene: &Scene, now_s: f64, run_from_m_per_s: f64) -> Vec<Trs> {
         let skeleton = scene
             .robot
             .skeleton
             .as_ref()
             .expect("the robot is animated");
-        let clip_index = |clip: BotClip| match clip {
-            BotClip::Idle => scene.robot_clips[0],
-            BotClip::Walk => scene.robot_clips[1],
-            BotClip::Run => scene.robot_clips[2],
-            BotClip::Death => scene.robot_clips[3],
+        let get_duration_s = |clip: AvatarClip| -> f64 {
+            f64::from(skeleton.animations[scene.get_robot_clip(clip)].duration_s)
         };
-        let clip_time = |clip: BotClip, time_s: f32| {
-            let duration_s: f32 = skeleton.animations[clip_index(clip)].duration_s.max(1e-3);
-            if clip == BotClip::Death {
-                time_s.min(duration_s)
-            } else {
-                time_s.rem_euclid(duration_s)
-            }
+        let (clip, time_s) = match bot.dead_time_s {
+            Some(dead_s) => (AvatarClip::Death, f64::from(dead_s)),
+            None => bot.gait.get_pose(run_from_m_per_s, now_s, get_duration_s),
         };
-        let animation = &bot.animation;
-        let current: Vec<Trs> = skeleton.sample(
-            clip_index(animation.clip),
-            clip_time(animation.clip, animation.time_s),
-        );
-        if animation.blend_frac >= 1.0 {
-            return current;
-        }
-        let previous: Vec<Trs> = skeleton.sample(
-            clip_index(animation.previous_clip),
-            clip_time(animation.previous_clip, animation.previous_time_s),
-        );
-        previous
-            .iter()
-            .zip(&current)
-            .map(|(a, b)| a.lerp(b, animation.blend_frac))
-            .collect()
+        let duration_s: f64 = get_duration_s(clip).max(MIN_CLIP_S);
+        let clip_s: f64 = if clip.is_looping() {
+            time_s.rem_euclid(duration_s)
+        } else {
+            time_s.min(duration_s)
+        };
+        skeleton.sample(scene.get_robot_clip(clip), clip_s as f32)
     }
 
     /// `get_flashlight_lights` lights what the player looks at as Lunar Surface's flashlight does,
@@ -1350,11 +1376,11 @@ impl Session {
         let remote_entries = self
             .remote_bots
             .iter()
-            .map(|remote| (&remote.bot, TEAM_TINTS[remote.team as usize % 2]));
+            .map(|remote| (&remote.bot, TEAM_BODY_RGB[remote.team as usize % 2]));
         for (bot, main_tint) in self
             .bots
             .iter()
-            .map(|bot| (bot, TEAM_TINTS[(self.team as usize + 1) % 2]))
+            .map(|bot| (bot, TEAM_BODY_RGB[(self.team as usize + 1) % 2]))
             .chain(remote_entries)
         {
             let sink_m: f32 = bot.dead_time_s.map_or(0.0, |time_s| {
@@ -1362,44 +1388,53 @@ impl Session {
             });
             let model: Mat4 = Mat4::from_translation(bot.feet_m - Vec3::Y * sink_m)
                 * Mat4::from_quat(Quat::from_rotation_y(bot.yaw_rad))
-                * Mat4::from_scale(Vec3::splat(scene.robot_scale));
+                * Mat4::from_scale(Vec3::new(1.0, bot.height_frac, 1.0) * scene.robot_scale)
+                * Mat4::from_translation(Vec3::NEG_Y * scene.robot.bounds_min_m.y);
             let joint_offset: u32 = joint_matrices.len() as u32;
-            skeleton.write_palette(&Session::bot_pose(bot, scene), model, &mut joint_matrices);
-            let flash: f32 = bot.hit_flash_frac;
+            let pose: Vec<Trs> = Session::bot_pose(
+                bot,
+                scene,
+                f64::from(self.time_s),
+                f64::from(self.get_run_from_m_per_s()),
+            );
+            skeleton.write_palette(&pose, model, &mut joint_matrices);
             for part in &scene.robot.parts {
                 let name: &str = part
                     .material_index
                     .and_then(|index| scene.robot_material_names.get(index))
                     .map_or("", String::as_str);
-                let tint: Vec3 = match name {
-                    "Main" => main_tint,
-                    "Grey" => Vec3::new(0.75, 0.74, 0.72),
-                    _ => Vec3::ONE,
-                };
+                if name == ROBOT_SCREEN_MATERIAL {
+                    continue;
+                }
                 world_draws.push(DrawItem {
                     mesh: part.mesh,
                     material: part.material,
                     model,
-                    tint: (tint + Vec3::new(2.0, 0.3, 0.2) * flash).extend(1.0),
+                    tint: main_tint.extend(1.0),
                     joint_offset: Some(joint_offset),
                     bounds_center_m: bot.feet_m + Vec3::Y * 1.0,
                     bounds_radius_m: 1.6,
                     does_cast_shadow: true,
+                    body_flash_frac: Some(bot.hit_flash_frac),
                 });
             }
             if bot.is_alive() {
-                let eye_m: Vec3 = bot.feet_m + Vec3::Y * (BOT_HEIGHT_M * 0.87) + bot.facing() * 0.3;
-                world_particles.push(Particle {
-                    position_m: eye_m,
-                    stretch_m: Vec3::ZERO,
-                    size_m: 0.07 + bot.muzzle_flash_frac * 0.2,
-                    color_rgba: (self.bot_beam_color
-                        * scene.light_scale
-                        * (0.25 + bot.muzzle_flash_frac))
-                        .extend(0.0),
-                    kind: ParticleKind::MuzzleFlash,
-                    seed: 0.3,
-                });
+                let eye_m: Vec3 = bot.feet_m
+                    + Vec3::Y * (BOT_HEIGHT_M * 0.87 * bot.height_frac)
+                    + bot.facing() * 0.3;
+                if bot.muzzle_flash_frac > 0.0 {
+                    world_particles.push(Particle {
+                        position_m: eye_m,
+                        stretch_m: Vec3::ZERO,
+                        size_m: bot.muzzle_flash_frac * 0.2,
+                        color_rgba: (self.bot_beam_color
+                            * scene.light_scale
+                            * bot.muzzle_flash_frac)
+                            .extend(0.0),
+                        kind: ParticleKind::MuzzleFlash,
+                        seed: 0.3,
+                    });
+                }
                 point_lights.push(PointLight {
                     position_m: eye_m,
                     radius_m: 3.0 + bot.muzzle_flash_frac * 4.0,
@@ -1444,6 +1479,7 @@ impl Session {
                     bounds_center_m: pylon.foot_m + Vec3::Y * (pylon.height_m * 0.5),
                     bounds_radius_m: pylon.height_m,
                     does_cast_shadow: true,
+                    body_flash_frac: None,
                 });
             }
             if !is_off {

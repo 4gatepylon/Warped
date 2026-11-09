@@ -151,7 +151,10 @@ pub struct TextureHandle(pub u32);
 pub struct MaterialHandle(pub u32);
 
 /// `DrawItem` draws one mesh with one material. `joint_offset` is the first of the mesh's joint
-/// matrices in `FrameDescription::joint_matrices`, for skinned meshes only.
+/// matrices in `FrameDescription::joint_matrices`, for skinned meshes only. `body_flash_frac` marks
+/// a player's body (the teal robot): its teal turns into `tint`'s team colour as on Lunar Surface
+/// (`recolor_body` in `scene.metal`) instead of being multiplied by it, and it reddens by the
+/// share given (1 just after a hit).
 #[derive(Clone, Copy, Debug)]
 pub struct DrawItem {
     pub mesh: MeshHandle,
@@ -162,6 +165,7 @@ pub struct DrawItem {
     pub bounds_center_m: Vec3,
     pub bounds_radius_m: f32,
     pub does_cast_shadow: bool,
+    pub body_flash_frac: Option<f32>,
 }
 
 /// `Camera` is where the player looks from.

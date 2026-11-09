@@ -7,14 +7,14 @@
 //!
 //! Interface: `MatchPlay`, `MatchOptions`.
 
-use std::collections::HashMap;
 use std::error::Error;
 use std::time::Instant;
 
 use glam::{DMat4, Mat4, Vec3};
 
 use crate::console_reach::ConsolePlace;
-use crate::game::bots::{Bot, BotClip};
+use crate::game::bots::Bot;
+use warped_shared::movement::get_crouched_height_frac;
 use crate::game::guns::Gun;
 use crate::game::session::{RemoteBot, Session};
 use crate::net::{Client, NetEvent};
@@ -24,10 +24,6 @@ use crate::thrown_wormholes::PlayerWormholes;
 
 /// `STATE_PERIOD_S` is how often this player's state goes to the server.
 const STATE_PERIOD_S: f64 = 1.0 / 30.0;
-/// `EYE_HEIGHT_M` is how far a player's eye is above their feet, to place remote robots.
-const EYE_HEIGHT_M: f32 = 1.6;
-/// `MIN_WALK_M_PER_S` is the slowest a remote player moves and still walks, Lunar Surface's.
-const MIN_WALK_M_PER_S: f32 = 0.8;
 
 /// `MatchOptions` is how this window takes part in the game.
 pub struct MatchOptions {
@@ -44,7 +40,6 @@ pub struct MatchPlay {
     hold_s: f32,
     last_state: Instant,
     was_dead: bool,
-    last_feet_m: HashMap<u32, Vec3>,
 }
 
 impl MatchPlay {
@@ -61,7 +56,6 @@ impl MatchPlay {
             hold_s: 0.0,
             last_state: Instant::now(),
             was_dead: false,
-            last_feet_m: HashMap::new(),
         };
         let team: Option<u32> = play.options.team;
         if let Some(client) = &mut play.client {
@@ -256,26 +250,28 @@ impl MatchPlay {
                 self.held_console.map(|i| i as u8),
                 session.weapons.beam_speckle_frac,
                 PlayerWormholes::default(),
+                f64::from(session.player.crouch_frac),
             )?;
         }
         Ok(())
     }
 
-    /// `sync_remotes` makes one robot per other player, placed and animated from their frames: idle
-    /// below `MIN_WALK_M_PER_S`, running from halfway between walking and sprinting, as Lunar
-    /// Surface's `choose_gait`, with the speed over this frame's `dt_s`.
+    /// `sync_remotes` makes one robot per other player, placed from their frames: its feet one eye
+    /// height below the eye they send (as crouched, W-137 (crouched robots sink): a crouched
+    /// player's robot stands on the floor, squashed to the share of standing they crouch to). The
+    /// session moves each robot's gait on (`Bot::follow_gait`).
     fn sync_remotes(&mut self, client: &Client, session: &mut Session, scene: &Scene, dt_s: f32) {
-        let _ = scene;
+        let _ = (scene, dt_s);
         let own_id: Option<u32> = client.id;
         let mut remotes: Vec<RemoteBot> = Vec::new();
         let mut old: Vec<RemoteBot> = std::mem::take(&mut session.remote_bots);
-        let run_from_m_per_s: f32 =
-            (session.movement.walk_m_per_s + session.movement.sprint_m_per_s) / 2.0;
         for player in client.players.iter().filter(|p| Some(p.id) != own_id) {
             let frame: Mat4 = player.frame.as_mat4();
             let eye_m: Vec3 = frame.w_axis.truncate();
             let forward: Vec3 = -frame.z_axis.truncate();
-            let feet_m: Vec3 = eye_m - Vec3::Y * EYE_HEIGHT_M;
+            let height_frac: f32 =
+                get_crouched_height_frac(player.crouch_frac, &session.settings.movement) as f32;
+            let feet_m: Vec3 = eye_m - Vec3::Y * (session.movement.eye_height_m * height_frac);
             let mut remote: RemoteBot = match old.iter().position(|r| r.id == player.id) {
                 Some(i) => old.swap_remove(i),
                 None => {
@@ -296,15 +292,9 @@ impl MatchPlay {
                     }
                 }
             };
-            let last_m: Vec3 = self.last_feet_m.insert(player.id, feet_m).unwrap_or(feet_m);
-            let speed_m_per_s: f32 = (feet_m - last_m).with_y(0.0).length() / dt_s;
-            remote.bot.animation.play(match speed_m_per_s {
-                s if s >= run_from_m_per_s => BotClip::Run,
-                s if s >= MIN_WALK_M_PER_S => BotClip::Walk,
-                _ => BotClip::Idle,
-            });
             remote.team = player.team;
             remote.bot.feet_m = feet_m;
+            remote.bot.height_frac = height_frac;
             remote.bot.yaw_rad = forward.x.atan2(forward.z);
             remote.frame = frame;
             remote.is_firing = player.is_laser_on;

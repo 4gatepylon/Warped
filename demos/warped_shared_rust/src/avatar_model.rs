@@ -50,7 +50,7 @@ impl AvatarClip {
     /// `get_name` gives the clip's animation name in the model.
     ///
     /// Example: `assert_eq!(AvatarClip::Walk.get_name(), "Walk");`
-    fn get_name(self) -> &'static str {
+    pub fn get_name(self) -> &'static str {
         match self {
             AvatarClip::Idle => "Idle",
             AvatarClip::Walk => "Walk",

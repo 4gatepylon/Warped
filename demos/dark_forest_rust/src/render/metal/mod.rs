@@ -758,7 +758,12 @@ impl MetalRenderer {
             let uniforms: GpuDrawUniforms = GpuDrawUniforms {
                 model: draw.model,
                 tint: draw.tint,
-                flags: UVec4::new(0, u32::from(is_viewmodel), 0, 0),
+                flags: UVec4::new(
+                    0,
+                    u32::from(is_viewmodel),
+                    u32::from(draw.body_flash_frac.is_some()),
+                    draw.body_flash_frac.unwrap_or(0.0).to_bits(),
+                ),
             };
             unsafe { encoder.setVertexBuffer_offset_atIndex(Some(&mesh.vertices), 0, 0) };
             set_vertex_bytes(encoder, as_bytes(&uniforms), 3);

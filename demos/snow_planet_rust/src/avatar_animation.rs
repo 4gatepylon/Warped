@@ -10,33 +10,24 @@
 
 use glam::{DMat4, DVec4};
 
+use warped_shared::gait::Gait;
+
 use crate::avatar_model::{AvatarClip, AvatarModel};
 use crate::geometry::{AXIS_W, get_distance};
 use crate::voxel_world::{VoxelPlayer, VoxelWorld};
 
 /// `OWN_TRACK_ID` is the id this window gives its own player's eye, beside the others' ids.
 pub const OWN_TRACK_ID: u32 = u32::MAX;
-const SPEED_SMOOTHING_S: f64 = 0.12;
-const STALE_SNAPSHOT_S: f64 = 0.25;
-const MIN_WALK_M_PER_S: f64 = 0.8;
-const WALK_CYCLE_M: f64 = 1.6;
-const RUN_CYCLE_M: f64 = 2.4;
-const MAX_STRIDES_PER_S: f64 = 2.5;
-const MIN_AIR_S: f64 = 0.08;
 
 /// `Track` is what this window remembers of one player: their id, last eye frame, feet frame and
 /// ground point (`under`, the eye's foot on the level's base plane, which a jump doesn't move),
-/// when the eye last moved, their smoothed speed over the ground, where they are in the stride
-/// (fraction of a loop), and when they left the ground (`None` while on it).
+/// and their gait (`warped_shared::gait`: their speed over the ground, stride and takeoff).
 struct Track {
     id: u32,
     eye: DMat4,
     feet: DMat4,
     under: DVec4,
-    moved_s: f64,
-    speed_m_per_s: f64,
-    stride_frac: f64,
-    left_ground_s: Option<f64>,
+    gait: Gait,
 }
 
 /// `Corpse` is an eliminated player's body: where it lies, when it fell and the player's team.
@@ -97,10 +88,7 @@ impl AvatarAnimator {
                             eye,
                             feet,
                             under,
-                            moved_s: now_s,
-                            speed_m_per_s: 0.0,
-                            stride_frac: 0.0,
-                            left_ground_s: None,
+                            gait: Gait::New(now_s),
                         });
                         self.tracks.last_mut().expect("a track was just added")
                     }
@@ -154,26 +142,10 @@ struct Ground {
     r: f64,
 }
 
-/// `choose_gait` gives the clip for moving at `speed_m_per_s` over the ground: idle below
-/// `MIN_WALK_M_PER_S`, walking below `run_from_m_per_s`, running from there.
-///
-/// Example: `let clip = choose_gait(10.0, 14.0);`
-fn choose_gait(speed_m_per_s: f64, run_from_m_per_s: f64) -> AvatarClip {
-    if speed_m_per_s < MIN_WALK_M_PER_S {
-        AvatarClip::Idle
-    } else if speed_m_per_s < run_from_m_per_s {
-        AvatarClip::Walk
-    } else {
-        AvatarClip::Run
-    }
-}
-
 impl Track {
-    /// `follow` takes the player's eye `eye` and `ground` at `now_s`: the speed over the ground
-    /// (smoothed over `SPEED_SMOOTHING_S`, and zero once the eye has stood still for
-    /// `STALE_SNAPSHOT_S`, as snapshots don't come every frame), the stride advanced by it (one
-    /// loop per `WALK_CYCLE_M` or `RUN_CYCLE_M`, at most `MAX_STRIDES_PER_S`, so the feet slide
-    /// at the game's fast speeds rather than blur), and whether they are off the ground.
+    /// `follow` takes the player's eye `eye` and `ground` at `now_s`, as the shared `Gait` rules
+    /// count it: the distance over the ground since the eye last moved (none while it stands
+    /// still), and whether they stand on something.
     ///
     /// Example: `track.follow(eye, ground, 14.0, 12.5, 0.016);`
     fn follow(&mut self, eye: DMat4, ground: Ground, run_from_m_per_s: f64, now_s: f64, dt_s: f64) {
@@ -183,43 +155,21 @@ impl Track {
             is_on_ground,
             r,
         } = ground;
+        let moved_m: Option<f64> = (eye != self.eye).then(|| get_distance(under, self.under) * r);
         if eye != self.eye {
-            let since_s: f64 = (now_s - self.moved_s).max(dt_s).max(f64::EPSILON);
-            let ground_m: f64 = get_distance(under, self.under) * r;
-            let blend_frac: f64 = 1.0 - (-since_s / SPEED_SMOOTHING_S).exp();
-            self.speed_m_per_s += (ground_m / since_s - self.speed_m_per_s) * blend_frac;
-            (self.eye, self.feet, self.under, self.moved_s) = (eye, feet, under, now_s);
-        } else if now_s - self.moved_s > STALE_SNAPSHOT_S {
-            self.speed_m_per_s = 0.0;
+            (self.eye, self.feet, self.under) = (eye, feet, under);
         }
-        let cycle_m: f64 = match choose_gait(self.speed_m_per_s, run_from_m_per_s) {
-            AvatarClip::Run => RUN_CYCLE_M,
-            _ => WALK_CYCLE_M,
-        };
-        let rate_per_s: f64 = (self.speed_m_per_s / cycle_m).min(MAX_STRIDES_PER_S);
-        self.stride_frac = (self.stride_frac + rate_per_s * dt_s).fract();
-        self.left_ground_s = match (is_on_ground, self.left_ground_s) {
-            (true, _) => None,
-            (false, None) => Some(now_s),
-            (false, Some(left_s)) => Some(left_s),
-        };
+        self.gait
+            .follow(moved_m, is_on_ground, run_from_m_per_s, now_s, dt_s);
     }
 
-    /// `get_pose` gives the clip of `body` and the time in it for the player now: in the air for
-    /// `MIN_AIR_S` or more, jumping; otherwise by `choose_gait`. A stride's time is its place in
-    /// the loop times the clip's length, so walking and running hand over in step.
+    /// `get_pose` gives the clip of `body` and the time in it for the player now, by the shared
+    /// `Gait` rules.
     ///
     /// Example: `let (clip, time_s) = track.get_pose(&world.body, 14.0, 12.5);`
     fn get_pose(&self, body: &AvatarModel, run_from_m_per_s: f64, now_s: f64) -> (AvatarClip, f64) {
-        if let Some(left_s) = self.left_ground_s
-            && now_s - left_s >= MIN_AIR_S
-        {
-            return (AvatarClip::Jump, now_s - left_s - MIN_AIR_S);
-        }
-        match choose_gait(self.speed_m_per_s, run_from_m_per_s) {
-            AvatarClip::Idle => (AvatarClip::Idle, now_s),
-            clip => (clip, self.stride_frac * body.get_duration_s(clip)),
-        }
+        self.gait
+            .get_pose(run_from_m_per_s, now_s, |clip| body.get_duration_s(clip))
     }
 }
 
@@ -237,6 +187,7 @@ mod tests {
     //! | Corpse | of a player never seen (none), lying (with its team), older than its time (gone) | `corpses_lie_until_respawn` |
 
     use super::*;
+    use warped_shared::gait::{MAX_STRIDES_PER_S, MIN_AIR_S, STALE_SNAPSHOT_S};
     use crate::map::{Map, get_map_folder};
 
     const FRAME_S: f64 = 1.0 / 60.0;
