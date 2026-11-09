@@ -201,7 +201,9 @@ impl MatchPlay {
                 session.player.take_damage(f32::MAX);
             }
         }
-        client.keep_joining()?;
+        if session.player.is_alive() {
+            client.keep_joining()?;
+        }
         if let Some(settings) = &client.settings {
             self.settings = settings.clone();
             if session.settings != *settings {

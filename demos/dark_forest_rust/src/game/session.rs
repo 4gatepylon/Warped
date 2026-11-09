@@ -45,6 +45,12 @@ const TEAM_PLAYER_BEAM_COLOR: Vec3 = Vec3::new(0.35, 0.8, 1.6);
 const MAP_BEAM_HDR_SCALE: f32 = 1.8;
 /// `TEAM_BOT_BEAM_COLOR` is the HDR color of the bots' bolts (times the light scale).
 const TEAM_BOT_BEAM_COLOR: Vec3 = Vec3::new(1.8, 0.25, 0.12);
+/// `AUTOPILOT_TURN_PER_S` is how fast the autopilot turns toward what it looks at (the share of
+/// the way left it turns each second, as an exponential rate): fast enough to follow a sprinter.
+const AUTOPILOT_TURN_PER_S: f32 = 15.0;
+/// `AUTOPILOT_AIM_SLACK_M` is how near the target a shot aimed straight at it must still end,
+/// after any wormhole's bending, for the autopilot to count the target as in sight.
+const AUTOPILOT_AIM_SLACK_M: f32 = 0.3;
 /// `AUTOPILOT_HIP_FIRE_RANGE_M` is the range inside which the autopilot fires from the hip.
 const AUTOPILOT_HIP_FIRE_RANGE_M: f32 = 14.0;
 /// `NEAR_M` is the camera's near plane.
@@ -787,7 +793,8 @@ impl Session {
     /// `autopilot_controls` plays the game: walk to the other team's consoles and hold `E` on each
     /// (`is_console_objective`, with `walker`); or aim at visible robots and fire, walk toward the
     /// nearest enemy player when none is visible (with `walker`), and else walk the waypoint loop.
-    /// It stands still while it has a robot or player in sight, since a shot fires only
+    /// A robot or player counts as in sight only along a straight line clear of the forest that a
+    /// shot would follow to it (`AUTOPILOT_AIM_SLACK_M`), not bent away by a wormhole. It stands still while it has one in sight, since a shot fires only
     /// `shoot_after_moving_s` after the last step. It waits while its team is not known yet (`is_team_known`: an online game before the
     /// server's welcome).
     fn autopilot_controls(&mut self, scene: &Scene, dt_s: f32) -> Controls {
@@ -842,6 +849,13 @@ impl Session {
                 let to_bot: Vec3 = *aim_m - eye_m;
                 to_bot.length() < 45.0
                     && cast_ray(&scene.solids, eye_m, to_bot.normalize(), to_bot.length()).is_none()
+                    && self
+                        .arena
+                        .warps
+                        .trace_beam(eye_m, to_bot, to_bot.length(), |_, _, _| None)
+                        .end_m
+                        .distance(*aim_m)
+                        < AUTOPILOT_AIM_SLACK_M
             })
             .min_by(|a, b| a.distance(eye_m).total_cmp(&b.distance(eye_m)));
         let feet_m: Vec3 = self.player.feet_m;
@@ -880,7 +894,7 @@ impl Session {
         yaw_delta_rad = (yaw_delta_rad + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
             - std::f32::consts::PI;
         let pitch_delta_rad: f32 = target_pitch_rad - self.player.pitch_rad;
-        let turn_frac: f32 = 1.0 - (-5.0 * dt_s).exp();
+        let turn_frac: f32 = 1.0 - (-AUTOPILOT_TURN_PER_S * dt_s).exp();
         let look_delta_rad: Vec2 = Vec2::new(-yaw_delta_rad, -pitch_delta_rad) * turn_frac;
         let forward: Vec2 = Vec2::new(-self.player.yaw_rad.sin(), -self.player.yaw_rad.cos());
         let right: Vec2 = Vec2::new(self.player.yaw_rad.cos(), -self.player.yaw_rad.sin());
@@ -935,7 +949,9 @@ impl Session {
         let bar_state: OverlayHudState = self.overlay_hud_state();
         self.bar_pulses.update(dt_s, &bar_state);
         let mut player_input: PlayerInput = controls.player;
-        player_input.look_delta_rad /= self.guns.get_zoom(&self.settings) as f32;
+        if !self.is_autopilot {
+            player_input.look_delta_rad /= self.guns.get_zoom(&self.settings) as f32;
+        }
         self.player.update(
             &player_input,
             &self.movement,
