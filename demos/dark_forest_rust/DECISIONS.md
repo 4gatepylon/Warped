@@ -143,6 +143,10 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   from the mouths, still get them all.
 - **D31. The lens pass draws only over the mouths in view.** It is scissored to the screen rectangle of every
   in-view mouth's reach, and skipped (with the tone map's lens test) when none is in view; the result is the same.
+- **D32. The haze takes a step per 1.5 m of its ray (4 to 12 steps).** The light-shaft haze marched 12 steps through
+  the shadow map for every pixel, about 2 ms of a frame at 3440x1440, though most of the forest's surfaces are a few
+  metres away. Short rays now take fewer steps: the haze's brightness is the same, its fine dither pattern differs
+  (pictures in the PR). **Weigh in:** if the pattern change shows in play, 12 steps for every ray costs about 1 ms.
 
 ## Follow-ups for the next agent
 
