@@ -771,6 +771,26 @@ fragment float4 lens_fragment(FullscreenVertexOut in [[stage_in]],
 }
 
 /**
+ * @brief `sample_spline` reads `picture` at `uv` through a cubic B-spline of its 4 × 4 nearest texels, in four bilinear
+ * taps: a smooth upsampling without steps or ringing, for the half-resolution lens picture (W-138, no aliasing).
+ * @par Example
+ * @code
+ * float4 c = sample_spline(lens_picture, in.uv);
+ * @endcode
+ */
+static float4 sample_spline(texture2d<float> picture, float2 uv) {
+    constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+    float2 size = float2(picture.get_width(), picture.get_height());
+    float2 p = uv * size - 0.5, i = floor(p), f = p - i, f2 = f * f, f3 = f2 * f;
+    float2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    float2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0, w3 = f3 / 6.0;
+    float2 g0 = w0 + w1, g1 = w2 + w3;
+    float2 h0 = (i - 0.5 + w1 / g0) / size, h1 = (i + 1.5 + w3 / g1) / size;
+    return g0.y * (g0.x * picture.sample(linear_sampler, h0) + g1.x * picture.sample(linear_sampler, float2(h1.x, h0.y)))
+        + g1.y * (g0.x * picture.sample(linear_sampler, float2(h0.x, h1.y)) + g1.x * picture.sample(linear_sampler, h1));
+}
+
+/**
  * @brief `tonemap_fragment` adds bloom, exposes, tone maps with ACES, grades, and stores luma
  * in alpha for FXAA.
  * @par Interface
@@ -812,7 +832,7 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
             scene_m = length(p.xyz / p.w - frame.camera_position_m.xyz);
         }
         if (entry_m < scene_m) {
-            lensed = lens_picture.sample(linear_sampler, in.uv);
+            lensed = sample_spline(lens_picture, in.uv);
         }
     }
     encoded = mix(encoded, lensed.rgb, lensed.a);

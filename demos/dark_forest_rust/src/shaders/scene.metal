@@ -81,6 +81,9 @@ fragment float4 prepass_fragment(SceneVertexOut in [[stage_in]],
     return float4(view_normal, 1.0);
 }
 
+/** @brief `MATERIAL_MAX_ANISOTROPY` is how many samples along a surface seen at a slant its textures take (Metal's most), so bridge planks and decks seen edge-on don't shimmer (W-138, no aliasing). */
+constant int MATERIAL_MAX_ANISOTROPY = 16;
+
 /**
  * @brief `read_surface` samples a material at one fragment.
  * @par Example
@@ -92,7 +95,7 @@ inline Surface read_surface(SceneVertexOut in, constant MaterialUniforms& materi
                             constant DrawUniforms& draw, MaterialTextures textures,
                             bool is_front_face, thread float& alpha) {
     constexpr sampler material_sampler(coord::normalized, filter::linear, mip_filter::linear,
-                                       address::repeat, max_anisotropy(8));
+                                       address::repeat, max_anisotropy(MATERIAL_MAX_ANISOTROPY));
     float4 texel = textures.base_color.sample(material_sampler, in.uv) * material.base_color_factor;
     float4 base_color = texel * draw.tint;
     if (draw.flags.z != 0) {
