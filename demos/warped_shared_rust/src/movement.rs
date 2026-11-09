@@ -2,8 +2,8 @@
 //! level), apart from the space it moves in: crouching (its share of the way down), sprint energy
 //! (draining while sprinting, refilling faster while crouched), the head bob's steps, and how much
 //! a hit and crouching slow a player. A level turns the speed this gives into motion in its own
-//! space, with its own collisions (Lunar Surface's, Dust's, Snow Planet's, the match's and City
-//! Sphere's `VoxelPlayer::step`).
+//! space, with its own collisions (the `VoxelPlayer::step` of Lunar Surface, Dust, Snow Planet
+//! and the match, and City Sphere's `CityWorld::move_player`).
 //!
 //! Interface: `MoveState` (`step`), `MoveInput`, `MoveRules`.
 //!
