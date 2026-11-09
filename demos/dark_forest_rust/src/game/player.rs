@@ -456,6 +456,8 @@ mod tests {
     const DECK_TOP_M: f32 = 7.0;
     /// `SPEED_TOLERANCE_M_S` is how close a measured speed comes to its setting.
     const SPEED_TOLERANCE_M_S: f32 = 0.01;
+    const FOREST_WALK_M_PER_S: f32 = 8.0;
+    const FOREST_SPRINT_M_PER_S: f32 = 15.48;
 
     /// `forest_movement` is the movement on the Dark Forest map with the built-in settings.
     fn forest_movement() -> Movement {
@@ -565,13 +567,16 @@ mod tests {
         player
     }
 
-    /// `test_movement_matches_lunar_surface` checks walking, sprinting, a jump's speed and gravity
-    /// here are Lunar Surface's: its map's numbers times its own server settings.
+    /// `test_movement_matches_lunar_surface` checks a jump's speed, gravity and every movement
+    /// setting here are Lunar Surface's, except walking and sprinting, which the user asked
+    /// slower: halfway between City Sphere's (6 and 13 m/s) and Lunar Surface's (10 and 18 m/s).
     #[test]
     fn test_movement_matches_lunar_surface() {
-        let (forest, lunar) = (forest_movement(), lunar_movement());
-        assert_eq!(forest.walk_m_per_s, lunar.walk_m_per_s);
-        assert_eq!(forest.sprint_m_per_s, lunar.sprint_m_per_s);
+        let (forest, mut lunar) = (forest_movement(), lunar_movement());
+        assert!((forest.walk_m_per_s - FOREST_WALK_M_PER_S).abs() < SPEED_TOLERANCE_M_S);
+        assert!((forest.sprint_m_per_s - FOREST_SPRINT_M_PER_S).abs() < SPEED_TOLERANCE_M_S);
+        lunar.settings.walk_speed_per_map_speed = forest.settings.walk_speed_per_map_speed;
+        lunar.settings.sprint_speed_per_map_speed = forest.settings.sprint_speed_per_map_speed;
         assert!((forest.jump_m_per_s - lunar.jump_m_per_s).abs() < 1e-4);
         assert!((forest.gravity_m_per_s2 - lunar.gravity_m_per_s2).abs() < 1e-3);
         assert_eq!(forest.settings, lunar.settings);
