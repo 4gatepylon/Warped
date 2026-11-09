@@ -109,6 +109,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
+- [ ] **W-139 Dark Forest thrown-wormhole sheet.** A bug found by agents on 2026-11-09 and not fixed yet: in Dark Forest's `spawn` view, a hard straight-edged sheet covers part of a thrown wormhole's lens (upper right), like a clipping glitch in the lens capture.
 
 ## Pending user review
 
