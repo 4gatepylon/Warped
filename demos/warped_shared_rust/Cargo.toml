@@ -18,12 +18,12 @@ gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_ma
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 rayon = "1.12"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+serde_yaml = "0.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-metal = "0.3"
+objc2-quartz-core = "0.3"
 sdl3 = { version = "0.22", features = ["build-from-source-static"] }
-
-[dev-dependencies]
-serde_yaml = "0.9"

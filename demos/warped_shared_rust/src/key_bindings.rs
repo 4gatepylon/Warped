@@ -150,7 +150,7 @@ impl Control {
     /// `get_name` gives the control's name as `player_settings.yaml` writes it.
     ///
     /// Example: `let name = Control::Wheel.get_name();`
-    fn get_name(self) -> String {
+    pub fn get_name(self) -> String {
         match self {
             Control::Key(scancode) => scancode.name().to_string(),
             Control::Mouse(button) => MOUSE_BUTTON_NAMES

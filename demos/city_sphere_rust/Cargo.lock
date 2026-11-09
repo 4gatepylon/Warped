@@ -982,9 +982,12 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "objc2-metal",
+ "objc2-quartz-core",
  "rayon",
  "sdl3",
  "serde",
+ "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]

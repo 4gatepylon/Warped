@@ -21,6 +21,12 @@
 //!   crosshair, the hit effect and the banner's lobby and "YOU DIED" lines.
 //! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
 //! - `third_person`: the third-person view's switch, and its boom in flat space.
+//! - `app`: the interface between the one-window app (`../warped_mvp_rust/`) and a level.
+//! - `match_state`, `match_protocol`, `match_menu`: the match's rules, what its server and clients
+//!   share (levels file, view, client, network beacon) and its progression page.
+//! - `page`: a menu page's shapes in the debug font, and drawing them with SDL.
+//! - `player_settings`, `settings_editor`: `player_settings.yaml`, and a settings page any menu
+//!   shows (numbers, key bindings, buttons).
 //!
 //! Example: `use warped_shared::geometry::{AXIS_W, make_boost};`
 //!
@@ -28,6 +34,7 @@
 //! - Gotchas: a file here is the same for every level; a level that needs it to differ passes the
 //!   difference in, rather than keeping its own copy (`README.md`, "Adding a level").
 
+pub mod app;
 pub mod app_bundle;
 pub mod avatar_model;
 #[cfg(target_os = "macos")]
@@ -42,13 +49,20 @@ pub mod hud;
 pub mod hud_bars;
 #[cfg(target_os = "macos")]
 pub mod key_bindings;
+pub mod match_menu;
+pub mod match_protocol;
+pub mod match_state;
 pub mod mesh;
 pub mod movement;
 #[cfg(target_os = "macos")]
 pub mod overlay;
+pub mod page;
 pub mod play_settings;
 #[cfg(target_os = "macos")]
+pub mod player_settings;
+#[cfg(target_os = "macos")]
 pub mod render_mesh;
+pub mod settings_editor;
 pub mod shapes;
 pub mod shot_noise;
 pub mod spaceships;
