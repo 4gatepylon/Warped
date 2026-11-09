@@ -27,7 +27,7 @@ use super::guns::{
 };
 use super::hud::{BarPulsePair, HudState, OverlayHudState, build_hud, build_overlay_rects};
 use super::nav::NavGraph;
-use super::player::{MAX_HEALTH, Player, PlayerInput};
+use super::player::{MAX_HEALTH, Movement, Player, PlayerInput};
 use super::world::{Arena, Surface};
 use crate::assets::gltf_model::Trs;
 use crate::console_reach::ConsolePlace;
@@ -197,6 +197,8 @@ pub struct Session {
     pub player: Player,
     pub guns: Guns,
     pub settings: ServerSettings,
+    pub movement: Movement,
+    since_movement_key_s: f32,
     pub bots: Vec<Bot>,
     pub kill_count: u32,
     pub death_count: u32,
@@ -291,11 +293,18 @@ impl Session {
                 )
             })
             .collect();
+        let movement: Movement = Movement::New(
+            &arena.map_player,
+            arena.map_gravity_m_per_s2,
+            &ServerSettings::Builtin(),
+        );
         Session {
             player: Player::new(spawn_m, yaw_rad),
             arena,
             nav,
             guns: Guns::New(ShotNoise::FromClock()),
+            movement,
+            since_movement_key_s: 0.0,
             settings: ServerSettings::Builtin(),
             bots,
             kill_count: 0,
@@ -355,6 +364,19 @@ impl Session {
             self.robot_hold = hold;
             self.robot_hold_s = ROBOT_HOLD_RESTART_S;
         }
+    }
+
+    /// `set_settings` makes `settings` the match's (the game server's, once it welcomes this
+    /// window) and works out the player's movement from them.
+    ///
+    /// Example: `session.set_settings(settings.clone());`
+    pub fn set_settings(&mut self, settings: ServerSettings) {
+        self.movement = Movement::New(
+            &self.arena.map_player,
+            self.arena.map_gravity_m_per_s2,
+            &settings,
+        );
+        self.settings = settings;
     }
 
     /// `respawn_player` brings the player back, whole, at their team's spawn farthest from the
@@ -750,7 +772,8 @@ impl Session {
     /// `autopilot_controls` plays the game: walk to the other team's consoles and hold `E` on each
     /// (`is_console_objective`, with `walker`); or aim at visible robots and fire, walk toward the
     /// nearest enemy player when none is visible (with `walker`), and else walk the waypoint loop.
-    /// It waits while its team is not known yet (`is_team_known`: an online game before the
+    /// It stands still while it has a robot or player in sight, since a shot fires only
+    /// `shoot_after_moving_s` after the last step. It waits while its team is not known yet (`is_team_known`: an online game before the
     /// server's welcome).
     fn autopilot_controls(&mut self, scene: &Scene, dt_s: f32) -> Controls {
         if !self.is_team_known {
@@ -855,7 +878,7 @@ impl Session {
         Controls {
             player: PlayerInput {
                 move_axes: Vec2::new(walk_direction.dot(right), walk_direction.dot(forward))
-                    * if visible_bot.is_some() { 0.5 } else { 1.0 },
+                    * if visible_bot.is_some() { 0.0 } else { 1.0 },
                 look_delta_rad,
                 is_sprint_held: visible_bot.is_none(),
                 is_crouch_held: false,
@@ -881,14 +904,27 @@ impl Session {
         self.frame_count += 1;
         if self.player.health < self.last_health {
             self.hit_effect_frac = 1.0;
+            self.player.slow_down(&self.movement);
         }
+        let is_walking_upright: bool =
+            controls.player.move_axes != Vec2::ZERO && !controls.player.is_crouch_held;
+        self.since_movement_key_s = if is_walking_upright || controls.player.is_jump_pressed {
+            0.0
+        } else {
+            self.since_movement_key_s + dt_s
+        };
         self.last_health = self.player.health;
         let bar_state: OverlayHudState = self.overlay_hud_state();
         self.bar_pulses.update(dt_s, &bar_state);
         let mut player_input: PlayerInput = controls.player;
         player_input.look_delta_rad /= self.guns.get_zoom(&self.settings) as f32;
-        self.player
-            .update(&player_input, &scene.solids, &self.arena.ladders, dt_s);
+        self.player.update(
+            &player_input,
+            &self.movement,
+            &scene.solids,
+            &self.arena.ladders,
+            dt_s,
+        );
         if self.player.is_alive() {
             let warps: &Warps = &self.arena.warps;
             let centre_m: Vec3 = self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
@@ -912,8 +948,10 @@ impl Session {
                 0.0,
             );
         }
-        let can_shoot: bool =
-            self.player.is_alive() && self.console_hold_frac.is_none() && self.winner.is_none();
+        let can_shoot: bool = self.player.is_alive()
+            && self.console_hold_frac.is_none()
+            && self.winner.is_none()
+            && f64::from(self.since_movement_key_s) >= self.settings.movement.shoot_after_moving_s;
         let step: GunStep = GunStep {
             is_sprinting: self.player.is_sprinting,
             bob_phase_rad: self.player.bob_phase_rad,
@@ -947,7 +985,7 @@ impl Session {
             player_eye_m: self.player.eye_position_m(),
             player_velocity_m_s: self.player.velocity_m_s,
             is_player_alive: self.player.is_alive(),
-            is_player_crouched: self.player.height_m < 1.5,
+            is_player_crouched: self.player.crouch_frac > 0.5,
         };
         let held_count: usize = usize::from(self.robot_hold.is_some());
         let shots: Vec<BotShot> = self

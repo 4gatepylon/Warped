@@ -204,7 +204,9 @@ impl MatchPlay {
         client.keep_joining()?;
         if let Some(settings) = &client.settings {
             self.settings = settings.clone();
-            session.settings = settings.clone();
+            if session.settings != *settings {
+                session.set_settings(settings.clone());
+            }
         }
         if let Some(team) = client.team {
             if team != session.team {

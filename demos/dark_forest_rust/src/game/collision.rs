@@ -6,8 +6,9 @@
 
 use glam::Vec3;
 
-/// `STEP_HEIGHT_M` is the tallest ledge a mover climbs without jumping.
-pub const STEP_HEIGHT_M: f32 = 0.45;
+/// `STEP_HEIGHT_M` is the tallest ledge a mover climbs without jumping: Lunar Surface's
+/// `MAX_WALK_RISE_M`.
+pub const STEP_HEIGHT_M: f32 = 0.5;
 /// `SKIN_M` is the gap kept between a mover and what it touches.
 const SKIN_M: f32 = 0.001;
 
