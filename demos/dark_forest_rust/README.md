@@ -92,8 +92,8 @@ countdown.
 - **Objective:** two pylons per team (the hyperbolic demo's `scifi_beacon`), one on the ground near the base, one on
   the treehouse deck, each sending up a beam in its team's colour while its console is on. Hold `E` at an enemy
   console for 3 s to turn it off; a team wins once every console of the other team is off.
-- **Look:** a murky green grade of the HDRI sky, thick green haze, golden-white lasers for everyone (the map's
-  `laser.rgb`), and 31 flickering candles (warm map lights with `flicker_frac`) on the decks, bridges and support
+- **Look:** a murky green grade of the HDRI sky, thick green haze, golden lasers for everyone (the map's
+  `laser.rgb`) drawn as Lunar Surface's beams, speckle included (DECISIONS.md D33), and 31 flickering candles (warm map lights with `flicker_frac`) on the decks, bridges and support
   bundles.
 - **Map page:** the menu's map page (Tab, then E) is `assets/map_picture.png`, a photo of the forest from straight
   above made by `make map-picture`, with live marks over it; without it the page shows the old drawing.

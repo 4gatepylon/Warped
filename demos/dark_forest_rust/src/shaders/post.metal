@@ -1097,7 +1097,7 @@ constant float LASER_CORE_WHITENESS = 0.6;
 constant float MIN_SPECKLE_GLOW = 0.02;
 constant float BEAM_QUAD_REACH = 8.0;
 constant float BEAM_NEAR_M = 0.05;
-constant float BEAM_HDR_PER_DISPLAY = 2.0;
+constant float BEAM_HDR_PER_DISPLAY = 1.0;
 /** @brief `hash_pixel`'s lowbias32 constants and the speckle kind's salt, Lunar Surface's. */
 constant uint SPECKLE_KIND_SALT = 0x9e3779b9u;
 constant uint3 PIXEL_HASH_PRIMES = uint3(73856093u, 19349663u, 2654435761u);
@@ -1195,7 +1195,7 @@ fragment float4 beam_fragment(BeamVertexOut in [[stage_in]], constant GpuBeam* b
     float3 eye = frame.camera_position_m.xyz;
     float4 near_point = frame.inv_view_proj * float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1.0, 1.0);
     float3 v = normalize(near_point.xyz / near_point.w - eye);
-    float scene_depth = depth.read(uint2(in.position.xy)).r;
+    float scene_depth = depth.read(uint2(in.position.xy));
     float ray_end_m = 1e30;
     if (scene_depth > 0.0) {
         float4 p = frame.inv_view_proj * float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, scene_depth, 1.0);
