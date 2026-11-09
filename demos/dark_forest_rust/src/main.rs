@@ -1375,7 +1375,9 @@ fn main() {
                 BANNER_HEIGHT_FRAC,
             ));
         } else if menu.is_none()
-            && let Some(respawn_in_s) = session.player.get_respawn_in_s()
+            && let Some(respawn_in_s) = session
+                .player
+                .get_respawn_in_s(session.settings.respawn.delay_s as f32)
         {
             death_picture.draw(
                 &[

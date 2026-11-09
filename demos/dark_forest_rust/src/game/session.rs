@@ -1008,7 +1008,10 @@ impl Session {
         self.was_firing = is_firing;
         self.is_flashlight_on = controls.is_flashlight_held && self.player.is_alive();
         self.is_trigger_down = is_firing;
-        if self.player.should_respawn() {
+        if self
+            .player
+            .should_respawn(self.settings.respawn.delay_s as f32)
+        {
             self.death_count += 1;
             self.respawn_player();
         }

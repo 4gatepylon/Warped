@@ -36,8 +36,6 @@ const BODY_RADIUS_M: f32 = 0.3;
 const MAX_PITCH_RAD: f32 = 1.54;
 /// `MAX_HEALTH` is full health.
 pub const MAX_HEALTH: f32 = 100.0;
-/// `RESPAWN_DELAY_S` is how long the player stays dead.
-const RESPAWN_DELAY_S: f32 = 3.0;
 /// `REGEN_DELAY_S` is how long after being hit health starts to regenerate.
 const REGEN_DELAY_S: f32 = 5.0;
 /// `REGEN_RATE_PER_S` is the regeneration speed.
@@ -230,18 +228,22 @@ impl Player {
         false
     }
 
-    /// `should_respawn` says whether the respawn delay has passed.
-    pub fn should_respawn(&self) -> bool {
+    /// `should_respawn` says whether the respawn delay, the server settings' `respawn.delay_s`,
+    /// has passed.
+    ///
+    /// Example: `if player.should_respawn(settings.respawn.delay_s as f32) { ... }`
+    pub fn should_respawn(&self, respawn_delay_s: f32) -> bool {
         self.dead_time_s
-            .is_some_and(|time_s: f32| time_s > RESPAWN_DELAY_S)
+            .is_some_and(|time_s: f32| time_s > respawn_delay_s)
     }
 
-    /// `get_respawn_in_s` is how long until a dead player respawns (`None` while alive).
+    /// `get_respawn_in_s` is how long until a dead player respawns, after the server settings'
+    /// `respawn.delay_s` (`None` while alive).
     ///
-    /// Example: `if let Some(left_s) = player.get_respawn_in_s() { ... }`
-    pub fn get_respawn_in_s(&self) -> Option<f32> {
+    /// Example: `if let Some(left_s) = player.get_respawn_in_s(delay_s) { ... }`
+    pub fn get_respawn_in_s(&self, respawn_delay_s: f32) -> Option<f32> {
         self.dead_time_s
-            .map(|time_s: f32| (RESPAWN_DELAY_S - time_s).max(0.0))
+            .map(|time_s: f32| (respawn_delay_s - time_s).max(0.0))
     }
 
     /// `update` applies one frame of input and physics as Lunar Surface's `VoxelPlayer::step`
@@ -413,7 +415,7 @@ impl Player {
 }
 
 /// `tests` checks climbing a rope ladder onto a deck, sprint energy, movement against Lunar
-/// Surface's, the jump and crouching.
+/// Surface's, the jump, crouching and the respawn delay.
 ///
 /// | Partitioning | Part | Covered by |
 /// | --- | --- | --- |
@@ -425,6 +427,7 @@ impl Player {
 /// | input at a ladder's foot | walk into it (climbs to the deck), walk past it sideways (stays on the ground) | `test_walking_into_a_ladder_climbs_onto_the_deck`, `test_walking_beside_a_ladder_stays_down` |
 /// | sprint energy while sprinting | some left, empty | `test_sprinting_drains_energy_then_stops` |
 /// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
+/// | time since death | before the settings' respawn delay, after it | `test_respawn_waits_the_settings_delay` |
 #[cfg(test)]
 mod tests {
     use glam::Mat4;
@@ -612,7 +615,10 @@ mod tests {
             for _ in 0..(1.0 / dt_s) as usize {
                 player.update(&sprint, &movement, &solids, &[], dt_s);
             }
-            assert!(player.feet_m.z > rail_z_m, "went through at {dt_s} s a frame");
+            assert!(
+                player.feet_m.z > rail_z_m,
+                "went through at {dt_s} s a frame"
+            );
         }
     }
 
@@ -727,5 +733,32 @@ mod tests {
             "{}",
             crouched.energy_frac
         );
+    }
+
+    /// `test_respawn_waits_the_settings_delay` checks a dead player respawns once the delay it is
+    /// given (the server settings' `respawn.delay_s`, here not the built-in 3 s) has passed.
+    #[test]
+    fn test_respawn_waits_the_settings_delay() {
+        let respawn_delay_s: f32 = 5.0;
+        let dt_s: f32 = 0.1;
+        let movement: Movement = forest_movement();
+        let solids: [Aabb; 1] = open_ground();
+        let mut player: Player = Player::new(Vec3::ZERO, 0.0);
+        player.take_damage(f32::MAX);
+        let mut temp_waited_s: f32 = 0.0;
+        while temp_waited_s < respawn_delay_s - 2.0 * dt_s {
+            player.update(&PlayerInput::default(), &movement, &solids, &[], dt_s);
+            temp_waited_s += dt_s;
+        }
+        assert!(!player.should_respawn(respawn_delay_s));
+        let left_s: f32 = player.get_respawn_in_s(respawn_delay_s).expect("dead");
+        assert!(
+            (left_s - (respawn_delay_s - temp_waited_s)).abs() < 1e-3,
+            "{left_s}"
+        );
+        for _ in 0..3 {
+            player.update(&PlayerInput::default(), &movement, &solids, &[], dt_s);
+        }
+        assert!(player.should_respawn(respawn_delay_s));
     }
 }
