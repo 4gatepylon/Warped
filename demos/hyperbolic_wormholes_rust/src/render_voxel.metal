@@ -1156,17 +1156,16 @@ static float get_safe_step_m(thread const Scene &scene, float3 f, float gap, flo
 
 /**
  * @brief `trace_terrain` is terrain.rs's `find_hit_s` on the chord from x along v from `s_start` to `hit.s`: steps of a
- * fraction of the gap to the ground, at least a little more each meter out (counting the ray's `travelled` before this chord),
- * then bisection of the step that went under; with
+ * fraction of the gap to the ground, at least a little more each meter out, then bisection of the step that went under; with
  * `should_track_lit` (shadow rays only), it lowers `hit.lit` to the least gap over the distance travelled times
  * `SHADOW_PENUMBRA_TAN`. A camera ray steps instead as far as it safely can (`get_safe_step_m`) when that is longer.
  * @par Example
  * @code
- * trace_terrain<false>(scene, x, v, 0.0, 0.0, hit);
+ * trace_terrain<false>(scene, x, v, 0.0, hit);
  * @endcode
  */
 template <bool should_track_lit>
-static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s_start, float travelled, thread Hit &hit) {
+static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s_start, thread Hit &hit) {
     float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = s_start, previous = s_start;
     for (int i = 0; i < TERRAIN_MAX_STEPS; i++) {
         float4 p = geodesic_point(x, v, s);
@@ -1185,7 +1184,7 @@ static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s
         if (should_track_lit) hit.lit = min(hit.lit, gap / max(s * r * SHADOW_PENUMBRA_TAN, TINY));
         if (f.z > top_m && geodesic_tangent(x, v, s).y > 0.0) return;
         previous = s;
-        float step_m = max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * (travelled + s) * r);
+        float step_m = max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * s * r);
         if (!should_track_lit) {
             float4 t = geodesic_tangent(x, v, s);
             step_m = max(step_m, get_safe_step_m(scene, f, gap, max(-t.y * rsqrt(1.0 + p.y * p.y), 0.0)));
@@ -1273,11 +1272,11 @@ static bool is_clear_of_blocks(thread const Scene &scene, int w, float3 local, f
  * no static block within reach.
  * @par Example
  * @code
- * trace_scene(scene, x, v, -1, 0.0, float3(0.0), 0.0, hit, glass_s);
+ * trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
  * @endcode
  */
-static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, float travelled, thread Hit &hit, thread float &glass_s) {
-    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, 0.0, travelled, hit); else trace_ground(x, v, hit);
+static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, thread Hit &hit, thread float &glass_s) {
+    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, 0.0, hit); else trace_ground(x, v, hit);
     if (warp < 0) {
         trace_structures<false>(scene, x, v, hit, glass_s);
     } else {
@@ -1307,7 +1306,7 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
     h.lit = 1.0;
     float glass_s = NO_HIT_S;
     if (scene.u.has_terrain != 0) {
-        trace_terrain<true>(scene, x, l, TERRAIN_SHADOW_START_M / scene.u.curvature_radius_m, 0.0, h);
+        trace_terrain<true>(scene, x, l, TERRAIN_SHADOW_START_M / scene.u.curvature_radius_m, h);
         if (h.mat != 0) return SHADOW_FLOOR;
     }
     trace_structures<true>(scene, x, l, h, glass_s);
@@ -2621,7 +2620,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
-            trace_scene(scene, x, v, -1, 0.0, float3(0.0), travelled, hit, glass_s);
+            trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
             if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, ~0u, core, halo, code, speckle);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
@@ -2645,7 +2644,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         hit.s = ds;
         hit.mat = 0;
         float glass_s = NO_HIT_S;
-        trace_scene(scene, x, v, inside, rho, local, travelled, hit, glass_s);
+        trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) {
             if (mask_warp != inside || travelled + ds > mask_travel_limit) {
