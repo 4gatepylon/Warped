@@ -143,6 +143,7 @@ enum Effect {
     ColorGrade,
     VolumetricHaze,
     MaterialResponse,
+    Foveation,
 }
 
 /// `Args` are the command-line flags.
@@ -897,6 +898,8 @@ fn main() {
         is_material_response_enabled: !args.disable_effect.contains(&Effect::MaterialResponse),
         shadow_distance_m: args.shadow_distance_m,
         is_vsync_enabled: !args.no_vsync,
+        is_foveation_enabled: !args.disable_effect.contains(&Effect::Foveation)
+            && !((args.photo.is_some() || args.video_frames.is_some()) && !args.photo_hud),
     };
     let is_title_shown: bool = !(args.no_title
         || args.host
@@ -1150,6 +1153,7 @@ fn main() {
                         settings.is_material_response_enabled =
                             !settings.is_material_response_enabled
                     }
+                    Scancode::F9 => settings.is_foveation_enabled = !settings.is_foveation_enabled,
                     Scancode::LeftBracket => {
                         settings.render_scale_frac =
                             (settings.render_scale_frac - RENDER_SCALE_STEP_FRAC).max(0.3);

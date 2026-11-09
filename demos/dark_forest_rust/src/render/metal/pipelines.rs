@@ -104,6 +104,8 @@ pub struct Pipelines {
     pub tonemap: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub lens: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub fxaa: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    pub fxaa_physical: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    pub resolve: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub hud: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub hud_image: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub overlay_rects: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
@@ -382,6 +384,8 @@ impl Pipelines {
             tonemap: fullscreen_pipeline("tonemap_fragment", LDR_FORMAT, Blend::None),
             lens: fullscreen_pipeline("lens_fragment", LDR_FORMAT, Blend::None),
             fxaa: fullscreen_pipeline("fxaa_fragment", DRAWABLE_FORMAT, Blend::None),
+            fxaa_physical: fullscreen_pipeline("fxaa_fragment", LDR_FORMAT, Blend::None),
+            resolve: fullscreen_pipeline("resolve_fragment", DRAWABLE_FORMAT, Blend::None),
             overlay_rects: fullscreen_pipeline(
                 "overlay_rects_fragment",
                 DRAWABLE_FORMAT,

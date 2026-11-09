@@ -81,6 +81,8 @@ struct FrameUniforms {
     float4 post_params;
     float4 bounce_color;
     float4 effect_params;
+    float4 foveation;
+    float4 noise_offset_px;
 };
 
 /** @brief `PassUniforms` is the view-projection matrix of one pass (camera or shadow cascade). */
@@ -177,6 +179,7 @@ struct Surface {
     float occlusion;
     float3 emissive;
     float2 screen_position;
+    float2 ssao_uv;
     bool should_use_ssao;
 };
 
@@ -190,6 +193,57 @@ struct Surface {
  */
 inline float interleaved_gradient_noise(float2 pixel) {
     return fract(52.9829189 * fract(dot(pixel, float2(0.06711056, 0.00583715))));
+}
+
+/**
+ * @brief `get_screen_px` is the screen pixel that a pixel of a foveated target shows (W-136, sharp centre, soft
+ * edges): the scene passes draw through a rasterization rate map into smaller "physical" targets, full size around
+ * the crosshair and squeezed toward the edges. Unfoveated (`frame.foveation.z` 0), the two are the same.
+ * @par Interface
+ * `frame.foveation` is (1 / physical width, 1 / physical height, 1 while foveated, unused); `rate_map` is the rate
+ * map's parameter buffer, bound at `buffer(9)` wherever a shader decodes it.
+ * @par Example
+ * @code
+ * float2 screen_px = get_screen_px(frame, rate_map, in.position.xy);
+ * @endcode
+ */
+inline float2 get_screen_px(constant FrameUniforms& frame, constant rasterization_rate_map_data& rate_map,
+                            float2 physical_px) {
+    if (frame.foveation.z < 0.5) {
+        return physical_px;
+    }
+    rasterization_rate_map_decoder decoder(rate_map);
+    return decoder.map_physical_to_screen_coordinates(physical_px);
+}
+
+/**
+ * @brief `get_noise_px` is the screen pixel that seeds a foveated pixel's noise (shadow and haze dither, grain):
+ * exactly `get_screen_px` inside the full-rate centre, where physical and screen pixels differ by
+ * `frame.noise_offset_px`, and just as random but cheaper (no decoding) toward the edges.
+ * @par Example
+ * @code
+ * float jitter = interleaved_gradient_noise(get_noise_px(frame, in.position.xy));
+ * @endcode
+ */
+inline float2 get_noise_px(constant FrameUniforms& frame, float2 physical_px) {
+    return physical_px + frame.noise_offset_px.xy;
+}
+
+/**
+ * @brief `get_physical_uv` is where the screen point at `screen_uv` lies in a foveated target, in that target's
+ * texture coordinates (`get_screen_px`'s inverse); unfoveated, it is `screen_uv`.
+ * @par Example
+ * @code
+ * float d = depth.sample(point_sampler, get_physical_uv(frame, rate_map, sample_uv));
+ * @endcode
+ */
+inline float2 get_physical_uv(constant FrameUniforms& frame, constant rasterization_rate_map_data& rate_map,
+                              float2 screen_uv) {
+    if (frame.foveation.z < 0.5) {
+        return screen_uv;
+    }
+    rasterization_rate_map_decoder decoder(rate_map);
+    return decoder.map_screen_to_physical_coordinates(screen_uv * frame.screen_size.xy) * frame.foveation.xy;
 }
 
 /**
@@ -429,8 +483,7 @@ inline float3 shade_surface(constant FrameUniforms& frame, Surface surface,
 
     float ssao = 1.0;
     if (surface.should_use_ssao && frame.render_params.z > 0.5) {
-        float2 ssao_uv = surface.screen_position * frame.screen_size.zw;
-        ssao = textures.ssao.sample(linear_sampler, ssao_uv).r;
+        ssao = textures.ssao.sample(linear_sampler, surface.ssao_uv).r;
     }
     float occlusion = surface.occlusion * ssao;
     float sky_visibility =
