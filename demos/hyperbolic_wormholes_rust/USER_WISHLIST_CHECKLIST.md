@@ -45,10 +45,16 @@ is in [`AGENTS.md`](AGENTS.md).
     open). Lunar Surface, Dust and Snow Planet: #434 (servers
     take a console hold only in reach and aimed at, console bots walk to every pylon, `claude/console-reach-walking-bots`,
     open). Dark Forest: #431 (Lunar's HUD, hit effect and
-    "YOU DIED", `claude/dark-forest-parity-hud`, open) and #439 (playable and winnable: the server takes a console hold
+    "YOU DIED", `claude/dark-forest-parity-hud`, merged), #439 (playable and winnable: the server takes a console hold
     only in reach and aimed at, 10 s; console bots walk to every pylon by the ladders; both guns with Lunar's hits;
-    Lunar's jump; hidden bot windows; `claude/dark-forest-playable`, open); still missing there: Lunar's beam looks and
-    speckle, the Tab pages, the minimap, flashlight, third person, thrown wormholes, exit prompt, movement speeds.
+    Lunar's jump; hidden bot windows; `claude/dark-forest-playable`, merged) and #445 (Lunar's movement: speeds,
+    sprint energy, crouch, jump, air control, step, a hit's slowing, the shot delay after moving, the settings'
+    respawn delay; Lunar's flashlight and exit prompt; `claude/dark-forest-movement`, open, 2026-11-09); still
+    missing there: Lunar's beam looks and speckle, the Tab pages, the minimap, third person, thrown wormholes.
+    Shared code: #447 (`demos/warped_shared_rust/`, the files identical in Lunar Surface, Dust, Snow Planet, City
+    Sphere and the match, moved into one library they all use, no change in play or pictures;
+    `claude/shared-level-code`, merged); its `PLAN.md` is the next step, one movement, guns, health, HUD and robots
+    for all five levels: #449 (the settings sections and `shot_noise` shared, `claude/shared-play-settings`, open).
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
@@ -94,7 +100,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
-- [ ] **W-131 Lunar wormhole_exit slow at full size.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lunar Surface's `wormhole_exit` bench view takes about 109 ms of GPU time at full 2560x1440 (the reference and the match's copy alike); in play the window's render scale drops to keep frames fast, but the view itself is far over 16.7 ms.
 
 ## Pending user review
 
@@ -156,7 +161,8 @@ is in [`AGENTS.md`](AGENTS.md).
   there's like tree houses and stuff. Maybe have some like rope ladders and ways of going up trees. And crossing
   across them."
   Merged into `staging/user-4gatepylon` with #399, 2026-11-08. #426: robots, players and lasers show through the
-  wormholes (open, 2026-11-08). #439: playable and winnable end to end (open, 2026-11-08).
+  wormholes (merged, 2026-11-08). #439: playable and winnable end to end (merged, 2026-11-08). #445: Lunar Surface's
+  movement, flashlight and exit prompt (open, 2026-11-09).
 - [?] **W-123 Match progression menu.** "Make sure that the menus, when you see, like, there's a menu that shows the
   game progression, kind of the game history. Like, some state, I suppose, in the game server has to keep track of the
   game history and which team won what and what the wavefronts are, who has ownership, defensive ownership, offensive
@@ -318,6 +324,9 @@ are here too, since the user hadn't confirmed them.
     2026-11-08: on `staging`, waiting for the user to test it.
 - [?] **W-134 Dust map page picture stale.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Dust's committed MAP page picture (`map_pictures/dust_r50m.png`) was drawn before the ground switched to 3 noise octaves; a fresh render differs in 6.5% of its pixels.
   #440: redrawn with `make make-map-picture MAP=dust`.
+- [?] **W-131 Lunar wormhole_exit slow at full size.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lunar Surface's `wormhole_exit` bench view takes about 109 ms of GPU time at full 2560x1440 (the reference and the match's copy alike); in play the window's render scale drops to keep frames fast, but the view itself is far over 16.7 ms.
+  #450: Lunar Surface's ground is baked and each ray tests less; 19 of 21 bench views now take at most 16.6 ms at
+  2560x1440 at full resolution (`wormhole_exit` 109 → 49.5 ms, still over; in play the render scale drops there).
 
 ## Done
 

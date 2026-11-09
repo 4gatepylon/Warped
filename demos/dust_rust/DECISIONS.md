@@ -105,3 +105,10 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
         look, so it waits for the user. **User?** Since W-134 (Dust map page picture stale) it is redrawn with
         `make make-map-picture MAP=dust` (a mean of 3.4 of 255 from the old one, 6.9% of pixels past 8; two
         renders in a row are identical).
+20. **Lunar Surface's renderer speed-ups, shared** (W-131, Lunar wormhole_exit slow at full size; Lunar Surface's
+    D110): the same shader and packing changes as `demos/hyperbolic_wormholes_rust/` (structure groups, only the
+    shapes a chord can reach, nearer-first mesh BVHs and any-hit mesh shadows, beam midpoints packed once and per-warp
+    beam masks, far lamps skipped, the baked ground's slopes for its normal, and the ground's sunlight shared between
+    fine samples that are all fully lit with no structure near their shadow rays). The look is the same (the PR's
+    difference table). At render scale 1, 2560×1440, every view but `laser_into_wormhole` is now about 16.5 ms or
+    less; the default render scale stays 0.6 (item 17), for the user to raise. **User?** default render scale 1.

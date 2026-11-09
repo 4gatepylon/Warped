@@ -113,20 +113,39 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   pose 30 times a second and the server snapshots at 60 Hz, so remote robots jumped every two or three frames.
   Hits are still the shooter's call, now against where the robot is drawn. A jump of more than 3 m (a wormhole,
   a respawn) isn't blended.
-- **D26. The forest's shadows are kept between frames.** The four shadow cascades took about 6.5 ms of every frame
+- **D26. Lunar Surface's movement, with the forest's own body and ladders.** `player.rs` follows Lunar's
+  `VoxelPlayer::step` and `VoxelWorld::set_settings` (`Movement`): walking and sprinting at the settings' multiples of
+  the map's speeds, the velocity set at once on the ground and in the air (no run-up or drift, as on Lunar), sprinting in
+  any direction while not crouching, crouching over 0.15 s to half speed with the eye at 0.6 of its height, a jump of
+  1.25 m in 0.58 s, falls capped at 40 m/s, a hit's slowing to half speed for 1 s, and steps up ledges to Lunar's
+  0.5 m (for the robots too). The map's own numbers are now Lunar Surface's map's (5 m/s walking, 9 m/s sprinting, a
+  5.2 m/s jump under 6 m/s²), so the same server settings give the same play here as on every other level; nothing
+  else reads those numbers. Kept from the forest: its body (0.3 m radius, 1.8 m tall, eye 1.68 m up; a crouched body
+  shrinks with its eye, so it fits under what the eye does), its rope ladders at the 4.4 m/s pace they were made for,
+  and the landing dip. Tests check the numbers against Lunar's own `server_settings.yaml` and map. The player also
+  waits the server settings' `respawn.delay_s` before respawning, as Lunar does, instead of its own 3 s.
+- **D27. A shot fires only 0.25 s after the last step upright or jump, as on Lunar Surface.** The autopilot and the
+  fighting bots therefore stand still while they have a target in sight.
+- **D28. The flashlight is two point lights, and `Esc` asks before quitting.** Lunar's flashlight is a cone of light
+  from the eye; this renderer has no spot lights and its shaders belong to another agent now, so `F` puts a light where
+  the view meets the world (as wide as the cone there, halved at its 25 m range) and a dim one just ahead of the eye.
+  Heuristic: gives up the cone's sharp edge and lights a little around the spot. Others don't see your flashlight, as
+  on Lunar. `Esc` frees the mouse and, pressed again, shows Lunar's exit prompt (`exit_prompt.rs`, copied); `Tab`
+  alone opens the menu.
+- **D29. The forest's shadows are kept between frames.** The four shadow cascades took about 6.5 ms of every frame
   redrawing the static forest. Each cascade is now a square centred on the camera (as wide as the sphere around its
   slice, so its texels and depth bias are unchanged) that stays put until the camera walks out of its spare margin
   (about 4 m for the nearest, 70 m and more for the farthest; turning never moves it). The static casters are drawn
   into a cache only when a cascade moves; each frame the cache is copied into the shadow map and only robots and
   other moving casters are drawn on top. Shadows look the same (a few hundred pixels differ by up to 7/255).
-- **D27. The lit passes get only the point lights whose reach meets the view.** A candle's light reaches 3.5 m, so a
+- **D30. The lit passes get only the point lights whose reach meets the view.** A candle's light reaches 3.5 m, so a
   light whose sphere is outside the view frustum can't light anything visible; the lens's live faces, which look
   from the mouths, still get them all.
-- **D28. The haze takes a step per 1.5 m of its ray (4 to 12 steps).** The light-shaft haze marched 12 steps through
+- **D31. The haze takes a step per 1.5 m of its ray (4 to 12 steps).** The light-shaft haze marched 12 steps through
   the shadow map for every pixel, about 2 ms of a frame at 3440x1440, though most of the forest's surfaces are a few
   metres away. Short rays now take fewer steps: the haze's brightness is the same, its fine dither pattern differs
   (pictures in the PR). **Weigh in:** if the pattern change shows in play, 12 steps for every ray costs about 1 ms.
-- **D29. The lens pass draws only over the mouths in view.** It is scissored to the screen rectangle of every
+- **D32. The lens pass draws only over the mouths in view.** It is scissored to the screen rectangle of every
   in-view mouth's reach, and skipped (with the tone map's lens test) when none is in view; the result is the same.
 
 ## Follow-ups for the next agent

@@ -9,23 +9,13 @@
 //!
 //! Must know:
 //! - It shares `net.rs` and the modules it needs (`map.rs`, `settings.rs`, `thrown_wormholes.rs`,
-//!   `shot_noise.rs`, `terrain.rs`, `geometry.rs`, `app_bundle.rs`) with the game, so both speak
-//!   the same protocol.
+//!   `terrain.rs`, and `geometry`, `play_settings`, `shapes` and `shot_noise` from
+//!   `../warped_shared_rust/`) with the game, so both speak the same protocol.
 //! - It exits on the first error, so a supervisor such as systemd can restart it.
 
 #[allow(dead_code)]
-#[path = "../app_bundle.rs"]
-mod app_bundle;
-#[allow(dead_code)]
 #[path = "../city_world.rs"]
 mod city_world;
-#[allow(dead_code)]
-#[path = "../geometry.rs"]
-mod geometry;
-#[cfg(target_os = "macos")]
-#[allow(dead_code)]
-#[path = "../key_bindings.rs"]
-mod key_bindings;
 #[path = "../map.rs"]
 mod map;
 #[allow(dead_code)]
@@ -34,9 +24,6 @@ mod net;
 #[allow(dead_code)]
 #[path = "../settings.rs"]
 mod settings;
-#[allow(dead_code)]
-#[path = "../shot_noise.rs"]
-mod shot_noise;
 #[allow(dead_code)]
 #[path = "../terrain.rs"]
 mod terrain;
@@ -50,6 +37,9 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use clap::Parser;
+#[cfg(target_os = "macos")]
+use warped_shared::key_bindings;
+use warped_shared::{geometry, play_settings, shapes, shot_noise};
 
 use map::{Map, MapName, get_console_team};
 use settings::ServerSettings;

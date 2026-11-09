@@ -17,6 +17,8 @@
 use glam::{DMat4, Vec2, Vec3};
 
 use super::nav::{NavGraph, NavStep};
+#[cfg(test)]
+use super::player::Movement;
 use super::player::{Player, PlayerInput};
 use super::world::LadderVolume;
 use crate::console_reach::{ConsolePlace, REACH_TOLERANCE_M};
@@ -410,6 +412,11 @@ mod tests {
             arena.bounds_max_m,
         );
         let starts: Vec<(Vec3, f32)> = arena.team_spawns.concat();
+        let movement: Movement = Movement::New(
+            &arena.map_player,
+            arena.map_gravity_m_per_s2,
+            &crate::settings::ServerSettings::Builtin(),
+        );
         for (team, &(spawn_m, yaw_rad)) in
             (0..2_u32).flat_map(|team| starts.iter().map(move |start| (team, start)))
         {
@@ -433,7 +440,7 @@ mod tests {
                     now_s,
                     DT_S,
                 );
-                player.update(&walk.input, &solids, &arena.ladders, DT_S);
+                player.update(&walk.input, &movement, &solids, &arena.ladders, DT_S);
                 (now_s, walk_s) = (now_s + DT_S, walk_s + DT_S);
                 held_s = if walk.console.is_some() {
                     held_s + DT_S

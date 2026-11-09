@@ -42,16 +42,21 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | --- | --- |
 | Mouse | look (click the window to capture the mouse) |
 | `WASD` | move; walk into a ladder to climb it (`W` up, `S` or `Ctrl` down, or look down and `W`) |
-| `Shift` / `Ctrl` or `C` / `Space` | sprint / crouch / jump (`Space` lets go of a ladder) |
+| `Shift` / `Ctrl` or `C` / `Space` | sprint (any direction, while the energy bar lasts) / crouch (half speed, eye lowered) / jump (`Space` lets go of a ladder) |
+| `F` (hold) | flashlight |
 | Left mouse | fire: the sniper (gun 1) once a click, then 2 s to reload; the rifle (gun 2) while held, until it overheats |
 | Right mouse | aim: zoom in 2.5 times (sniper) or 1.5 times (rifle); the mouse turns the view more slowly by as much |
 | `1` / `2` / wheel | take the sniper / take the rifle / swap guns |
 | `E` (hold) | turn off an enemy console: look at it from within 3 m and hold 10 s |
-| `Esc` | release the mouse; a second `Esc` quits |
+| `Esc` | release the mouse; a second `Esc` asks "Do you want to exit?" (`Return`/`Y` exits, `Esc`/`N` stays) |
+| `Tab` | menu (scores, settings, map, credits) |
 | `F1`-`F8`, `[` / `]` | effects and render scale, as in `../fps_demo/` |
 
-The guns, hits, console holds and jump are the Lunar Surface demo's too (W-126; DECISIONS.md D17 to D21): one sniper
-hit eliminates a player, the rifle takes 12 hits to the body or 2 to the head, a jump rises 1.25 m and lasts 0.58 s.
+The guns, hits, console holds and movement are the Lunar Surface demo's too (W-126; DECISIONS.md D17 to D22 and D26 to D28): one
+sniper hit eliminates a player, the rifle takes 12 hits to the body or 2 to the head; you walk at 10 m/s and sprint at
+18 m/s (no run-up, the same in the air), crouch to half speed with the eye at 0.6 of its height, a jump rises 1.25 m
+and lasts 0.58 s, a hit slows you to half speed for 1 s, and a shot fires only 0.25 s after your last step upright or
+jump (crouch-walking doesn't count). Ladders keep the forest's own pace.
 
 The HUD is the Lunar Surface demo's (W-126, same play in every level; DECISIONS.md D16): in the bottom left the
 health bar (a segment per rifle hit to the body), the gun's ammo bar (the sniper's one block while loaded, the
@@ -168,7 +173,7 @@ ready. The forest is cut into 8 m tiles so that each pass (four shadow
 cascades, the depth prepass and the lit pass) draws only the tiles it sees.
 
 The static forest's shadows are drawn into a cache only when a shadow cascade moves (the cascades are centred on the
-camera and stay put until it walks out of their margin; DECISIONS.md D26), and only the robots and other moving
+camera and stay put until it walks out of their margin; DECISIONS.md D29), and only the robots and other moving
 casters are drawn into the shadow map each frame. The frame statistics' GPU time is each frame's own: from when it
 started or the frame before it ended, whichever is later, to when it ended.
 

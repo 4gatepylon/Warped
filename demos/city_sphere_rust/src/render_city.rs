@@ -28,7 +28,7 @@ use rayon::prelude::*;
 use crate::city_world::{CityWorld, Hole, get_up};
 use crate::fps_demo_assets::get_asset_path;
 use crate::mesh::{MeshMaterial, MeshModel};
-use crate::voxel_textures::{make_array, make_mips};
+use crate::texture_arrays::{make_array, make_mips};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;

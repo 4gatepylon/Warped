@@ -175,9 +175,10 @@ make package-mac-app ONLINE_GAMES=online_games.txt
 - `make package-mac-app` builds `.build/Warped/Warped.app` (the game with its maps built in, the icon from
   [`app/app_icon.png`](app/app_icon.png), [`app/Info.plist`](app/Info.plist) with macOS 13 and the Local Network
   note), signs it ad hoc and zips it with [`app/how_to_open.txt`](app/how_to_open.txt) into `.build/Warped.zip`.
-- The app carries the fps_demo's surface textures in `Contents/Resources/assets/`, and `fps_demo_assets.rs` reads
-  them from there when the game runs from the app. The revolver is built into the program (`viewmodel.rs`), not
-  shipped as files, as its Sketchfab Standard license asks; the menu's CREDITS page credits its author.
+- The app carries the fps_demo's surface textures in `Contents/Resources/assets/`, and `fps_demo_assets.rs`
+  (`../warped_shared_rust/`) reads them from there when the game runs from the app. The revolver is built into the
+  program (`viewmodel.rs`), not shipped as files, as its Sketchfab Standard license asks; the menu's CREDITS page
+  credits its author.
 - `ONLINE_GAMES=` copies an `online_games.txt` into the app for its title screen (`title.rs` says the format); the
   cloud deploy writes it.
 
@@ -261,10 +262,13 @@ make run-autopilot
 
 ## How it works
 
+- [`../warped_shared_rust/`](../warped_shared_rust/README.md): the code every Rust level shares, used as a
+  library: `geometry.rs`, the gun held in hand (`viewmodel.rs`), the HUD's bars and overlay types, the maps'
+  models and the robot body, the smooth shapes, the key bindings, and finding assets.
 - `thrown_wormholes.rs`: each player's purple and green mouths: the lobbed throw, where a mouth hovers once down,
   and which colour is next. Each map adds the linked pairs as mouths of its own (after the map's), and
   `net.rs` sends every player's mouths in each snapshot.
-- `geometry.rs`: Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
+- `geometry.rs` (shared): Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
 - `world.rs`: the scene: hyperbolic boxes grouped in clusters, and the wormholes' mouths with their gluing maps.
 - `scene_data.rs`: each frame, packs the scene into rows of float 4-vectors, one row in the camera's coordinates and
   one per mouth, so a ray that goes through a mouth stays in small coordinates (the same layout as the WebGL demo's
@@ -398,6 +402,13 @@ with adaptive sampling (and tracing every pixel):
 | red pylon | 5.8 (6.1) | ridge | 6.5 (8.3) |
 | overlook | 6.1 (5.2) | habitat row | 6.2 (6.5) |
 | laser into the wormhole | 18.7 (32.6) | | |
+
+Those times predate the bigger map, its models and the 1.5× curvature: on 2026-11-08 the same views took 13 to 109
+ms at 2560×1440. D110 (W-131, Lunar wormhole_exit slow at full size) baked the ground and culled what each ray tests,
+with the same pictures: measured under the agents' exclusive GPU lock (median GPU ms, best of 3 alternating rounds of
+20 frames, Apple M3 Pro, macOS 15.7.3, rustc 1.98.1), 19 of the 21 views now take 8 to 16.5 ms at 2560×1440 (before:
+13 to 42), with p99 within 0.4 ms of the median; `laser_into_wormhole` takes 17.5 (40.7) and `wormhole_exit` 49.5
+(109.0). At 3440×1440, 12 views are under 16.7 ms; the rest take 16.8 to 22 ms and `wormhole_exit` 59.
 
 In a full-screen window (2560×1336, automatic scale, `--view`), every view runs at 72 fps or more, all at full
 resolution but the wormhole exit, at render scales 0.96 to 0.98: blue spawn 181 fps, middle 166, Einstein ring 152,

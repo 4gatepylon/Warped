@@ -22,50 +22,42 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
-mod app_bundle;
 mod avatar_animation;
-mod avatar_model;
 mod black_hole_growth;
 mod console_bot;
 mod console_reach;
 mod credits;
 mod dust;
-mod exit_prompt;
-mod fps_demo_assets;
-mod geometry;
 mod hit_feedback;
-mod hud_bars;
-mod key_bindings;
 mod map;
 mod map_export;
 mod map_layout;
 mod map_photo;
 mod menu;
-mod mesh;
 mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
 mod picture_saver;
 mod render_cpu;
-mod render_mesh;
 mod render_metal;
 mod render_voxel;
 mod scene_data;
 mod settings;
-mod shapes;
-mod shot_noise;
-mod spaceships;
 mod terrain;
 mod third_person;
 mod thrown_wormholes;
 mod title;
-mod viewmodel;
 mod voxel_clearance;
 mod voxel_textures;
 mod voxel_world;
 mod world;
 mod zone_walls;
+
+use warped_shared::{
+    app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, hud_bars, key_bindings, mesh,
+    overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel,
+};
 
 use std::error::Error;
 use std::fs;
