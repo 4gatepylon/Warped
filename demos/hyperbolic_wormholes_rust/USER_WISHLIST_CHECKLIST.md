@@ -63,7 +63,7 @@ is in [`AGENTS.md`](AGENTS.md).
     #461 (City Sphere moves by the shared movement rules and gains Lunar's crouch, `claude/city-crouch`,
     merged), #466 (Dark Forest on the shared crate: its HUD, hit effect, shot noise and settings sections,
     glam 0.34; `claude/dark-forest-shared-hud`, merged), #468 (Dark Forest's guns on the shared `Weapons`,
-    `claude/dark-forest-shared-guns`, merged), #DF3C_PR (Dark Forest's robots are Lunar's teal robot,
+    `claude/dark-forest-shared-guns`, merged), #473 (Dark Forest's robots are Lunar's teal robot,
     animated by the shared gait rules; `claude/dark-forest-teal-robots`, open).
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
@@ -124,7 +124,7 @@ is in [`AGENTS.md`](AGENTS.md).
   #464: the middle 66% of the width drawn as before and the rest at half resolution, blended (option B, the
   default; options A-E with timings in the PR for the user), in Lunar Surface, the match, Dust and Snow Planet.
 - [?] **W-137 Crouched robots sink.** A bug found by agents on 2026-11-09: other windows place a remote player's feet one standing eye height below the eye they receive (`VoxelPlayer::FromEye`), so a crouched player's robot sinks about 0.7 m into the floor (Lunar Surface and its copies).
-  #463: each window sends its crouch, and other windows stand a crouched robot on the floor, squashed to the crouched eye height, with its hit shapes (Lunar Surface, Dust, Snow Planet, the match, City Sphere); #DF3C_PR: Dark Forest too, with its robots' switch to the teal robot.
+  #463: each window sends its crouch, and other windows stand a crouched robot on the floor, squashed to the crouched eye height, with its hit shapes (Lunar Surface, Dust, Snow Planet, the match, City Sphere); #473: Dark Forest too, with its robots' switch to the teal robot.
 - [?] **W-127 Dark Forest canopy flicker.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): In about one fixed-step capture in three or four, a few thousand canopy pixels differ, also on the base build before any of the 2026-11-08 work; it looks like a GPU race in the FPS-demo renderer.
   #444: the forest is drawn in 8 m tiles, and repeat captures no longer differ in thousands of canopy pixels (8 of 20 differ in at most 28 pixels by 1-2/255, against 4 of 20 by up to 4,173 pixels and 23/255 before).
 - [?] **W-128 Dark Forest double lens.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Standing within 4 m of a gate shows a faint second image of the wormhole's lens over the direct view.
