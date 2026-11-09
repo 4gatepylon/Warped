@@ -180,4 +180,5 @@ showed 61 fps and 3.3 GPU ms.
   `--bot-objective consoles` (`console_bot.rs`), the console reach check (`console_reach.rs`), hit
   pictures saved on their own thread (`picture_saver.rs`), `--serve-match`, `--match`.
 - `e2e/`: settings and levels for the fast bot match.
-- Everything else is the hyperbolic demo; see its README for the level itself.
+- Everything else is the hyperbolic demo; see its README for the level itself. The files every Rust level
+  shares are in [`../warped_shared_rust/`](../warped_shared_rust/README.md), a library this crate depends on.

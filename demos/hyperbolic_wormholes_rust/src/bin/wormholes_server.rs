@@ -9,25 +9,15 @@
 //!
 //! Must know:
 //! - It shares `net.rs` and the modules it needs (`map.rs`, `settings.rs`, `thrown_wormholes.rs`,
-//!   `shot_noise.rs`, `terrain.rs`, `geometry.rs`, `app_bundle.rs`, `shapes.rs`,
-//!   `console_reach.rs`) with the game, so both speak the same protocol and check consoles alike.
+//!   `shot_noise.rs`, `terrain.rs`, `console_reach.rs`, and `geometry` and `shapes` from
+//!   `../warped_shared_rust/`) with the game, so both speak the same protocol and check consoles alike.
 //! - It loads the map as the game does (its curvature scaled by the server settings), so the
 //!   consoles' places match the players' map.
 //! - It exits on the first error, so a supervisor such as systemd can restart it.
 
 #[allow(dead_code)]
-#[path = "../app_bundle.rs"]
-mod app_bundle;
-#[allow(dead_code)]
 #[path = "../console_reach.rs"]
 mod console_reach;
-#[allow(dead_code)]
-#[path = "../geometry.rs"]
-mod geometry;
-#[cfg(target_os = "macos")]
-#[allow(dead_code)]
-#[path = "../key_bindings.rs"]
-mod key_bindings;
 #[path = "../map.rs"]
 mod map;
 #[allow(dead_code)]
@@ -36,9 +26,6 @@ mod net;
 #[allow(dead_code)]
 #[path = "../settings.rs"]
 mod settings;
-#[allow(dead_code)]
-#[path = "../shapes.rs"]
-mod shapes;
 #[allow(dead_code)]
 #[path = "../shot_noise.rs"]
 mod shot_noise;
@@ -55,6 +42,9 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use clap::Parser;
+#[cfg(target_os = "macos")]
+use warped_shared::key_bindings;
+use warped_shared::{geometry, shapes};
 
 use map::{Map, MapName};
 use settings::ServerSettings;
