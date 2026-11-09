@@ -101,9 +101,9 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   soon as the server names the team, and a bot waits for that before it moves.
 - **D23. Frames are shown for a steady whole number of refreshes (the stutter fix).** On the user's 100 Hz display
   a frame took the GPU 11-16 ms, so frames were shown for a mix of 10 and 20 ms while the game stepped by the
-  loop's own, jittery interval: constant jitter. Now each frame waits for a whole number of refreshes chosen from
-  the last 30 frames' GPU times (slower at once when the 90th percentile doesn't fit, faster again only with 25%
-  to spare), and the game steps exactly that long (`render::frame_clock`). **Weigh in:** where the GPU can't hold
+  loop's own, jittery interval: constant jitter. Now each frame waits for a whole number of refreshes: one more
+  once over a tenth of the last 30 frames were shown late, one fewer once the GPU's 90th percentile fits in 75% of
+  that, from Metal's presented times; and the game steps exactly that long (`render::frame_clock`). **Weigh in:** where the GPU can't hold
   100 fps this shows a steady 50 fps rather than an uneven 60-80; 60 fps isn't a whole number of refreshes at 100 Hz.
 - **D24. The forest is drawn in 8 m tiles.** The arena's surfaces were one mesh each (2.5 million triangles), drawn
   whole in all six passes. Cut into 8 m tiles, each pass culls them against its view: the same triangles, fewer

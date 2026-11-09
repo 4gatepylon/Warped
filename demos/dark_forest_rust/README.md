@@ -158,11 +158,13 @@ robots (60 frames each, vsync on, median at the 60 Hz interval in every run) giv
 
 ### Frame pacing
 
-With vsync on, each frame stays on screen a whole number of display refreshes, the same for every frame: one when
-the GPU's recent frames fit in a refresh, else two (or more), chosen from the last 30 frames' GPU times
-(`render::frame_clock::choose_refreshes_per_frame`), and the game simulates exactly that long a step per frame. So
-on a 100 Hz display a frame the GPU can't finish in 10 ms is shown for a steady 20 ms (50 fps) instead of a mix of
-10 and 20 ms, which looked like constant jitter. The forest is cut into 8 m tiles so that each pass (four shadow
+With vsync on, each frame stays on screen a whole number of display refreshes, the same for every frame: one while
+frames are shown on time, two (or three) once more than a tenth of the last 30 were shown late, and one again when
+the GPU's recent frames fit well inside one refresh (`render::frame_clock::choose_refreshes_per_frame`, fed by Metal's
+presented times); the game simulates exactly that long a step per frame. So on a 100 Hz display a frame the GPU can't
+finish in 10 ms is shown for a steady 20 ms (50 fps) instead of a mix of 10 and 20 ms, which looked like constant
+jitter. While no frame reaches a display (it sleeps, or the window is hidden), frames are shown as soon as they are
+ready. The forest is cut into 8 m tiles so that each pass (four shadow
 cascades, the depth prepass and the lit pass) draws only the tiles it sees.
 
 ## Code
