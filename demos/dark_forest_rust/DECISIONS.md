@@ -48,8 +48,8 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   then itself. The lens pass then looks for a robot along the traced ray, at each bent step and across each robot's
   bounding sphere on the straight part, by comparing the ray's distance from the mouth with the faces' depth, and
   hides a robot behind the static forest with the atlas's alpha, now the static world's distance (log-encoded).
-  Lasers are added in the atlas's own direction (lined up on its 12 m sphere), so a laser that doesn't pass near a
-  mouth's centre shows a little off its true place. Redrawing the whole forest per visible mouth (D12's live view)
+  Lasers and glows are shown where the traced ray passes them: their segments (up to 24, beams' dashes joined) go
+  to the lens pass, which reads the live faces in the direction of the nearest point on the ray (W-129). Redrawing the whole forest per visible mouth (D12's live view)
   would cost about a full frame each; this costs only the robots. The parked branch `devin/dark-forest-lens-robots`
   drew robots over the atlas in the atlas's direction, so they slid with parallax and showed through bamboo walls;
   it was redone rather than finished. Robots in the live faces are lit with the player's last shadow cascade (which
@@ -99,6 +99,20 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
 - **D22. Joining a team puts the player at that team's spawn.** A window started at the red spawn and stayed there
   after the server put it on blue, so a blue player began among red's pylons; it now respawns at its team's spawn as
   soon as the server names the team, and a bot waits for that before it moves.
+- **D23. Frames are shown for a steady whole number of refreshes (the stutter fix).** On the user's 100 Hz display
+  a frame took the GPU 11-16 ms, so frames were shown for a mix of 10 and 20 ms while the game stepped by the
+  loop's own, jittery interval: constant jitter. Now each frame waits for a whole number of refreshes: one more
+  once over a tenth of the last 30 frames were shown late, one fewer once the GPU's 90th percentile fits in 75% of
+  that, from Metal's presented times; and the game steps exactly that long (`render::frame_clock`). **Weigh in:** where the GPU can't hold
+  100 fps this shows a steady 50 fps rather than an uneven 60-80; 60 fps isn't a whole number of refreshes at 100 Hz.
+- **D24. The forest is drawn in 8 m tiles.** The arena's surfaces were one mesh each (2.5 million triangles), drawn
+  whole in all six passes. Cut into 8 m tiles, each pass culls them against its view: the same triangles, fewer
+  drawn. Pixels where two canopy pieces are at exactly the same depth may now resolve the other way (1-2/255 of
+  colour on about 0.1-0.8% of the pixels), and they now do so the same way every frame.
+- **D25. Other players are shown 70 ms in the past, blended between the poses received.** Players send their
+  pose 30 times a second and the server snapshots at 60 Hz, so remote robots jumped every two or three frames.
+  Hits are still the shooter's call, now against where the robot is drawn. A jump of more than 3 m (a wormhole,
+  a respawn) isn't blended.
 
 ## Follow-ups for the next agent
 

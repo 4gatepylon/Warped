@@ -102,4 +102,6 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
       - `map_pictures/dust_r50m.png` predates item 17's renderer: a fresh render of the same map differs from it by
         a mean of 3.3 of 255 (6.5% of pixels past 8), while lowering the mouths changes 0.35% of a fresh render's
         pixels, around the mouths. Regenerating it (`make make-map-picture MAP=dust`) would change the map page's
-        look, so it waits for the user. **User?**
+        look, so it waits for the user. **User?** Since W-134 (Dust map page picture stale) it is redrawn with
+        `make make-map-picture MAP=dust` (a mean of 3.4 of 255 from the old one, 6.9% of pixels past 8; two
+        renders in a row are identical).
