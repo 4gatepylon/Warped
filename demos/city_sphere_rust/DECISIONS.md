@@ -172,3 +172,8 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
     the bob's phase differs from the first take-off on (positions don't); (b) a hit's slow lasts one more step, since
     the rules count it down after using it. City's play trace (`record_city_play_trace`) without crouching is
     otherwise byte for byte the same as before. As on Lunar, crouching doesn't shrink the body for collisions.
+37. **4x MSAA** (W-138, no aliasing): the opaque, glass and beam pipelines rasterize 4 samples per pixel into
+    memoryless multisample colour and depth targets (`make_sample_texture`, tile memory only), and the pass resolves
+    them into the render texture, so structure, glass-hole and beam edges are anti-aliased. Lines drawn by the fragment
+    shader (the glass's hexagons, panel seams) were already filtered by their textures and are unchanged. At 3440x1440:
+    0.1-0.3 ms more GPU time per view (every view 1.6-2.6 ms median).
