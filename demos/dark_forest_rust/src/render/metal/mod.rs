@@ -49,9 +49,10 @@ use self::resources::{
 use crate::render::culling::{CASCADE_COUNT, CascadeCamera, Cascades, Frustum, fit_cascades};
 use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
-    LensMouth, MAX_LIVE_LENS_SLOT_COUNT, MaterialData, MaterialHandle, MeshData, MeshHandle,
-    OccluderBox, Particle, RenderSettings, Renderer, TextureData, TextureHandle,
-    overlay::get_overlay_regions_px, pick_live_lens_mouths,
+    LensMouth, MAX_LENS_GLOW_SEGMENT_COUNT, MAX_LIVE_LENS_SLOT_COUNT, MaterialData, MaterialHandle,
+    MeshData, MeshHandle, OccluderBox, Particle, RenderSettings, Renderer, TextureData,
+    TextureHandle, get_glow_segments, get_segment_distance_m, overlay::get_overlay_regions_px,
+    pick_live_lens_mouths,
 };
 
 /// `FRAMES_IN_FLIGHT` is how many frames the CPU may encode ahead of the GPU.
@@ -639,7 +640,25 @@ impl MetalRenderer {
         spheres.sort_by(|a, b| get_slot_distance_m(a).total_cmp(&get_slot_distance_m(b)));
         spheres.truncate(MAX_LENS_MOVER_COUNT);
         uniforms.movers[..spheres.len()].copy_from_slice(&spheres);
-        uniforms.live_params = Vec4::new(0.0, spheres.len() as f32, frame.camera.near_m, 0.0);
+        let mut glows: Vec<(Vec3, Vec3, f32)> = get_glow_segments(frame.lens_particles);
+        let get_glow_distance_m = |&(start_m, end_m, _): &(Vec3, Vec3, f32)| -> f32 {
+            slots
+                .iter()
+                .map(|&mouth| get_segment_distance_m(live.mouths[mouth].centre_m, start_m, end_m))
+                .fold(f32::MAX, f32::min)
+        };
+        glows.sort_by(|a, b| get_glow_distance_m(a).total_cmp(&get_glow_distance_m(b)));
+        glows.truncate(MAX_LENS_GLOW_SEGMENT_COUNT);
+        for (index, &(start_m, end_m, radius_m)) in glows.iter().enumerate() {
+            uniforms.glow_starts[index] = start_m.extend(radius_m);
+            uniforms.glow_ends[index] = end_m.extend(radius_m);
+        }
+        uniforms.live_params = Vec4::new(
+            0.0,
+            spheres.len() as f32,
+            frame.camera.near_m,
+            glows.len() as f32,
+        );
 
         let face_px: f32 = live.face_px as f32;
         let alpha_mode_of = |draw: &DrawItem| self.materials[draw.material.0 as usize].alpha_mode;

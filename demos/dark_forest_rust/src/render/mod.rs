@@ -312,8 +312,45 @@ pub fn encode_lens_depth(near_m: f32, depth: f32) -> u8 {
     (frac.clamp(0.0, 1.0) * f32::from(u8::MAX)).round() as u8
 }
 
+/// `MAX_LENS_GLOW_SEGMENT_COUNT` is how many laser and glow segments the lens pass looks for along
+/// its rays; `post.metal`'s `LensUniforms` agrees.
+pub const MAX_LENS_GLOW_SEGMENT_COUNT: usize = 24;
+/// `GLOW_JOIN_COS` is how parallel two tracer dashes must be (the cosine of the angle between them)
+/// to be joined into one segment.
+const GLOW_JOIN_COS: f32 = 0.999;
+
+/// `get_glow_segments` turns the particles the lens shows into segments (start, end, radius): runs
+/// of overlapping, parallel tracer dashes (a laser beam, cut into dashes) joined into one segment
+/// each, and every other particle as its own (a point, for eye glows and sparks).
+///
+/// Example: `let glows: Vec<(Vec3, Vec3, f32)> = get_glow_segments(&frame.lens_particles);`
+pub fn get_glow_segments(particles: &[Particle]) -> Vec<(Vec3, Vec3, f32)> {
+    let mut segments: Vec<(Vec3, Vec3, f32)> = Vec::new();
+    let mut is_last_tracer: bool = false;
+    for particle in particles {
+        let half_m: Vec3 = particle.stretch_m * 0.5;
+        let (start_m, end_m) = (particle.position_m - half_m, particle.position_m + half_m);
+        let is_tracer: bool = particle.kind == ParticleKind::Tracer;
+        if let Some(last) = segments.last_mut()
+            && is_tracer
+            && is_last_tracer
+            && last.1.distance(start_m) <= particle.stretch_m.length()
+            && (last.1 - last.0)
+                .normalize_or_zero()
+                .dot(particle.stretch_m.normalize_or_zero())
+                >= GLOW_JOIN_COS
+        {
+            last.1 = end_m;
+        } else {
+            segments.push((start_m, end_m, particle.size_m));
+        }
+        is_last_tracer = is_tracer;
+    }
+    segments
+}
+
 /// `get_segment_distance_m` is how near the segment from `a_m` to `b_m` comes to `point_m`.
-fn get_segment_distance_m(point_m: Vec3, a_m: Vec3, b_m: Vec3) -> f32 {
+pub fn get_segment_distance_m(point_m: Vec3, a_m: Vec3, b_m: Vec3) -> f32 {
     let ab: Vec3 = b_m - a_m;
     let along_frac: f32 = (point_m - a_m).dot(ab) / ab.length_squared().max(1e-12);
     point_m.distance(a_m + ab * along_frac.clamp(0.0, 1.0))
@@ -419,6 +456,7 @@ pub trait Renderer {
 /// | candidate count | at most the slots, more than the slots | `test_live_mouths_take_partner_then_self`, `test_live_mouths_keep_the_nearest_when_full` |
 /// | mover shape | a point (robot), a long segment (laser) | `test_live_mouths_need_a_mover_and_a_visible_mouth` |
 /// | depth | sky, nearer than the near bound, between the bounds | `test_lens_depth_encoding` |
+/// | glow particles | one beam's dashes, two beams' dashes back to back, a point glow between dashes | `test_beam_dashes_join_into_segments` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,6 +580,37 @@ mod tests {
         let slots: Vec<usize> =
             pick_live_lens_mouths(&mouths, Vec3::new(55.0, 1.7, 0.0), &[true; 6], &movers);
         assert_eq!(slots, vec![4, 5, 2, 3]);
+    }
+
+    /// `test_beam_dashes_join_into_segments` checks that a beam's overlapping dashes become one
+    /// segment, that a second beam turning off from its end and a point glow stay apart.
+    #[test]
+    fn test_beam_dashes_join_into_segments() {
+        let dash = |position_m: Vec3, direction: Vec3| Particle {
+            position_m,
+            stretch_m: direction * 0.3,
+            size_m: 0.02,
+            color_rgba: Vec4::ONE,
+            kind: ParticleKind::Tracer,
+            seed: 0.0,
+        };
+        let glow: Particle = Particle {
+            stretch_m: Vec3::ZERO,
+            size_m: 0.07,
+            kind: ParticleKind::MuzzleFlash,
+            ..dash(Vec3::new(9.0, 1.0, 0.0), Vec3::X)
+        };
+        let mut particles: Vec<Particle> = (0..10)
+            .map(|i| dash(Vec3::new(i as f32 * 0.15, 1.0, 0.0), Vec3::X))
+            .collect();
+        particles.extend((0..4).map(|i| dash(Vec3::new(1.5, 1.0 + i as f32 * 0.15, 0.0), Vec3::Y)));
+        particles.push(glow);
+        let segments: Vec<(Vec3, Vec3, f32)> = get_glow_segments(&particles);
+        assert_eq!(segments.len(), 3, "{segments:?}");
+        assert!(segments[0].0.distance(Vec3::new(-0.15, 1.0, 0.0)) < 1e-5);
+        assert!(segments[0].1.distance(Vec3::new(1.5, 1.0, 0.0)) < 1e-5);
+        assert!(segments[1].1.distance(Vec3::new(1.5, 1.6, 0.0)) < 1e-5);
+        assert_eq!(segments[2], (glow.position_m, glow.position_m, glow.size_m));
     }
 
     /// `test_lens_depth_encoding` checks the sky and the far bound encode to 255, anything nearer

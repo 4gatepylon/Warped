@@ -48,8 +48,8 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   then itself. The lens pass then looks for a robot along the traced ray, at each bent step and across each robot's
   bounding sphere on the straight part, by comparing the ray's distance from the mouth with the faces' depth, and
   hides a robot behind the static forest with the atlas's alpha, now the static world's distance (log-encoded).
-  Lasers are added in the atlas's own direction (lined up on its 12 m sphere), so a laser that doesn't pass near a
-  mouth's centre shows a little off its true place. Redrawing the whole forest per visible mouth (D12's live view)
+  Lasers and glows are shown where the traced ray passes them: their segments (up to 24, beams' dashes joined) go
+  to the lens pass, which reads the live faces in the direction of the nearest point on the ray (W-129). Redrawing the whole forest per visible mouth (D12's live view)
   would cost about a full frame each; this costs only the robots. The parked branch `devin/dark-forest-lens-robots`
   drew robots over the atlas in the atlas's direction, so they slid with parallax and showed through bamboo walls;
   it was redone rather than finished. Robots in the live faces are lit with the player's last shadow cascade (which
