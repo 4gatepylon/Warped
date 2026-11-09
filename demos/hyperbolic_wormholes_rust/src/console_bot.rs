@@ -406,9 +406,9 @@ impl Fighter {
 
     /// `step` turns `player` and gives this step's keys and laser at time `now_s` (`dt_s` after the
     /// last), against the nearest of `enemies` (each one's id and eye point): it walks to them
-    /// around blocks and dangers (`Navigator`) until it sees them within `FIRE_RANGE_M` with no
-    /// danger between, then faces them (offset by `get_scan_offset_rad`), fires, and closes in to
-    /// `CLOSE_M`.
+    /// around blocks and dangers (`Navigator`), firing once it sees them within `FIRE_RANGE_M` with
+    /// no danger between, and within `CLOSE_M` stands, faces them (offset by `get_scan_offset_rad`)
+    /// and fires.
     ///
     /// Example: `let fight = fighter.step(&world, &mut player, &enemies, now_s, 1.0 / 60.0);`
     pub fn step(
@@ -438,14 +438,14 @@ impl Fighter {
         let is_seen: bool = distance_m < FIRE_RANGE_M
             && world.find_clear_m(eye, toward, distance_m) > distance_m - SIGHT_SLACK_M
             && !self.navigator.crosses_danger(world.r, eye, target);
-        if !is_seen {
+        if !is_seen || distance_m > CLOSE_M {
             let input: Input = self
                 .navigator
                 .walk_toward(world, player, target, now_s, dt_s);
             aim_pitch(player, player.get_camera_frame(world), target);
             return FightStep {
                 input,
-                is_laser_on: false,
+                is_laser_on: is_seen,
             };
         }
         turn_toward(player, target);
@@ -454,10 +454,7 @@ impl Fighter {
         player.look(right_rad / LOOK_RAD_PER_PX, -up_rad / LOOK_RAD_PER_PX);
         self.navigator.stand();
         FightStep {
-            input: Input {
-                forward: distance_m > CLOSE_M,
-                ..Input::default()
-            },
+            input: Input::default(),
             is_laser_on: true,
         }
     }
