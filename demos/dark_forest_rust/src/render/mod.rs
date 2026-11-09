@@ -213,6 +213,21 @@ pub struct Particle {
     pub seed: f32,
 }
 
+/// `Beam` is one straight piece of a laser drawn as Lunar Surface draws it: the sniper's a white
+/// blade in a soft haze, the rifle's (`is_rifle`) a laser over its halo, in `rgb` (linear, 0 to 1),
+/// with a share `speckle_frac` of its pixels speckling each frame. `has_previous` and `has_next`
+/// say whether the laser goes on past `start_m` and `end_m`, so the joint is drawn once.
+#[derive(Clone, Copy, Debug)]
+pub struct Beam {
+    pub start_m: Vec3,
+    pub end_m: Vec3,
+    pub rgb: Vec3,
+    pub is_rifle: bool,
+    pub speckle_frac: f32,
+    pub has_previous: bool,
+    pub has_next: bool,
+}
+
 /// `HudRect` is a filled rectangle on the screen, in pixels from the top left of the window.
 #[derive(Clone, Copy, Debug)]
 pub struct HudRect {
@@ -237,7 +252,9 @@ pub struct HudImage<'a> {
 
 /// `FrameDescription` is everything the backend draws in one frame. The first
 /// `static_draw_count` of `world_draws` are the same every frame (the arena), so the backend may
-/// keep their shadows between frames. `lens_draws` and
+/// keep their shadows between frames. `beams` are the lasers in flight, drawn after the lit pass,
+/// whose speckled pixels are black and white in `beam_speckle_shares` (the rest drop out).
+/// `lens_draws` and
 /// `lens_particles` are the robots and laser effects among `world_draws` and `world_particles`,
 /// which wormhole lenses also show live (the lens atlas holds only the static world).
 /// `overlay_rects` are the HUD's bars and crosshair, in the Lunar Surface demo's look, drawn over
@@ -259,6 +276,8 @@ pub struct FrameDescription<'a> {
     pub lens_draws: &'a [DrawItem],
     pub lens_particles: &'a [Particle],
     pub overlay_rects: &'a [overlay::OverlayRect],
+    pub beams: &'a [Beam],
+    pub beam_speckle_shares: glam::Vec2,
 }
 
 /// `LensMouth` is one wormhole mouth as the lens pass sees it: its lens throat (where rays cross),

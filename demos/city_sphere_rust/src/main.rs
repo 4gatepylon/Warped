@@ -37,6 +37,8 @@ mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
+#[cfg(test)]
+mod play_trace;
 mod render_city;
 mod render_cpu;
 mod render_metal;

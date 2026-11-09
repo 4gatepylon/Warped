@@ -8,6 +8,7 @@
 //! - `geometry`: the hyperboloid model's maths.
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
+//! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
 //! - `mesh`, `avatar_model`: glTF models of the maps' structures and the players' robot body.
@@ -37,6 +38,7 @@ pub mod hud_bars;
 #[cfg(target_os = "macos")]
 pub mod key_bindings;
 pub mod mesh;
+pub mod movement;
 #[cfg(target_os = "macos")]
 pub mod overlay;
 pub mod play_settings;

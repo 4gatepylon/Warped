@@ -78,6 +78,13 @@ const VIEWMODEL_NEAR_M: f32 = 0.01;
 const BLOOM_LEVEL_COUNT: usize = 6;
 /// `MAX_POINT_LIGHT_COUNT` is the number of point lights the shaders read; `common.metal` agrees.
 const MAX_POINT_LIGHT_COUNT: usize = 64;
+/// `BEAM_RADIUS_M` is a laser beam's radius, Lunar Surface's; `post.metal`'s beams widen it to a
+/// pixel far away.
+const BEAM_RADIUS_M: f32 = 0.02;
+/// `BEAM_SEED_PERIOD` is how many frames the beams' speckle seed runs before it repeats.
+const BEAM_SEED_PERIOD: usize = 1 << 20;
+/// `MAX_BEAM_COUNT` is how many beam pieces fit in the beam pass's 4 KB of inline bytes.
+const MAX_BEAM_COUNT: usize = 60;
 /// `QUAD_VERTEX_COUNT` is the vertex count of a triangle-strip quad.
 const QUAD_VERTEX_COUNT: usize = 4;
 /// `FULLSCREEN_VERTEX_COUNT` is the vertex count of a full-screen triangle.
@@ -1646,6 +1653,55 @@ impl MetalRenderer {
                         world_particles.len(),
                     );
                 }
+            }
+            encoder.endEncoding();
+        }
+
+        if !frame.beams.is_empty() {
+            let gpu_beams: Vec<gpu_types::GpuBeam> = frame
+                .beams
+                .iter()
+                .take(MAX_BEAM_COUNT)
+                .map(|beam| gpu_types::GpuBeam {
+                    start_radius: beam.start_m.extend(BEAM_RADIUS_M),
+                    end_speckle: beam.end_m.extend(beam.speckle_frac),
+                    color_kind: beam.rgb.extend(f32::from(u8::from(beam.is_rifle))),
+                    joints: Vec4::new(
+                        f32::from(u8::from(beam.has_previous)),
+                        f32::from(u8::from(beam.has_next)),
+                        0.0,
+                        0.0,
+                    ),
+                })
+                .collect();
+            let beam_pass: gpu_types::GpuBeamPass = gpu_types::GpuBeamPass {
+                params: Vec4::new(
+                    2.0 * (frame.camera.fov_y_rad * 0.5).tan() / targets.height_px as f32,
+                    frame.beam_speckle_shares.x,
+                    frame.beam_speckle_shares.y,
+                    (frame_index % BEAM_SEED_PERIOD) as f32,
+                ),
+            };
+            let descriptor: Retained<MTLRenderPassDescriptor> =
+                color_pass(&targets.hdr, MTLLoadAction::Load, None);
+            let encoder = command_buffer
+                .renderCommandEncoderWithDescriptor(&descriptor)
+                .expect("render encoder creation failed");
+            encoder.setRenderPipelineState(&self.pipelines.beam);
+            set_vertex_bytes(&encoder, as_bytes(&frame_uniforms), 1);
+            set_fragment_bytes(&encoder, as_bytes(&frame_uniforms), 1);
+            set_vertex_bytes(&encoder, slice_bytes(&gpu_beams), 0);
+            set_fragment_bytes(&encoder, slice_bytes(&gpu_beams), 0);
+            set_vertex_bytes(&encoder, as_bytes(&beam_pass), 2);
+            set_fragment_bytes(&encoder, as_bytes(&beam_pass), 2);
+            unsafe {
+                encoder.setFragmentTexture_atIndex(Some(&targets.depth), 0);
+                encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                    MTLPrimitiveType::TriangleStrip,
+                    0,
+                    QUAD_VERTEX_COUNT,
+                    gpu_beams.len(),
+                );
             }
             encoder.endEncoding();
         }

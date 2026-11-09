@@ -32,7 +32,7 @@ use super::world::{Arena, Surface};
 use crate::assets::gltf_model::Trs;
 use crate::console_reach::ConsolePlace;
 use crate::render::overlay::{HitEffect, OverlayRect};
-use crate::render::{Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
+use crate::render::{Beam, Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
 use crate::scene::{GunViewmodel, Scene, draw_items_for};
 use crate::settings::ServerSettings;
 use crate::shot_noise::ShotNoise;
@@ -175,6 +175,8 @@ pub struct FrameData {
     pub hit_effect: HitEffect,
     pub lens_draws: Range<usize>,
     pub lens_particles: Vec<Particle>,
+    pub beams: Vec<Beam>,
+    pub beam_speckle_shares: Vec2,
 }
 
 /// `OFF_PYLON_TINT` darkens a pylon whose console is off.
@@ -1469,14 +1471,27 @@ impl Session {
         let beacon_particle_end: usize = world_particles.len();
         let now_s: f64 = f64::from(self.time_s);
         let muzzle_m: Vec3 = self.muzzle_world_m();
+        let mut beams: Vec<Beam> = Vec::new();
+        let mut beam_dashes: Vec<Particle> = Vec::new();
         for flight in &self.flights {
             let tracer: &Tracer = &flight.tracer;
-            for (start_m, end_m) in tracer.get_lit_pieces(now_s, muzzle_m) {
+            let pieces: Vec<(Vec3, Vec3)> = tracer.get_lit_pieces(now_s, muzzle_m);
+            let piece_count: usize = pieces.len();
+            for (index, (start_m, end_m)) in pieces.into_iter().enumerate() {
+                beams.push(Beam {
+                    start_m,
+                    end_m,
+                    rgb: tracer.rgb,
+                    is_rifle: tracer.is_rifle,
+                    speckle_frac: tracer.speckle_frac,
+                    has_previous: index > 0,
+                    has_next: index + 1 < piece_count,
+                });
                 let length_m: f32 = start_m.distance(end_m);
                 let dash_count: usize = (length_m / BEAM_DASH_SPACING_M).ceil().max(1.0) as usize;
                 let step_m: Vec3 = (end_m - start_m) / dash_count as f32;
                 for dash in 0..dash_count {
-                    world_particles.push(Particle {
+                    beam_dashes.push(Particle {
                         position_m: start_m + step_m * (dash as f32 + 0.5),
                         stretch_m: step_m * BEAM_DASH_OVERLAP,
                         size_m: BEAM_RADIUS_M,
@@ -1549,11 +1564,18 @@ impl Session {
         let lens_particles: Vec<Particle> = world_particles[..robot_particle_count]
             .iter()
             .chain(&world_particles[beacon_particle_end..])
+            .chain(&beam_dashes)
             .copied()
             .collect();
+        let speckle_shares: Vec2 = Vec2::new(
+            self.settings.beam_speckle.black_frac as f32,
+            self.settings.beam_speckle.white_frac as f32,
+        );
         FrameData {
             lens_draws,
             lens_particles,
+            beams,
+            beam_speckle_shares: speckle_shares,
             camera,
             world_draws,
             viewmodel_draws,

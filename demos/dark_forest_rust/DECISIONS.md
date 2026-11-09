@@ -143,6 +143,14 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   from the mouths, still get them all.
 - **D31. The lens pass draws only over the mouths in view.** It is scissored to the screen rectangle of every
   in-view mouth's reach, and skipped (with the tone map's lens test) when none is in view; the result is the same.
+- **D33. The lasers are drawn as Lunar Surface's beams, in a pass after the lit pass** (W-126 (same play in every
+  level)). `beam_fragment` in `post.metal` copies `render_voxel.metal`'s `scan_beams`, `shade_ray_end` and
+  `speckle_beam`: the pixel's ray meets the beam closest before the scene's depth, the sniper's is a white blade in a
+  soft haze and the rifle's a laser over its halo, and the speckle share of the glow's pixels turns black, white or
+  drops out each frame in the settings' `beam_speckle` shares. Each piece is a screen quad 8 widths around it, so the
+  pass costs only the pixels near a beam. Lunar's display colours go into the HDR target divided by the exposure, so
+  the tone map shows them about as bright as Lunar does (a gain of 2 turned the gold white). The old dashes still
+  draw the lasers in the wormholes' live faces.
 
 ## Follow-ups for the next agent
 
