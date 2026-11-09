@@ -158,7 +158,8 @@ is in [`AGENTS.md`](AGENTS.md).
   you're like slowed and you start to lose health because you're like freezing. And it should be the case that
   there's like multiple of these. And if you shoot through them, like the shot has like a smaller distance it can
   pass. These can be like blizzard zones or something like that."
-  Merged into `staging/user-4gatepylon` with #396, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #396, 2026-11-08. Speed: #465 gives it Lunar Surface's half-resolution
+  lens (with #464's sharp centre, every bench view under 16.7 ms at 3440x1440; Snow's S14).
 - [?] **W-121 Dust demo.** Part of W-124 (four map demos): "Dust has, by default, a fog of sorts, like there's kind of
   a sandstorm going on, and that should refract the light. There should be like a wind always happening, and the light
   should kind of bend in the direction of the wind. There will be no black hole there, but there will still be
