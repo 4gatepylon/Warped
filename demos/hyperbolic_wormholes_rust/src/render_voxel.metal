@@ -88,6 +88,7 @@ constant float AMBIENT = 0.11;
 constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
 constant float SUN_UNKNOWN = -1.0;
+constant float NEAR_STRUCTURE_LIT = 0.999;
 constant float SHADOW_PENUMBRA_TAN = 0.015;
 constant float3 HAZE_COLOR = float3(0.15, 0.17, 0.21);
 constant float HAZE_START_M = 60.0;
@@ -859,7 +860,8 @@ static ulong get_shape_mask(thread const Scene &scene, device const VoxelStructu
 /**
  * @brief `march_shapes` sphere-traces the chart line q0 + dq mu from mu to mu_hi and gives where it meets a shape (or
  * INFINITY); with `should_track_lit` (shadow rays only, since it slows the camera's rays), it lowers `lit` to the
- * least gap to a shape over the chart distance from `mu_from` times `SHADOW_PENUMBRA_TAN`.
+ * least gap to a shape over the chart distance from `mu_from` times `SHADOW_PENUMBRA_TAN`, and to `NEAR_STRUCTURE_LIT`
+ * when it passes near a shape without meeting it.
  * @par Example
  * @code
  * float mu = march_shapes<false>(scene, st, q0, dq, 0.0, 1.0, false, index, 0.0, lit);
@@ -883,6 +885,7 @@ static float march_shapes(thread const Scene &scene, device const VoxelStructure
         mu += d / speed;
         if (mu > mu_hi) break;
     }
+    if (should_track_lit) lit = min(lit, NEAR_STRUCTURE_LIT);
     return INFINITY;
 }
 
@@ -895,24 +898,54 @@ static float hit_mesh_triangle(device const MeshTriangle &t, float3 q0, float3 d
     return b1 >= 0.0 && b2 >= 0.0 && b1 + b2 <= 1.0 ? dot(e2, g) / det : INFINITY;
 }
 
-/** @brief `march_mesh` walks a model's BVH (in `nodes`, over `triangles`) from node `root` and gives where the chart line first meets a triangle within [mu_lo, mu_hi] (or INFINITY), and which. @par Example @code float mu = march_mesh(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, 0.0, 1.0, index); @endcode */
-static float march_mesh(device const MeshTriangle *triangles, device const BvhNode *nodes, int root, float3 q0, float3 dq, float mu_lo, float mu_hi, thread int &index) {
+/** @brief `enter_node` gives where the chart line q0 + dq mu (`inv` = 1 / dq) enters a BVH node's box within [mu_lo, mu_hi], or INFINITY if it misses it there. @par Example @code float mu = enter_node(nodes[k], q0, inv, 0.0, 1.0); @endcode */
+static float enter_node(device const BvhNode &node, float3 q0, float3 inv, float mu_lo, float mu_hi) {
+    float3 a = (node.lo.xyz - q0) * inv, b = (node.hi.xyz - q0) * inv, near = min(a, b), far = max(a, b);
+    float mu_in = max(max(max(near.x, near.y), near.z), mu_lo);
+    return mu_in > min(min(min(far.x, far.y), far.z), mu_hi) ? INFINITY : mu_in;
+}
+
+/**
+ * @brief `march_mesh` walks a model's BVH (in `nodes`, over `triangles`) from node `root`, nearer child first, and gives
+ * where the chart line first meets a triangle within [mu_lo, mu_hi] (or INFINITY), and which; with `is_any_hit` (shadow
+ * rays) it stops at the first triangle it meets, and lowers `lit` to `NEAR_STRUCTURE_LIT` once it reaches a leaf.
+ * @par Example
+ * @code
+ * float mu = march_mesh<false>(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, 0.0, 1.0, index, hit.lit);
+ * @endcode
+ */
+template <bool is_any_hit>
+static float march_mesh(device const MeshTriangle *triangles, device const BvhNode *nodes, int root, float3 q0, float3 dq, float mu_lo, float mu_hi, thread int &index,
+                        thread float &lit) {
     int stack[MESH_STACK_SIZE];
-    int top = 0;
-    stack[top++] = root;
+    float entries[MESH_STACK_SIZE];
     float3 inv = 1.0 / dq;
+    int top = 0;
+    float root_mu = enter_node(nodes[root], q0, inv, mu_lo, mu_hi);
+    if (root_mu == INFINITY) return INFINITY;
+    stack[top] = root;
+    entries[top++] = root_mu;
     while (top > 0) {
-        device const BvhNode &node = nodes[stack[--top]];
-        float3 a = (node.lo.xyz - q0) * inv, b = (node.hi.xyz - q0) * inv, near = min(a, b), far = max(a, b);
-        if (max(max(max(near.x, near.y), near.z), mu_lo) > min(min(min(far.x, far.y), far.z), mu_hi)) continue;
+        top--;
+        if (entries[top] > mu_hi) continue;
+        device const BvhNode &node = nodes[stack[top]];
         int first = int(node.lo.w), count = int(node.hi.w);
         if (count == 0) {
-            if (top + 2 <= MESH_STACK_SIZE) { stack[top++] = first; stack[top++] = first + 1; }
+            float mu_a = enter_node(nodes[first], q0, inv, mu_lo, mu_hi), mu_b = enter_node(nodes[first + 1], q0, inv, mu_lo, mu_hi);
+            int near_child = mu_a <= mu_b ? first : first + 1, far_child = mu_a <= mu_b ? first + 1 : first;
+            float mu_near = min(mu_a, mu_b), mu_far = max(mu_a, mu_b);
+            if (mu_far < INFINITY && top < MESH_STACK_SIZE) { stack[top] = far_child; entries[top++] = mu_far; }
+            if (mu_near < INFINITY && top < MESH_STACK_SIZE) { stack[top] = near_child; entries[top++] = mu_near; }
             continue;
         }
+        if (is_any_hit) lit = min(lit, NEAR_STRUCTURE_LIT);
         for (int i = first; i < first + count; i++) {
             float mu = hit_mesh_triangle(triangles[i], q0, dq);
-            if (mu >= mu_lo && mu < mu_hi) { mu_hi = mu; index = i; }
+            if (mu >= mu_lo && mu < mu_hi) {
+                mu_hi = mu;
+                index = i;
+                if (is_any_hit) return mu;
+            }
         }
     }
     return index >= 0 ? mu_hi : INFINITY;
@@ -947,8 +980,13 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     bool is_avatar = st.size.w <= FIRST_AVATAR_ROOT_CODE, is_mesh = is_avatar || st.size.w >= 0;
     if (is_mesh) {
         index = -1;
-        mu = is_avatar ? march_mesh(scene.avatar_triangles, scene.avatar_nodes, FIRST_AVATAR_ROOT_CODE - st.size.w, q0, dq, mu_lo, mu_hi, index)
-                       : march_mesh(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, mu_lo, mu_hi, index);
+        if (is_shadow) {
+            mu = is_avatar ? march_mesh<true>(scene.avatar_triangles, scene.avatar_nodes, FIRST_AVATAR_ROOT_CODE - st.size.w, q0, dq, mu_lo, mu_hi, index, hit.lit)
+                           : march_mesh<true>(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, mu_lo, mu_hi, index, hit.lit);
+        } else {
+            mu = is_avatar ? march_mesh<false>(scene.avatar_triangles, scene.avatar_nodes, FIRST_AVATAR_ROOT_CODE - st.size.w, q0, dq, mu_lo, mu_hi, index, hit.lit)
+                           : march_mesh<false>(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, mu_lo, mu_hi, index, hit.lit);
+        }
     } else if (is_shadow) {
         float lam_from = -tanh(s_star), mu_from = lam_from / (p.w * (p.w + lam_from * t.w));
         mu = march_shapes<true>(scene, st, q0, dq, mu_lo, mu_hi, false, index, mu_from, hit.lit);
@@ -2804,8 +2842,9 @@ static bool is_cell_smooth(device const VoxelRayEnd *grid, int columns, int grid
  * `end`: the point (back on the hyperboloid, or the unit sphere for the sky), tangent, grid point, distance and dust
  * blend, and the rest is the first sample's. On a block face the cell under the blended grid point gives the
  * material, and the result is false (trace the ray instead) unless that cell is solid and the one in front of the
- * face is open. On the ground the four samples' sun (`with_ground_sun`) carries over when they all lie fully in the sun
- * or all fully in shadow, and is otherwise `SUN_UNKNOWN`, so the pixel traces its own.
+ * face is open. On the ground the four samples' sun (`with_ground_sun`) carries over when they are all fully in the
+ * sun with no structure near their shadow rays (`NEAR_STRUCTURE_LIT`), and is otherwise `SUN_UNKNOWN`, so the pixel
+ * traces its own.
  * @par Example
  * @code
  * if (!interpolate_ray_end(scene, a, b, c, d, 0.5, 0.0, end)) end = trace_ray(scene, pixel);
@@ -2823,7 +2862,7 @@ static bool interpolate_ray_end(thread const Scene &scene, VoxelRayEnd a, VoxelR
     end.view = normalize_tangent(end.point, mix(mix(a.view, b.view, wx), mix(c.view, d.view, wx), wy));
     if (a.surface.y < 0) {
         float sun = a.grid.x;
-        bool is_shared = b.grid.x == sun && c.grid.x == sun && d.grid.x == sun && (sun == SHADOW_FLOOR || sun == 1.0);
+        bool is_shared = sun == 1.0 && b.grid.x == sun && c.grid.x == sun && d.grid.x == sun;
         end.grid.x = is_shared ? sun : SUN_UNKNOWN;
         return true;
     }
@@ -2833,8 +2872,8 @@ static bool interpolate_ray_end(thread const Scene &scene, VoxelRayEnd a, VoxelR
 /**
  * @brief `with_ground_sun` gives a ray end that hit the ground with the sun's shadow there in `grid.x`, traced from just
  * above it as `light_surface` traces it, so that the pixels between fine samples (2 pixels apart) that all lie fully
- * in the sun or fully in shadow take that shadow instead of tracing their own; any other ray end, or ground facing away from the sun, is left
- * as it is (`SUN_UNKNOWN`).
+ * in the sun or fully in shadow take that shadow instead of tracing their own; any other ray end is left as it is, and
+ * ground facing away from the sun gets `SUN_UNKNOWN`.
  * @par Example
  * @code
  * coarse[k] = with_ground_sun(scene, trace_ray(scene, pixel));
@@ -2845,7 +2884,7 @@ static VoxelRayEnd with_ground_sun(thread const Scene &scene, VoxelRayEnd end) {
     float r = scene.u.curvature_radius_m;
     float4 x = end.point, n = float4(0.0, 1.0, 0.0, 0.0), l = transport_from_centre(scene.u.sun.xyz, x);
     if (scene.u.has_terrain != 0) n = terrain_normal(scene, get_fermi(x, r));
-    if (mdot(n, l) > 0.0) end.grid.x = trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / r), l);
+    end.grid.x = mdot(n, l) > 0.0 ? trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / r), l) : SUN_UNKNOWN;
     return end;
 }
 
@@ -2901,7 +2940,6 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
                                0.5 * float(di), 0.5 * float(dj), end)) {
-        end.grid.x = SUN_UNKNOWN;
         samples[j * columns + i] = with_ground_sun(scene, end);
     } else {
         fill_list[atomic_fetch_add_explicit(fill_count, 1, memory_order_relaxed)] = uint(j * columns + i);
