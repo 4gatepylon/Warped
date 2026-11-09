@@ -31,9 +31,11 @@ use crate::scene_data::{Beam, SceneData};
 use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
-    LOOK_RAD_PER_PX, MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
+    AvatarBody, LOOK_RAD_PER_PX, MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer,
+    VoxelWorld,
 };
 use crate::world::{Color, EYE_HEIGHT_M, World};
+use warped_shared::movement::get_crouched_height_frac;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -114,10 +116,10 @@ fn get_team_colors() -> Vec<Color> {
 /// index of its colour in `get_team_colors`, which is its team.
 ///
 /// Example: `let bodies = get_avatar_bodies(&world, &players);`
-fn get_avatar_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> Vec<(DMat4, usize)> {
+fn get_avatar_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> Vec<AvatarBody> {
     players
         .iter()
-        .map(|p| get_body(world, p.frame, p.team))
+        .map(|p| get_body(world, p.frame, p.crouch_frac, p.team))
         .collect()
 }
 
@@ -291,6 +293,7 @@ pub fn run_bot(
                 None,
                 0.0,
                 PlayerWormholes::default(),
+                0.0,
             )?;
         } else {
             client.keep_joining()?;
@@ -320,14 +323,19 @@ pub struct Tracers<'a> {
     pub dust: &'a [DustCloud],
 }
 
-/// `get_body` gives the body drawn for a player of `team` whose eye frame is `eye`: its feet frame
-/// and the index of its colour in `get_team_colors`, which is its team, as every window draws them.
+/// `get_body` gives the body drawn for a player of `team` whose eye frame is `eye` and who is
+/// `crouch_frac` of the way down a crouch: its feet frame on the ground (under the eye raised by
+/// the crouch's drop, W-137 (crouched robots sink)), the index of its colour in
+/// `get_team_colors`, which is its team, and its height as a share of standing, as every window
+/// draws them.
 ///
-/// Example: `let body = multiplayer::get_body(&world, player.frame, player.team);`
-pub fn get_body(world: &VoxelWorld, eye: DMat4, team: u32) -> (DMat4, usize) {
+/// Example: `let body = multiplayer::get_body(&world, player.frame, player.crouch_frac, player.team);`
+pub fn get_body(world: &VoxelWorld, eye: DMat4, crouch_frac: f64, team: u32) -> AvatarBody {
+    let standing_eye: DMat4 = world.raise_crouched_eye(eye, crouch_frac);
     (
-        VoxelPlayer::FromEye(world, eye).get_feet_frame(world),
+        VoxelPlayer::FromEye(world, standing_eye).get_feet_frame(world),
         team as usize,
+        get_crouched_height_frac(crouch_frac, &world.settings.movement),
     )
 }
 
@@ -348,8 +356,8 @@ pub fn with_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> VoxelWorld {
 fn trace_other_voxel_lasers(
     world: &VoxelWorld,
     players: &[RemotePlayer],
-    bodies: &[(DMat4, usize)],
-    own_body: Option<(DMat4, usize)>,
+    bodies: &[AvatarBody],
+    own_body: Option<AvatarBody>,
     colors: &[[f32; 3]],
 ) -> Vec<(u32, Shot)> {
     players
@@ -357,7 +365,7 @@ fn trace_other_voxel_lasers(
         .enumerate()
         .filter(|(_, player)| player.is_laser_on)
         .map(|(i, player)| {
-            let others: Vec<(DMat4, usize)> = bodies
+            let others: Vec<AvatarBody> = bodies
                 .iter()
                 .enumerate()
                 .filter(|&(j, _)| j != i)
@@ -395,14 +403,14 @@ pub fn pack_shared_voxel_view(
     players: &[RemotePlayer],
     poses: &[(AvatarClip, f64)],
     markers: &[Marker],
-    own_body: Option<(DMat4, usize)>,
+    own_body: Option<AvatarBody>,
     corpses: &[(DMat4, usize, (AvatarClip, f64))],
     tracers: Option<Tracers>,
     render_px: (u32, u32),
 ) -> SharedVoxelView {
     let colors: Vec<[f32; 3]> = get_team_colors();
-    let bodies: Vec<(DMat4, usize)> = get_avatar_bodies(world, players);
-    let own_bodies: Vec<(DMat4, usize)> = own_body.into_iter().collect();
+    let bodies: Vec<AvatarBody> = get_avatar_bodies(world, players);
+    let own_bodies: Vec<AvatarBody> = own_body.into_iter().collect();
     assert_eq!(
         poses.len(),
         bodies.len() + own_bodies.len(),
@@ -630,6 +638,7 @@ pub fn run_voxel_bot(
                 None,
                 0.0,
                 PlayerWormholes::default(),
+                0.0,
             )?;
         } else {
             client.keep_joining()?;
@@ -705,6 +714,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let view: SharedView =
@@ -769,6 +779,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
@@ -813,6 +824,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let target_camera: DMat4 = target.get_camera_frame(&world);
@@ -871,9 +883,10 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
-        let bodies: Vec<(DMat4, usize)> = get_avatar_bodies(&world, std::slice::from_ref(&firing));
+        let bodies: Vec<AvatarBody> = get_avatar_bodies(&world, std::slice::from_ref(&firing));
         let shots = trace_other_voxel_lasers(&world, &[firing], &bodies, None, &get_team_colors());
         assert!(shots[0].1.length_m > MIN_OTHER_BEAM_M);
     }
@@ -898,11 +911,13 @@ mod tests {
                 disabling_console: None,
                 disabling_frac: 0.0,
                 beam_speckle_frac: 0.0,
+                crouch_frac: 0.0,
                 wormholes: PlayerWormholes::default(),
             })
             .to_vec();
         let colors: Vec<Color> = get_team_colors();
-        for (player, (_, color_index)) in players.iter().zip(get_avatar_bodies(&world, &players)) {
+        for (player, (_, color_index, _)) in players.iter().zip(get_avatar_bodies(&world, &players))
+        {
             let [r, g, b, _] = TEAM_COLORS[player.team as usize];
             assert_eq!(colors[color_index], [r, g, b], "player {}", player.id);
         }
@@ -927,9 +942,10 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
-        let pack = |own_body: Option<(DMat4, usize)>| -> SharedVoxelView {
+        let pack = |own_body: Option<AvatarBody>| -> SharedVoxelView {
             pack_shared_voxel_view(
                 &world,
                 eye,
@@ -945,7 +961,7 @@ mod tests {
             )
         };
         let first_person: SharedVoxelView = pack(None);
-        let third_person: SharedVoxelView = pack(Some(get_body(&world, eye, OWN_TEAM)));
+        let third_person: SharedVoxelView = pack(Some(get_body(&world, eye, 0.0, OWN_TEAM)));
         assert_eq!(
             third_person.frame.uniforms.structure_count,
             first_person.frame.uniforms.structure_count + 1,

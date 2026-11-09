@@ -315,12 +315,14 @@ pub struct Shot {
     pub hit: ShotHit,
 }
 
-/// `Target` is a player a shot can hit: id, feet and up.
+/// `Target` is a player a shot can hit: id, feet, up, and height as a share of standing (less
+/// while crouched, W-137 (crouched robots sink): the torso and head spheres come down with it).
 #[derive(Clone, Copy)]
 pub struct Target {
     pub id: u32,
     pub feet: DVec3,
     pub up: DVec3,
+    pub height_frac: f64,
 }
 
 /// `get_up` is the up direction at `point`: toward the centre.
@@ -802,7 +804,7 @@ impl CityWorld {
                     (TORSO_HEIGHT_M, TORSO_RADIUS_M, false),
                     (HEAD_HEIGHT_M, HEAD_RADIUS_M, true),
                 ] {
-                    let center: DVec3 = target.feet + target.up * height_m;
+                    let center: DVec3 = target.feet + target.up * (height_m * target.height_frac);
                     if let Some((near, _)) = find_sphere_hits_m(o, d, center, radius_m) {
                         consider(
                             near,
@@ -1431,6 +1433,7 @@ mod tests {
             id: 7,
             feet,
             up: get_up(feet),
+            height_frac: 1.0,
         };
         let aim: DVec3 = (feet + target.up * TORSO_HEIGHT_M - a).normalize();
         let shot: Shot = world.trace_shot(a, aim, 500.0, 2, &[target], Some(1));

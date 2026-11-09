@@ -402,6 +402,26 @@ impl AvatarModel {
         posed.refit();
         posed
     }
+
+    /// `make_squashed` gives `make_posed`'s body squashed toward its feet to `height_frac` of its
+    /// height (a crouched player's robot, W-137 (crouched robots sink)): every corner's height
+    /// times `height_frac`, its normal turned to match, and the BVH refitted. At 1 it is
+    /// `make_posed`'s body exactly.
+    ///
+    /// Example: `let crouched = body.make_squashed(AvatarClip::Idle, 0.3, 0.6);`
+    pub fn make_squashed(&self, clip: AvatarClip, time_s: f64, height_frac: f64) -> MeshModel {
+        let mut posed: MeshModel = self.make_posed(clip, time_s);
+        if height_frac == 1.0 {
+            return posed;
+        }
+        let squash: Vec3 = Vec3::new(1.0, height_frac as f32, 1.0);
+        for triangle in &mut posed.triangles {
+            triangle.p = triangle.p.map(|p| p * squash);
+            triangle.n = triangle.n.map(|n| (n / squash).normalize_or_zero());
+        }
+        posed.refit();
+        posed
+    }
 }
 
 #[cfg(test)]
@@ -414,12 +434,14 @@ mod tests {
     //! | Time in a looping clip | within the first loop, a whole loop later | `looping_clips_repeat` |
     //! | Time in a held clip | before the end, after the end (held) | `held_clips_end_on_their_last_pose` |
     //! | Pose's shape | standing (2 m tall, feet on y = 0, facing -z), lying (death's end, low) | `the_body_stands_and_lies` |
+    //! | Squash | none (the posed body exactly), crouched (as tall as the share, feet still on y = 0) | `squashing_keeps_the_feet_down` |
 
     use super::*;
 
     const HEIGHT_M: f64 = 2.0;
     const TOLERANCE_M: f32 = 1e-3;
     const MAX_LYING_HEIGHT_M: f32 = 0.6;
+    const CROUCHED_HEIGHT_FRAC: f64 = 0.6;
 
     /// `get_bounds` gives the box around a posed model's triangles.
     ///
@@ -531,5 +553,25 @@ mod tests {
             "dead, the body is {} m tall",
             hi.y - lo.y
         );
+    }
+
+    #[test]
+    fn squashing_keeps_the_feet_down() {
+        let body: AvatarModel = AvatarModel::Load(BODY_MODEL, HEIGHT_M).expect("the body model");
+        let posed: MeshModel = body.make_posed(AvatarClip::Idle, 0.0);
+        let unsquashed: MeshModel = body.make_squashed(AvatarClip::Idle, 0.0, 1.0);
+        assert!(
+            posed
+                .triangles
+                .iter()
+                .zip(&unsquashed.triangles)
+                .all(|(a, b)| a.p == b.p && a.n == b.n)
+        );
+        let (lo, hi) = get_bounds(&posed);
+        let (squashed_lo, squashed_hi) =
+            get_bounds(&body.make_squashed(AvatarClip::Idle, 0.0, CROUCHED_HEIGHT_FRAC));
+        assert!((squashed_hi.y - hi.y * CROUCHED_HEIGHT_FRAC as f32).abs() < TOLERANCE_M);
+        assert!((squashed_lo.y - lo.y * CROUCHED_HEIGHT_FRAC as f32).abs() < TOLERANCE_M);
+        assert!((squashed_hi.x - hi.x).abs() < TOLERANCE_M);
     }
 }

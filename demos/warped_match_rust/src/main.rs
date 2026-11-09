@@ -3032,6 +3032,9 @@ impl Session {
                 multiplayer.disabling.map(|(console, _)| console),
                 self.weapons.beam_speckle_frac,
                 self.thrown.placed,
+                self.voxel
+                    .as_ref()
+                    .map_or(0.0, |voxel| voxel.player.crouch_frac),
             )
         {
             self.message = format!("Couldn't reach the server: {error}");
@@ -3779,17 +3782,32 @@ impl Session {
             let laser_aim: Option<DMat4> =
                 self.get_laser_aim(third_person_view.map_or(eye, |(_, shot_eye)| shot_eye));
             let team: u32 = self.get_team();
-            let own_body: Option<(DMat4, usize)> = third_person_view
+            let own_body: Option<voxel_world::AvatarBody> = third_person_view
                 .filter(|(placed, _)| placed.is_body_shown)
-                .map(|_| multiplayer::get_body(&voxel.world, laser_aim.unwrap_or(eye), team));
+                .map(|_| {
+                    multiplayer::get_body(
+                        &voxel.world,
+                        laser_aim.unwrap_or(eye),
+                        voxel.player.crouch_frac,
+                        team,
+                    )
+                });
             self.is_own_body_shown = own_body.is_some();
             let players: Vec<net::RemotePlayer> = self
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
-            let mut eyes: Vec<(u32, DMat4)> = players.iter().map(|p| (p.id, p.frame)).collect();
-            eyes.push((avatar_animation::OWN_TRACK_ID, laser_aim.unwrap_or(eye)));
+            let mut eyes: Vec<(u32, DMat4)> = players
+                .iter()
+                .map(|p| (p.id, voxel.world.raise_crouched_eye(p.frame, p.crouch_frac)))
+                .collect();
+            eyes.push((
+                avatar_animation::OWN_TRACK_ID,
+                voxel
+                    .world
+                    .raise_crouched_eye(laser_aim.unwrap_or(eye), voxel.player.crouch_frac),
+            ));
             let mut poses: Vec<(avatar_model::AvatarClip, f64)> =
                 self.avatars.update(&voxel.world, &eyes, now_s);
             poses.truncate(players.len() + usize::from(own_body.is_some()));
