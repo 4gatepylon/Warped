@@ -3871,6 +3871,11 @@ mod parity_tests {
     const GAP_TO_PYLON_M: f64 = 1.0;
     const CONSOLE_COUNT: usize = 4;
     const LUNAR_SETTINGS_PATH: &str = "../hyperbolic_wormholes_rust/server_settings.yaml";
+    const SNOW_ONLY_SETTINGS: [&str; 3] = [
+        "jump_time_per_map_jump_time",
+        "walk_speed_per_map_speed",
+        "sprint_speed_per_map_speed",
+    ];
 
     fn load_snow_planet() -> VoxelWorld {
         let mut map: Map = Map::Load(&get_map_folder("snow_planet")).expect("the Snow Planet map");
@@ -3960,7 +3965,11 @@ mod parity_tests {
             std::fs::read_to_string(root.join(path))
                 .expect("a settings file")
                 .lines()
-                .filter(|line| !line.trim_start().starts_with("jump_time_per_map_jump_time"))
+                .filter(|line| {
+                    !SNOW_ONLY_SETTINGS
+                        .iter()
+                        .any(|setting| line.trim_start().starts_with(setting))
+                })
                 .map(str::to_string)
                 .collect()
         };

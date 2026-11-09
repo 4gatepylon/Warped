@@ -93,7 +93,7 @@ countdown.
   `src/render/metal/mod.rs`), so they show through the wormholes too, hidden by the forest where it stands in front
   (DECISIONS.md D15).
 - **Thrown wormholes:** `Q` throws a wormhole mouth, as on Lunar Surface (W-126, same play in every level; the
-  throw, the colours, the hits that destroy a pair and the messages are Lunar's, DECISIONS.md D42): it is lobbed from
+  throw, the colours, the hits that destroy a pair and the messages are Lunar's, DECISIONS.md D43): it is lobbed from
   the eye, drops to the floor below whatever it hits and hovers there at eye height, purple first, then green. A
   mouth that would sit within another warp's reach, inside a solid or outside the arena fizzles. Once both are down
   they link, and players, robots and lasers go through them as through the map's mouths; what shows through a

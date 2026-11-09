@@ -16,8 +16,8 @@
 #     make host-game MAP=lunar-surface SERVER_SETTINGS=fast.yaml
 
 movement:
-  walk_speed_per_map_speed: 2.0  # Walking speed, times the map's (Lunar Surface: 5 m/s).
-  sprint_speed_per_map_speed: 2.0  # Sprinting speed, times the map's (Lunar Surface: 9 m/s).
+  walk_speed_per_map_speed: 1.6  # Walking speed, times the map's (5 m/s, so 8 m/s: halfway between City Sphere's 6 and Lunar Surface's 10, on the user's request).
+  sprint_speed_per_map_speed: 1.72  # Sprinting speed, times the map's (9 m/s, so 15.5 m/s: halfway between City Sphere's 13 and Lunar Surface's 18, on the user's request).
   jump_height_m: 1.25  # How high a jump rises. Blocks are 1 m tall.
   jump_time_per_map_jump_time: 0.545  # Time in the air, times the map's (1.06 s): 0.58 s, as on Lunar Surface (W-126); sets gravity.
   crouch_speed_frac: 0.5  # Speed while crouching (holding Ctrl), as a fraction of walking speed.

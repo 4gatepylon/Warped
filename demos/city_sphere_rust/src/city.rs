@@ -3847,7 +3847,10 @@ mod tests {
     const CROUCH_WALK_S: f64 = 0.5;
     const CROUCH_SPEED_TOLERANCE_FRAC: f64 = 1e-3;
     const CITY_ONLY_SECTION: &str = "glass:";
-    const CITY_ONLY_SETTING: &str = "  sprint_speed_per_map_speed:";
+    const CITY_ONLY_SETTINGS: [&str; 2] = [
+        "  walk_speed_per_map_speed:",
+        "  sprint_speed_per_map_speed:",
+    ];
 
     /// `read_lunar_file` reads one of Lunar Surface's own files (the hyperbolic demo's).
     fn read_lunar_file(name: &str) -> String {
@@ -4088,7 +4091,7 @@ mod tests {
 
     /// `the_settings_files_match_lunar_surface` checks City Sphere's settings files against Lunar
     /// Surface's, line for line (W-126 (same play in every level): "Respawn timers and all that
-    /// stuff should be the same throughout"), except the faster sprint the user asked for and
+    /// stuff should be the same throughout"), except the slower walk and sprint the user asked for and
     /// City Sphere's own `glass` section at the end.
     #[test]
     fn the_settings_files_match_lunar_surface() {
@@ -4099,7 +4102,11 @@ mod tests {
         let shared = |text: &str| -> Vec<String> {
             text.lines()
                 .take_while(|line| !line.starts_with(CITY_ONLY_SECTION))
-                .filter(|line| !line.starts_with(CITY_ONLY_SETTING))
+                .filter(|line| {
+                    !CITY_ONLY_SETTINGS
+                        .iter()
+                        .any(|setting| line.starts_with(setting))
+                })
                 .map(|line| line.trim_end().to_string())
                 .filter(|line| !line.is_empty())
                 .collect()

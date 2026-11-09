@@ -20,7 +20,7 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   placement makes a team both hold its ground and climb. Holding `E` for 3 s within 2.5 m turns a console off (the
   hyperbolic demo's defaults).
 - **D7. The hyperbolic demo's network protocol, unchanged.** Copying `net.rs` as is kept multiplayer working quickly
-  and keeps the bytes compatible with that demo's tools. Its wormhole fields were empty until D42 filled them.
+  and keeps the bytes compatible with that demo's tools. Its wormhole fields were empty until D43 filled them.
 - **D8. Robots in team colours, no new models.** The FPS demo's robot is tinted blue or red for other players, as the
   user allowed reusing the robot skins and guns.
 - **D9. Dim, swampy daylight.** The FPS demo's clear HDRI is graded murky green with a weaker sun, darker exposure and
@@ -238,7 +238,12 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   mouth from there, so the deck's underside shows whole, cut by its own edge. Every other bench view is unchanged.
   **Gives up:** a ray passing just beside a deck's edge below its top isn't bent either (the lens's reach goes 1.3 m
   below the deck's top).
-- **D42. Thrown wormholes (`Q`), Lunar Surface's in flat space** (W-126, same play in every level).
+- **D42. Dark Forest slower, halfway to City Sphere** (the user, 2026-11-09, while playtesting: "only lunar and dune
+  should be at the speed lunear is at; everything else should be slower; snow and forest should be halfway between
+  city sphere and dune/lkunar"). `walk_speed_per_map_speed` 2.0 → 1.6 (10 → 8 m/s) and `sprint_speed_per_map_speed`
+  2.0 → 1.72 (18 → 15.5 m/s), halfway between City Sphere's 6 and 13 m/s and Lunar Surface's 10 and 18. The
+  movement test still checks every other setting against Lunar Surface's file.
+- **D43. Thrown wormholes (`Q`), Lunar Surface's in flat space** (W-126, same play in every level).
   `thrown_wormholes.rs` is Lunar's with (u, v, h) read as (x, z, y): the same throw (16 m/s, 0.3 rad up, 20 m/s²,
   4 s), colours, markers and messages, and the server settings' `wormholes` section is Lunar's but for the mouth's
   size (a test compares them). Linked pairs join the map's mouths in `Warps` each time they change, so walking,

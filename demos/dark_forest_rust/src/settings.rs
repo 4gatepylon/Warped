@@ -141,8 +141,8 @@ impl ServerSettings {
                 zoom_s: 0.15,
             },
             movement: MovementSettings {
-                walk_speed_per_map_speed: 2.0,
-                sprint_speed_per_map_speed: 2.0,
+                walk_speed_per_map_speed: 1.6,
+                sprint_speed_per_map_speed: 1.72,
                 jump_height_m: 1.25,
                 jump_time_per_map_jump_time: 1.0 / 3.0,
                 crouch_speed_frac: 0.5,
@@ -275,6 +275,9 @@ mod tests {
         numbers
     }
 
+    const FOREST_WALK_SPEED_PER_MAP_SPEED: f64 = 1.6;
+    const FOREST_SPRINT_SPEED_PER_MAP_SPEED: f64 = 1.72;
+
     /// `assert_matches_lunar` checks `forest_section` has exactly the keys and numbers of Lunar
     /// Surface's section.
     ///
@@ -307,12 +310,27 @@ mod tests {
     }
 
     /// `test_movement_matches_lunar_surface` checks movement, sprint energy, how a hit slows and the
-    /// flashlight are Lunar Surface's.
+    /// flashlight are Lunar Surface's, except walking and sprinting, which the user asked slower
+    /// (halfway between City Sphere's and Lunar Surface's).
     #[test]
     fn test_movement_matches_lunar_surface() {
         let settings: ServerSettings = ServerSettings::Builtin();
         let file_name: &str = "server_settings.yaml";
-        assert_matches_lunar(&settings.movement, file_name, &["movement"]);
+        assert_eq!(
+            settings.movement.walk_speed_per_map_speed,
+            FOREST_WALK_SPEED_PER_MAP_SPEED
+        );
+        assert_eq!(
+            settings.movement.sprint_speed_per_map_speed,
+            FOREST_SPRINT_SPEED_PER_MAP_SPEED
+        );
+        let lunar = |key: &str| -> f64 { read_lunar_setting(file_name, &["movement"], key) };
+        let movement: MovementSettings = MovementSettings {
+            walk_speed_per_map_speed: lunar("walk_speed_per_map_speed"),
+            sprint_speed_per_map_speed: lunar("sprint_speed_per_map_speed"),
+            ..settings.movement.clone()
+        };
+        assert_matches_lunar(&movement, file_name, &["movement"]);
         assert_matches_lunar(&settings.sprint_energy, file_name, &["sprint_energy"]);
         assert_matches_lunar(&settings.when_hit, file_name, &["when_hit"]);
         assert_matches_lunar(&settings.flashlight, file_name, &["flashlight"]);
