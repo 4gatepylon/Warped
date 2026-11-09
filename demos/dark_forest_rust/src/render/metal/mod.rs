@@ -373,6 +373,73 @@ fn draw_fullscreen(
     encoder.endEncoding();
 }
 
+/// `LENS_SCISSOR_PAD_PX` widens the lens pass's rectangle so the tone map's filtered reads near its
+/// edge stay inside what was drawn.
+const LENS_SCISSOR_PAD_PX: f32 = 2.0;
+
+/// `get_lens_scissor` is the rectangle of a `width_px` by `height_px` target that holds every
+/// mouth's reach on screen: None when no mouth is in `frustum`, the whole target when the camera is
+/// within a reach (a corner of its box is behind the camera).
+///
+/// Example: `let rect: Option<MTLScissorRect> = get_lens_scissor(&mouths, view_proj, &frustum, 1280, 720);`
+fn get_lens_scissor(
+    mouths: &[LensMouth],
+    view_proj: Mat4,
+    frustum: &Frustum,
+    width_px: usize,
+    height_px: usize,
+) -> Option<MTLScissorRect> {
+    let whole: MTLScissorRect = MTLScissorRect {
+        x: 0,
+        y: 0,
+        width: width_px,
+        height: height_px,
+    };
+    let mut low_ndc: Vec2 = Vec2::splat(f32::MAX);
+    let mut high_ndc: Vec2 = Vec2::splat(f32::MIN);
+    let mut is_any_in_view: bool = false;
+    for mouth in mouths
+        .iter()
+        .filter(|mouth| frustum.contains_sphere(mouth.centre_m, mouth.reach_m))
+    {
+        is_any_in_view = true;
+        for corner in 0..8 {
+            let sign: Vec3 = Vec3::new(
+                if corner & 1 == 0 { -1.0 } else { 1.0 },
+                if corner & 2 == 0 { -1.0 } else { 1.0 },
+                if corner & 4 == 0 { -1.0 } else { 1.0 },
+            );
+            let clip: Vec4 = view_proj * (mouth.centre_m + sign * mouth.reach_m).extend(1.0);
+            if clip.w <= f32::EPSILON {
+                return Some(whole);
+            }
+            let ndc: Vec2 = clip.truncate().truncate() / clip.w;
+            low_ndc = low_ndc.min(ndc);
+            high_ndc = high_ndc.max(ndc);
+        }
+    }
+    if !is_any_in_view {
+        return None;
+    }
+    let size_px: Vec2 = Vec2::new(width_px as f32, height_px as f32);
+    let to_px = |ndc: Vec2| Vec2::new(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * size_px;
+    let corner_a: Vec2 = to_px(low_ndc);
+    let corner_b: Vec2 = to_px(high_ndc);
+    let left_top: Vec2 = (corner_a.min(corner_b) - LENS_SCISSOR_PAD_PX)
+        .floor()
+        .clamp(Vec2::ZERO, size_px);
+    let right_bottom: Vec2 = (corner_a.max(corner_b) + LENS_SCISSOR_PAD_PX)
+        .ceil()
+        .clamp(Vec2::ZERO, size_px);
+    let extent: Vec2 = right_bottom - left_top;
+    (extent.x > 0.0 && extent.y > 0.0).then_some(MTLScissorRect {
+        x: left_top.x as usize,
+        y: left_top.y as usize,
+        width: extent.x as usize,
+        height: extent.y as usize,
+    })
+}
+
 /// `gpu_particles` converts particles to their GPU layout.
 fn gpu_particles(particles: &[Particle]) -> Vec<GpuParticle> {
     particles
@@ -1695,7 +1762,16 @@ impl MetalRenderer {
         } else {
             &targets.hdr
         };
-        if let Some((lens_atlas, lens_uniforms)) = &self.lens {
+        let lens_scissor: Option<MTLScissorRect> = self.lens_live.as_ref().and_then(|live| {
+            get_lens_scissor(
+                &live.mouths,
+                frame_uniforms.view_proj,
+                &camera_frustum,
+                targets.lens.width(),
+                targets.lens.height(),
+            )
+        });
+        if let (Some((lens_atlas, lens_uniforms)), Some(scissor)) = (&self.lens, lens_scissor) {
             let live: &LensLive = self.lens_live.as_ref().expect("a lens has live slots");
             let frame_lens_uniforms: gpu_types::GpuLensUniforms = self.encode_lens_live(
                 &command_buffer,
@@ -1715,6 +1791,7 @@ impl MetalRenderer {
                 &self.pipelines.lens,
                 MTLLoadAction::DontCare,
                 |encoder: &Encoder| {
+                    encoder.setScissorRect(scissor);
                     set_fragment_bytes(encoder, as_bytes(&frame_uniforms), 1);
                     set_fragment_bytes(encoder, as_bytes(&frame_lens_uniforms), 2);
                     unsafe {
@@ -1739,6 +1816,9 @@ impl MetalRenderer {
                         *uniforms
                     });
                 lens_uniforms.params.y = if self.is_capturing { 1.0 } else { 0.0 };
+                if lens_scissor.is_none() {
+                    lens_uniforms.params.x = 0.0;
+                }
                 set_fragment_bytes(encoder, as_bytes(&lens_uniforms), 2);
                 unsafe {
                     encoder.setFragmentTexture_atIndex(Some(&targets.hdr), 0);
@@ -2058,5 +2138,68 @@ impl Drop for MetalRenderer {
         for (_, command_buffer) in self.in_flight.drain(..) {
             command_buffer.waitUntilCompleted();
         }
+    }
+}
+
+/// `tests` checks the lens pass's rectangle.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | mouths vs view | none in view, one in view, the camera within one's reach | `test_lens_scissor_covers_the_mouths_in_view` |
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `mouth_at` is a ground gate's mouth at `centre_m`.
+    fn mouth_at(centre_m: Vec3) -> LensMouth {
+        LensMouth {
+            centre_m,
+            lens_throat_m: 0.8,
+            reach_m: 5.0,
+            lambda_squared: 0.25,
+            floor_m: 0.0,
+            partner: 0,
+        }
+    }
+
+    /// `test_lens_scissor_covers_the_mouths_in_view` checks that a mouth behind the camera gives
+    /// no rectangle, a mouth ahead gives one around the screen's centre inside the target, and a
+    /// mouth around the camera gives the whole target.
+    #[test]
+    fn test_lens_scissor_covers_the_mouths_in_view() {
+        let view_proj: Mat4 = Mat4::perspective_infinite_reverse_rh(1.2, 16.0 / 9.0, 0.05);
+        let frustum: Frustum = Frustum::from_view_proj(view_proj);
+        let (width_px, height_px) = (1280, 720);
+        let behind: Option<MTLScissorRect> = get_lens_scissor(
+            &[mouth_at(Vec3::new(0.0, 0.0, 30.0))],
+            view_proj,
+            &frustum,
+            width_px,
+            height_px,
+        );
+        assert!(behind.is_none());
+        let ahead: MTLScissorRect = get_lens_scissor(
+            &[mouth_at(Vec3::new(0.0, 0.0, -40.0))],
+            view_proj,
+            &frustum,
+            width_px,
+            height_px,
+        )
+        .expect("a mouth ahead is in view");
+        assert!(ahead.x < width_px / 2 && ahead.x + ahead.width > width_px / 2);
+        assert!(ahead.y < height_px / 2 && ahead.y + ahead.height > height_px / 2);
+        assert!(ahead.width < width_px && ahead.x + ahead.width <= width_px);
+        let around: MTLScissorRect = get_lens_scissor(
+            &[mouth_at(Vec3::new(0.0, 0.0, -2.0))],
+            view_proj,
+            &frustum,
+            width_px,
+            height_px,
+        )
+        .expect("a mouth around the camera is in view");
+        assert_eq!(
+            (around.x, around.y, around.width, around.height),
+            (0, 0, width_px, height_px)
+        );
     }
 }

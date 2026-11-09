@@ -167,6 +167,11 @@ jitter. While no frame reaches a display (it sleeps, or the window is hidden), f
 ready. The forest is cut into 8 m tiles so that each pass (four shadow
 cascades, the depth prepass and the lit pass) draws only the tiles it sees.
 
+The static forest's shadows are drawn into a cache only when a shadow cascade moves (the cascades are centred on the
+camera and stay put until it walks out of their margin; DECISIONS.md D26), and only the robots and other moving
+casters are drawn into the shadow map each frame. The frame statistics' GPU time is each frame's own: from when it
+started or the frame before it ended, whichever is later, to when it ended.
+
 ## Code
 
 - `src/forest_layout.rs`: generates the map (labyrinth, bamboo, decks, bridges, ladders, pylons, wormholes, candles,

@@ -15,6 +15,10 @@ const CASCADE_SPLIT_LAMBDA_FRAC: f32 = 0.82;
 const CASCADE_NEAR_M: f32 = 0.1;
 /// `CASCADE_CASTER_MARGIN_M` extends each cascade toward the sun, to catch tall casters.
 const CASCADE_CASTER_MARGIN_M: f32 = 120.0;
+/// `EARLY_MOVE_FRAC` of a cascade's spare margin is how far the camera may walk before the
+/// cascade moves early, on a frame when no other cascade moves, so that two cascades rarely redraw
+/// their static casters in the same frame.
+const EARLY_MOVE_FRAC: f32 = 0.6;
 /// `DEGENERATE_PLANE_LENGTH` is the plane-normal length below which a plane is ignored.
 const DEGENERATE_PLANE_LENGTH: f32 = 1e-6;
 
@@ -113,7 +117,8 @@ pub fn cascade_split_far_m(shadow_distance_m: f32) -> [f32; CASCADE_COUNT] {
 /// snaps to whole shadow texels, so shadow edges don't shimmer when it moves. A cascade of
 /// `previous` with the same size is kept while it still covers everything within its slice's far
 /// distance of the camera, so turning never moves it and walking moves it only now and then: the
-/// renderer can keep its static casters' depth between frames.
+/// renderer can keep its static casters' depth between frames. A cascade past `EARLY_MOVE_FRAC`
+/// of its margin moves early on a frame when no other cascade has to, one at a time.
 ///
 /// Example:
 ///     let cascades: Cascades = fit_cascades(&camera, Vec3::Y, 120.0, 2048, Some(&last_cascades));
@@ -142,6 +147,8 @@ pub fn fit_cascades(
         radius_m: [0.0; CASCADE_COUNT],
     };
     let mut near_m: f32 = CASCADE_NEAR_M;
+    let mut kept_centers: [Option<Vec3>; CASCADE_COUNT] = [None; CASCADE_COUNT];
+    let mut walked_fracs: [f32; CASCADE_COUNT] = [f32::MAX; CASCADE_COUNT];
     for index in 0..CASCADE_COUNT {
         let far_m: f32 = split_far_m[index];
         let center_depth_m: f32 = (near_m + far_m) * 0.5;
@@ -154,18 +161,36 @@ pub fn fit_cascades(
             .max(far_m)
             .ceil();
         let texel_m: f32 = 2.0 * radius_m / resolution_px as f32;
-        let slack_m: f32 = radius_m - far_m - texel_m;
-        let kept: Option<Vec3> = previous
-            .filter(|previous| previous.radius_m[index] == radius_m)
-            .map(|previous| previous.center_light_m[index])
-            .filter(|center| (*center - camera_light).abs().max_element() <= slack_m);
-        let center_light: Vec3 = kept.unwrap_or_else(|| {
-            Vec3::new(
+        let slack_m: f32 = (radius_m - far_m - texel_m).max(0.0);
+        if let Some(previous) = previous.filter(|previous| previous.radius_m[index] == radius_m) {
+            let center: Vec3 = previous.center_light_m[index];
+            kept_centers[index] = Some(center);
+            walked_fracs[index] =
+                (center - camera_light).abs().max_element() / slack_m.max(f32::MIN_POSITIVE);
+        }
+        cascades.texel_size_m[index] = texel_m;
+        cascades.radius_m[index] = radius_m;
+        near_m = far_m;
+    }
+    let is_any_forced: bool = walked_fracs.iter().any(|&frac| frac > 1.0);
+    let early: Option<usize> = (!is_any_forced)
+        .then(|| {
+            (0..CASCADE_COUNT)
+                .filter(|&index| walked_fracs[index] > EARLY_MOVE_FRAC)
+                .max_by(|&a, &b| walked_fracs[a].total_cmp(&walked_fracs[b]))
+        })
+        .flatten();
+    for index in 0..CASCADE_COUNT {
+        let (radius_m, texel_m) = (cascades.radius_m[index], cascades.texel_size_m[index]);
+        let is_moving: bool = walked_fracs[index] > 1.0 || early == Some(index);
+        let center_light: Vec3 = match kept_centers[index] {
+            Some(center) if !is_moving => center,
+            _ => Vec3::new(
                 (camera_light.x / texel_m).floor() * texel_m,
                 (camera_light.y / texel_m).floor() * texel_m,
                 camera_light.z,
-            )
-        });
+            ),
+        };
         let projection: Mat4 = Mat4::orthographic_rh(
             center_light.x - radius_m,
             center_light.x + radius_m,
@@ -175,10 +200,7 @@ pub fn fit_cascades(
             -center_light.z + radius_m,
         );
         cascades.view_proj[index] = projection * light_view;
-        cascades.texel_size_m[index] = texel_m;
         cascades.center_light_m[index] = center_light;
-        cascades.radius_m[index] = radius_m;
-        near_m = far_m;
     }
     cascades
 }
@@ -272,7 +294,10 @@ mod tests {
             Some(&stepped),
         );
         assert_ne!(walked.view_proj[0], first.view_proj[0]);
-        assert_eq!(walked.view_proj[CASCADE_COUNT - 1], first.view_proj[CASCADE_COUNT - 1]);
+        assert_eq!(
+            walked.view_proj[CASCADE_COUNT - 1],
+            first.view_proj[CASCADE_COUNT - 1]
+        );
     }
 
     /// `test_cascades_cover_their_far_distance_all_round` checks that, after a turn and a step
@@ -293,7 +318,10 @@ mod tests {
                 let direction: Vec3 = Vec3::new(x as f32, y as f32, z as f32).normalize();
                 let point: Vec3 = position_m + direction * moved.split_far_m[index];
                 let ndc: Vec3 = moved.view_proj[index].project_point3(point);
-                assert!(ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0, "{index} {direction} {ndc}");
+                assert!(
+                    ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0,
+                    "{index} {direction} {ndc}"
+                );
                 assert!((0.0..=1.0).contains(&ndc.z), "{index} {direction} {ndc}");
             }
         }

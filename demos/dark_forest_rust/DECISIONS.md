@@ -113,6 +113,15 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   pose 30 times a second and the server snapshots at 60 Hz, so remote robots jumped every two or three frames.
   Hits are still the shooter's call, now against where the robot is drawn. A jump of more than 3 m (a wormhole,
   a respawn) isn't blended.
+- **D26. The forest's shadows are kept between frames.** The four shadow cascades took about 6.5 ms of every frame
+  redrawing the static forest. Each cascade is now a square centred on the camera (as wide as the sphere around its
+  slice, so its texels and depth bias are unchanged) that stays put until the camera walks out of its spare margin
+  (about 4 m for the nearest, 70 m and more for the farthest; turning never moves it). The static casters are drawn
+  into a cache only when a cascade moves; each frame the cache is copied into the shadow map and only robots and
+  other moving casters are drawn on top. Shadows look the same (a few hundred pixels differ by up to 7/255).
+- **D27. The lit passes get only the point lights whose reach meets the view.** A candle's light reaches 3.5 m, so a
+  light whose sphere is outside the view frustum can't light anything visible; the lens's live faces, which look
+  from the mouths, still get them all.
 
 ## Follow-ups for the next agent
 
