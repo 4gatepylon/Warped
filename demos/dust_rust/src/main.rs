@@ -95,7 +95,7 @@ use map::MapName;
 use physics::{Input, LaserReport, Player};
 use picture_saver::PictureSaver;
 use render_metal::FrameData;
-use render_voxel::VoxelFrame;
+use render_voxel::{DEFAULT_SHARP_CENTRE, SharpCentre, VoxelFrame};
 use scene_data::{Beam, SceneData};
 use settings::{PerPlayerSettings, ServerSettings};
 use thrown_wormholes::{
@@ -250,6 +250,17 @@ struct Arguments {
     /// 14 ms of GPU time; otherwise 1.
     #[arg(long)]
     render_scale: Option<f64>,
+    /// W-136 (sharp centre, soft edges): the share of the image's width, across a circle around
+    /// its centre, drawn at full resolution with Metal; outside it pixels are drawn at half
+    /// resolution and blended. Defaults to the renderer's `DEFAULT_SHARP_CENTRE`; `inf` keeps
+    /// every pixel sharp.
+    #[arg(long)]
+    sharp_width_frac: Option<f64>,
+    /// The share of the image's width, across a circle around its centre, beyond which pixels are
+    /// drawn at a quarter resolution (at least `--sharp-width-frac`). Defaults to the renderer's
+    /// `DEFAULT_SHARP_CENTRE`; `inf` keeps the edges at half resolution.
+    #[arg(long)]
+    half_width_frac: Option<f64>,
     /// Render fixed views without a window, time them and save them under .artifacts/bench_views/.
     #[arg(long, conflicts_with = "autopilot")]
     bench_views: bool,
@@ -481,11 +492,36 @@ fn get_default_render_scale(kind: RendererKind) -> f64 {
     }
 }
 
+/// `get_sharp_centre` gives how much of each frame is drawn sharp (W-136, sharp centre, soft
+/// edges): `--sharp-width-frac` and `--half-width-frac`, each defaulting to `DEFAULT_SHARP_CENTRE`.
+///
+/// Example: `frame.set_sharp_centre(get_sharp_centre(&arguments));`
+fn get_sharp_centre(arguments: &Arguments) -> SharpCentre {
+    SharpCentre {
+        sharp_width_frac: arguments
+            .sharp_width_frac
+            .unwrap_or(DEFAULT_SHARP_CENTRE.sharp_width_frac),
+        half_width_frac: arguments
+            .half_width_frac
+            .unwrap_or(DEFAULT_SHARP_CENTRE.half_width_frac),
+    }
+}
+
 /// `validate_arguments` checks every argument before anything happens, naming the argument and
 /// the valid range on failure.
 ///
 /// Example: `validate_arguments(&arguments)?;`
 fn validate_arguments(arguments: &Arguments) -> Result<()> {
+    let sharp_centre: SharpCentre = get_sharp_centre(arguments);
+    if !(sharp_centre.sharp_width_frac > 0.0
+        && sharp_centre.half_width_frac >= sharp_centre.sharp_width_frac)
+    {
+        return Err(format!(
+            "--sharp-width-frac must be positive and at most --half-width-frac, got {} and {}; e.g. --sharp-width-frac 0.66 --half-width-frac inf",
+            sharp_centre.sharp_width_frac, sharp_centre.half_width_frac
+        )
+        .into());
+    }
     if let Some(scale) = arguments.render_scale
         && !(scale > 0.0 && scale <= 1.0)
     {
@@ -1476,14 +1512,16 @@ fn bench_voxel_views(
             .and_then(|burst| burst.get_cloud(BENCH_DUST_AGE_S))
             .into_iter()
             .collect();
-        let warm_up: VoxelFrame =
+        let mut warm_up: VoxelFrame =
             VoxelFrame::Build(world, camera, &beams, spot, &clouds, render_px);
+        warm_up.set_sharp_centre(get_sharp_centre(arguments));
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame =
+            let mut frame: VoxelFrame =
                 VoxelFrame::Build(world, camera, &beams, spot, &clouds, render_px);
+            frame.set_sharp_centre(get_sharp_centre(arguments));
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());
@@ -2424,6 +2462,7 @@ struct Session {
     world: World,
     player: Player,
     render_scale: f64,
+    sharp_centre: SharpCentre,
     last_used_scale: f64,
     is_auto_scale: bool,
     exit_after_s: Option<f64>,
@@ -2758,6 +2797,7 @@ impl Session {
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
+            sharp_centre: get_sharp_centre(arguments),
             last_used_scale: 1.0,
             is_auto_scale: arguments.renderer == RendererKind::Metal
                 && arguments.render_scale.is_none(),
@@ -3887,7 +3927,7 @@ impl Session {
                 .rev()
                 .find(|tracer| tracer.get_lit_m(now_s).1 >= tracer.length_m)
                 .and_then(|tracer| tracer.spot.map(|x| (x, tracer.team)));
-            let view: multiplayer::SharedVoxelView = multiplayer::pack_shared_voxel_view(
+            let mut view: multiplayer::SharedVoxelView = multiplayer::pack_shared_voxel_view(
                 &voxel.world,
                 camera,
                 laser_aim,
@@ -3904,6 +3944,7 @@ impl Session {
                 }),
                 render_px,
             );
+            view.frame.set_sharp_centre(self.sharp_centre);
             if is_firing
                 && !self.was_firing
                 && let Some(shot) = &view.shot
