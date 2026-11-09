@@ -33,7 +33,7 @@ the settings sections, `weapons`, `movement` (through `Ground`), `gait`, `avatar
 | `movement` | the rules of moving (`MoveState::step`): crouching, sprint energy, the head bob's steps, a hit's and crouching's slow; each level moves the player in its own space (`VoxelPlayer::step`, City Sphere's `CityWorld::move_player`, Dark Forest's `Forest` through the `Ground` trait and a step's `MoveIntent`); a crouch's height share and its 4-bit network level (`get_crouched_height_frac`, `encode_crouch_level`) | yes |
 | `mesh`, `avatar_model` | glTF models of the maps' structures and the players' robot body, posed by a clip, and squashed for a crouched player (`make_squashed`) | yes |
 | `spaceships` | the spaceships in the sky | yes |
-| `key_bindings`, `exit_prompt` | a player's controls (SDL), and the "leave the game?" prompt | no (SDL) |
+| `key_bindings`, `menu_and_map` | a player's controls (SDL), with saved ones from older builds upgraded (`upgrade_saved_names`); what covers the view (`MenuAndMap`: the menu on `Esc`, which frees the mouse and whose QUIT page leaves the level, and the map while `Tab` is held, over the game going on; W-140, hold Tab for the map, Esc for the menu) | no (SDL) |
 | `texture_arrays` | mipmapped Metal texture arrays from image files | no (Metal) |
 | `render_mesh` | the maps' models as GPU buffers for the voxel renderer | no (Metal) |
 | `viewmodel` (+ `viewmodel.metal`) | the gun held in hand, drawn over the scene | no (Metal) |
@@ -85,8 +85,8 @@ warped_shared = { path = "../warped_shared_rust" }
 
 ```rust
 // src/main.rs, beside the level's own `mod` lines
-use warped_shared::{app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, hud_bars, key_bindings, mesh,
-    overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel};
+use warped_shared::{app_bundle, avatar_model, fps_demo_assets, geometry, hud_bars, key_bindings,
+    menu_and_map, mesh, overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel};
 use warped_shared::hud::get_crosshair_rects;
 use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 ```

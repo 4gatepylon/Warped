@@ -49,8 +49,8 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | Right mouse | aim: zoom in 2.5 times (sniper) or 1.5 times (rifle); the mouse turns the view more slowly by as much |
 | `1` / `2` / wheel | take the sniper / take the rifle / swap guns |
 | `E` (hold) | turn off an enemy console: look at it from within 3 m and hold 10 s |
-| `Esc` | release the mouse; a second `Esc` asks "Do you want to exit?" (`Return`/`Y` exits, `Esc`/`N` stays) |
-| `Tab` | menu (scores, settings, map, credits) |
+| `Esc` | menu (scores, settings, map, credits, quit), which frees the mouse; `Esc` again closes it; its QUIT page leaves with `Return`/`Y` |
+| `Tab` (hold) | the whole map over the game, which goes on while you look; let go to hide it |
 | `F1`-`F8`, `[` / `]` | effects and render scale, as in `../fps_demo/` |
 | `F9` | sharp centre on or off (foveation: full resolution around the crosshair, softer toward the edges; on by default) |
 
@@ -97,7 +97,7 @@ countdown.
 - **Look:** a murky green grade of the HDRI sky, thick green haze, golden lasers for everyone (the map's
   `laser.rgb`) drawn as Lunar Surface's beams, speckle included (DECISIONS.md D33), and 31 flickering candles (warm map lights with `flicker_frac`) on the decks, bridges and support
   bundles.
-- **Map page:** the menu's map page (Tab, then E) is `assets/map_picture.png`, a photo of the forest from straight
+- **Map page:** the map shown while `Tab` is held, and the menu's map page (`Esc`, then E), is `assets/map_picture.png`, a photo of the forest from straight
   above made by `make map-picture`, with live marks over it; without it the page shows the old drawing.
 
 ## Match interface

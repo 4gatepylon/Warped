@@ -1,12 +1,14 @@
 //! `menu` is the in-game menu, in pages under a tab bar (ported from the hyperbolic demo's
 //! `menu.rs`): the scores page, with each player's team, kills and deaths from the server; the
 //! settings page, where a player changes the look speed, render scale, vsync, frame-time readout
-//! and minimap for this run, sees the controls, and can quit; the map page, whose picture the
-//! window draws (`minimap.rs`); and the credits page (`credits.rs`). It keeps no window state:
-//! the window feeds it keys and the scores, and draws its lines.
+//! and minimap for this run and sees the controls; the map page, whose picture the window draws
+//! (`minimap.rs`); the credits page (`credits.rs`); and the quit page, which leaves the level.
+//! It keeps no window state: the window feeds it keys and the scores, and draws its lines. `Esc`
+//! opens and closes it, and the map page's lines also head the map shown while `Tab` is held
+//! (W-140, hold Tab for the map, Esc for the menu; `warped_shared::menu_and_map`).
 //!
 //! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`), `MenuOutcome`, `MenuSettings`,
-//! `Page`, `Scoreboard`, `MENU_PICTURE_PX`.
+//! `Page`, `Scoreboard`, `MENU_PICTURE_PX`, `get_held_map_lines`.
 //!
 //! Example: `if menu.handle(Scancode::Escape, &mut menu_settings) == MenuOutcome::Close { ... }`
 //!
@@ -16,6 +18,8 @@
 use std::cmp::Reverse;
 
 use sdl3::keyboard::Scancode;
+use warped_shared::key_bindings::Control;
+use warped_shared::menu_and_map::{QUIT_LINES, is_leave_control};
 
 use crate::credits::CREDITS_LINES;
 use crate::net::{Score, TEAM_NAMES};
@@ -25,19 +29,19 @@ pub const MENU_PICTURE_PX: (u32, u32) = (528, 312);
 
 /// `PAGE_COUNT` is how many pages the menu has.
 pub const PAGE_COUNT: usize = PAGES.len();
-const PAGES: [(Page, &str); 4] = [
+const PAGES: [(Page, &str); 5] = [
     (Page::Scores, "SCORES"),
     (Page::Settings, "SETTINGS"),
     (Page::Map, "MAP"),
     (Page::Credits, "CREDITS"),
+    (Page::Quit, "QUIT"),
 ];
-const ROWS: [Row; 6] = [
+const ROWS: [Row; 5] = [
     Row::LookSpeed,
     Row::RenderScale,
     Row::Vsync,
     Row::FrameTime,
     Row::Minimap,
-    Row::Quit,
 ];
 const CONTROLS_LINES: [&str; 6] = [
     "CONTROLS",
@@ -45,9 +49,10 @@ const CONTROLS_LINES: [&str; 6] = [
     "Mouse look, left button fire, right aim, R reload",
     "Walk into a rope ladder to climb: W up, S down, Space lets go",
     "Hold E at an enemy console for 3 s to switch it off",
-    "Tab or Esc opens and closes this menu",
+    "Hold Tab for the map; Esc opens and closes this menu",
 ];
 const MAP_LEGEND: &str = "You: white arrow  Robots: team colours  Squares: consoles";
+const HELD_MAP_TITLE: &str = "MAP     let go of Tab to hide it";
 const WAITING_LINE: &str = "No scores from the server yet: join a team first.";
 const LOOK_STEP_RAD_PER_PT: f32 = 0.0002;
 const LOOK_RANGE_RAD_PER_PT: (f32, f32) = (0.0004, 0.01);
@@ -67,6 +72,7 @@ pub enum Page {
     Settings,
     Map,
     Credits,
+    Quit,
 }
 
 /// `Scoreboard` is what the scores page shows: this player's own kills and deaths when playing
@@ -103,15 +109,26 @@ enum Row {
     Vsync,
     FrameTime,
     Minimap,
-    Quit,
 }
 
-/// `MenuOutcome` is what the window does after a key in the menu: nothing, close it, or quit.
+/// `MenuOutcome` is what the window does after a key in the menu: nothing, close it, or leave the
+/// level (`menu_and_map::PlayOutcome::LeaveLevel`; the forest run alone quits).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MenuOutcome {
     Stay,
     Close,
-    Quit,
+    LeaveLevel,
+}
+
+/// `get_held_map_lines` gives the lines over the map shown while `Tab` is held: its title and the
+/// map's legend.
+///
+/// Example: `picture.draw(&get_held_map_lines(), false);`
+pub fn get_held_map_lines() -> Vec<(String, bool)> {
+    vec![
+        (HELD_MAP_TITLE.to_string(), true),
+        (MAP_LEGEND.to_string(), false),
+    ]
 }
 
 /// `Menu` is the menu's open page and the settings row chosen on it.
@@ -222,14 +239,14 @@ impl Menu {
         PAGES[self.page_index].0
     }
 
-    /// `handle` acts on one pressed key: Escape or Tab closes the menu, Q and E turn the page,
-    /// and on the settings page Up and Down choose a row, Left and Right change it and Return
-    /// switches or quits.
+    /// `handle` acts on one pressed key: Escape closes the menu, Q and E turn the page, on the
+    /// quit page Return or Y leaves the level, and on the settings page Up and Down choose a row,
+    /// Left and Right change it and Return switches it.
     ///
     /// Example: `let outcome = menu.handle(Scancode::E, &mut menu_settings);`
     pub fn handle(&mut self, key: Scancode, settings: &mut MenuSettings) -> MenuOutcome {
         match key {
-            Scancode::Escape | Scancode::Tab => return MenuOutcome::Close,
+            Scancode::Escape => return MenuOutcome::Close,
             Scancode::Q => {
                 self.page_index = (self.page_index + PAGES.len() - 1) % PAGES.len();
                 return MenuOutcome::Stay;
@@ -237,6 +254,9 @@ impl Menu {
             Scancode::E => {
                 self.page_index = (self.page_index + 1) % PAGES.len();
                 return MenuOutcome::Stay;
+            }
+            _ if self.get_page() == Page::Quit && is_leave_control(Control::Key(key)) => {
+                return MenuOutcome::LeaveLevel;
             }
             _ if self.get_page() != Page::Settings => return MenuOutcome::Stay,
             _ => {}
@@ -268,8 +288,6 @@ impl Menu {
             Row::Vsync => settings.is_vsync_enabled = !settings.is_vsync_enabled,
             Row::FrameTime => settings.is_showing_frame_time = !settings.is_showing_frame_time,
             Row::Minimap => settings.is_showing_minimap = !settings.is_showing_minimap,
-            Row::Quit if key == Scancode::Return => return MenuOutcome::Quit,
-            Row::Quit => {}
         }
         MenuOutcome::Stay
     }
@@ -301,6 +319,7 @@ impl Menu {
             Page::Credits => {
                 lines.extend(CREDITS_LINES.iter().map(|line| (line.to_string(), false)));
             }
+            Page::Quit => lines.extend(QUIT_LINES.iter().map(|line| (line.to_string(), false))),
             Page::Settings => {
                 lines.push((
                     "Up/Down choose, Left/Right change, Return switches".to_string(),
@@ -332,7 +351,6 @@ impl Menu {
                             "minimap",
                             format_switch(settings.is_showing_minimap)
                         ),
-                        Row::Quit => "Quit the game".to_string(),
                     };
                     lines.push((text, i == self.row_index));
                 }
@@ -351,8 +369,9 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Page turning | forward past the last, back past the first; settings keys ignored off the settings page | `q_and_e_turn_pages` |
-    //! | Settings row | a number (stepped, clamped), a switch, quitting | `settings_rows_change_and_quit` |
-    //! | Closing | Escape, Tab | `escape_and_tab_close_it` |
+    //! | Settings row | a number (stepped, clamped), a switch | `settings_rows_change` |
+    //! | Closing | Escape; not Tab (the held map's key) | `escape_closes_it_and_tab_does_not` |
+    //! | Quit page | Return or Y (leave the level), another key (stay); Return elsewhere (no leaving) | `the_quit_page_leaves_the_level` |
     //! | Scoreboard | alone, waiting, scores (two teams, ties in kills, this player known or not) | `the_scores_page_sorts_and_totals` |
     //! | Fit | every page's lines within the picture's 64 characters and 25 lines | `every_page_fits_the_picture` |
 
@@ -370,10 +389,17 @@ mod tests {
     fn q_and_e_turn_pages() {
         let (mut menu, mut settings) = (Menu::New(), SETTINGS);
         assert_eq!(menu.get_page(), Page::Scores);
-        for expected in [Page::Settings, Page::Map, Page::Credits, Page::Scores] {
+        for expected in [
+            Page::Settings,
+            Page::Map,
+            Page::Credits,
+            Page::Quit,
+            Page::Scores,
+        ] {
             menu.handle(Scancode::E, &mut settings);
             assert_eq!(menu.get_page(), expected);
         }
+        menu.handle(Scancode::Q, &mut settings);
         menu.handle(Scancode::Q, &mut settings);
         assert_eq!(menu.get_page(), Page::Credits);
         menu.handle(Scancode::Down, &mut settings);
@@ -382,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_rows_change_and_quit() {
+    fn settings_rows_change() {
         let (mut menu, mut settings) = (Menu::New(), SETTINGS);
         menu.handle(Scancode::E, &mut settings);
         menu.handle(Scancode::Down, &mut settings);
@@ -397,26 +423,43 @@ mod tests {
         menu.handle(Scancode::Up, &mut settings);
         menu.handle(Scancode::Up, &mut settings);
         assert_eq!(
-            menu.handle(Scancode::Left, &mut settings),
+            menu.handle(Scancode::Return, &mut settings),
             MenuOutcome::Stay
         );
+        assert!(!settings.is_showing_minimap);
+    }
+
+    #[test]
+    fn the_quit_page_leaves_the_level() {
+        let (mut menu, mut settings) = (Menu::New(), SETTINGS);
+        menu.handle(Scancode::Q, &mut settings);
+        assert_eq!(menu.get_page(), Page::Quit);
+        let lines: Vec<(String, bool)> = menu.get_lines(&settings, Scoreboard::Waiting);
+        let texts: Vec<&str> = lines[2..].iter().map(|(text, _)| text.as_str()).collect();
+        assert_eq!(texts, QUIT_LINES);
+        assert_eq!(menu.handle(Scancode::N, &mut settings), MenuOutcome::Stay);
+        for key in [Scancode::Return, Scancode::Y] {
+            assert_eq!(
+                menu.handle(key, &mut settings),
+                MenuOutcome::LeaveLevel,
+                "{key:?}"
+            );
+        }
+        let mut scores_menu: Menu = Menu::New();
         assert_eq!(
-            menu.handle(Scancode::Return, &mut settings),
-            MenuOutcome::Quit
+            scores_menu.handle(Scancode::Return, &mut settings),
+            MenuOutcome::Stay
         );
     }
 
     #[test]
-    fn escape_and_tab_close_it() {
+    fn escape_closes_it_and_tab_does_not() {
         let (mut menu, mut settings) = (Menu::New(), SETTINGS);
         assert_eq!(
             menu.handle(Scancode::Escape, &mut settings),
             MenuOutcome::Close
         );
-        assert_eq!(
-            menu.handle(Scancode::Tab, &mut settings),
-            MenuOutcome::Close
-        );
+        assert_eq!(menu.handle(Scancode::Tab, &mut settings), MenuOutcome::Stay);
     }
 
     #[test]
@@ -505,6 +548,9 @@ mod tests {
                 assert!(line.chars().count() <= 64, "{line:?} is too wide");
             }
             menu.handle(Scancode::E, &mut settings);
+        }
+        for (line, _) in get_held_map_lines() {
+            assert!(line.chars().count() <= 64, "{line:?} is too wide");
         }
     }
 }

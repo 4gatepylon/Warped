@@ -244,6 +244,11 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   city sphere and dune/lkunar"). `walk_speed_per_map_speed` 2.0 → 1.6 (10 → 8 m/s) and `sprint_speed_per_map_speed`
   2.0 → 1.72 (18 → 15.5 m/s), halfway between City Sphere's 6 and 13 m/s and Lunar Surface's 10 and 18. The
   movement test still checks every other setting against Lunar Surface's file.
+- **D43. Hold Tab for the map, Esc for the menu** (W-140, hold Tab for the map, Esc for the menu; Lunar's D118).
+  Holding `Tab` draws the menu's map page (`minimap.draw_map`) and its legend over the game, dimmed 60%, while play
+  goes on; `Esc` opens the menu and frees the mouse, and `Esc` again closes it. The menu's last page, QUIT, leaves with
+  `Return` or `Y` (`MenuOutcome::LeaveLevel`), replacing the settings page's Quit row and D28's exit prompt
+  (`exit_prompt.rs` removed); the state is the shared `warped_shared::menu_and_map`, as in every level.
 
 ## Follow-ups for the next agent
 

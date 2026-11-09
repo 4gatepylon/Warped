@@ -3,12 +3,14 @@
 //! head bob, motion blur, how a hit looks, the wormhole tint and the Milky Way's brightness, and a
 //! row that saves them), the map page, whose
 //! picture the window draws (`map_layout.rs`), the scores page, with each player's team, kills
-//! and deaths from the server, and the credits page, with where the game's assets come from
-//! (`credits.rs`). It keeps no window state: the window feeds it pressed controls and the scores,
-//! and draws its lines.
+//! and deaths from the server, the credits page, with where the game's assets come from
+//! (`credits.rs`), and the quit page, which leaves the level. It keeps no window state: the window
+//! feeds it pressed controls and the scores, and draws its lines. `Esc` opens it and closes it, and
+//! the map page's lines also head the map shown while `Tab` is held (W-140, hold Tab for the map,
+//! Esc for the menu; `warped_shared::menu_and_map`).
 //!
 //! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`, `show_message`), `MenuOutcome`,
-//! `Page`, `Scoreboard`.
+//! `Page`, `Scoreboard`, `get_held_map_lines`.
 //!
 //! Example: `if menu.handle(control, &mut mine) == MenuOutcome::Close { ... }`
 //!
@@ -22,15 +24,17 @@ use sdl3::keyboard::Scancode;
 
 use crate::credits::CREDITS_LINES;
 use crate::key_bindings::{Action, Control, KeyBindings};
+use crate::menu_and_map::{QUIT_LINES, is_leave_control};
 use crate::net::{Score, TEAM_NAMES};
 use crate::settings::PerPlayerSettings;
 
 const VISIBLE_ROW_COUNT: usize = 20;
-const PAGES: [(Page, &str); 4] = [
+const PAGES: [(Page, &str); 5] = [
     (Page::Scores, "SCORES"),
     (Page::Settings, "SETTINGS"),
     (Page::Map, "MAP"),
     (Page::Credits, "CREDITS"),
+    (Page::Quit, "QUIT"),
 ];
 const MAP_LEGEND: &str = "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
 const NO_SERVER_LINE: &str = "No game on a server: host or join one to keep scores.";
@@ -66,6 +70,7 @@ pub enum Page {
     Map,
     Scores,
     Credits,
+    Quit,
 }
 
 /// `Scoreboard` is what the scores page shows: that there is no game on a server, that the server
@@ -103,13 +108,31 @@ enum Row {
     Save,
 }
 
-/// `MenuOutcome` is what the window does after a control in the menu: nothing, close the menu, or
-/// save the settings.
+/// `MenuOutcome` is what the window does after a control in the menu: nothing, close the menu,
+/// save the settings, or leave the level (`menu_and_map::PlayOutcome::LeaveLevel`).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MenuOutcome {
     Stay,
     Close,
     Save,
+    LeaveLevel,
+}
+
+/// `get_held_map_lines` gives the lines over the map shown while the show-map control is held: a
+/// title naming that control, and the map's legend.
+///
+/// Example: `let lines = get_held_map_lines(&mine.keys);`
+pub fn get_held_map_lines(keys: &KeyBindings) -> Vec<(String, bool)> {
+    vec![
+        (
+            format!(
+                "MAP     let go of {} to hide it",
+                keys.get_label(Action::ShowMap)
+            ),
+            true,
+        ),
+        (MAP_LEGEND.to_string(), false),
+    ]
 }
 
 /// `get_rows` gives the menu's rows in order: every action, then the numbers, then saving.
@@ -264,8 +287,9 @@ impl Menu {
 
     /// `handle` reacts to a pressed control: while waiting, it binds the control to the chosen
     /// action (`Escape` cancels); otherwise `Q` and `E` turn to the previous and next page,
-    /// `Escape` or the open-menu control closes the menu, and on the settings page the arrows move
-    /// between rows and change numbers and `Return` starts a binding or saves.
+    /// `Escape` or the open-menu control closes the menu, on the quit page `Return` or `Y` leaves
+    /// the level, and on the settings page the arrows move between rows and change numbers and
+    /// `Return` starts a binding or saves.
     ///
     /// Example: `let outcome = menu.handle(Control::Key(Scancode::Down), &mut mine);`
     pub fn handle(&mut self, control: Control, settings: &mut PerPlayerSettings) -> MenuOutcome {
@@ -295,6 +319,9 @@ impl Menu {
                 self.page_index = (self.page_index + 1) % PAGES.len();
                 return MenuOutcome::Stay;
             }
+            _ if self.get_page() == Page::Quit && is_leave_control(control) => {
+                return MenuOutcome::LeaveLevel;
+            }
             _ if self.get_page() != Page::Settings => return MenuOutcome::Stay,
             _ => {}
         }
@@ -323,7 +350,8 @@ impl Menu {
     /// `get_lines` gives the menu's text, each line with whether it is highlighted: the tab bar,
     /// then on the settings page a hint, the rows around the chosen one (`VISIBLE_ROW_COUNT` of
     /// them) and the line of news, on the map page the map's legend, on the scores page
-    /// `scoreboard`'s lines (`get_score_lines`), or on the credits page `CREDITS_LINES`.
+    /// `scoreboard`'s lines (`get_score_lines`), on the credits page `CREDITS_LINES`, or on the
+    /// quit page `QUIT_LINES`.
     /// `save_path` is where saving writes.
     ///
     /// Example: `let lines = menu.get_lines(&mine, "~/.config/warped/player_settings.yaml", Scoreboard::NoServer);`
@@ -354,9 +382,13 @@ impl Menu {
                 lines.extend(get_score_lines(scoreboard));
                 return lines;
             }
-            Page::Credits => {
+            Page::Credits | Page::Quit => {
+                let page_lines: &[&str] = match self.get_page() {
+                    Page::Credits => &CREDITS_LINES,
+                    _ => &QUIT_LINES,
+                };
                 let mut lines: Vec<(String, bool)> = vec![(tab_bar, true), (String::new(), false)];
-                lines.extend(CREDITS_LINES.iter().map(|line| (line.to_string(), false)));
+                lines.extend(page_lines.iter().map(|line| (line.to_string(), false)));
                 return lines;
             }
             Page::Settings => {}
@@ -397,8 +429,10 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Row kind | an action (rebound, or cancelled with Escape), a number (stepped, clamped), saving | `rows_rebind_step_and_save` |
-    //! | Closing | Escape, the open-menu control | `escape_and_the_menu_key_close_it` |
+    //! | Closing | Escape (the built-in open-menu control), another open-menu control; not the show-map control (`Tab`) | `escape_and_the_menu_key_close_it` |
     //! | Page | the first (SCORES, where the menu opens), turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
+    //! | Quit page | `Return` or `Y` (leave the level), another key (stay); its lines; `Return` elsewhere (no leaving) | `the_quit_page_leaves_the_level` |
+    //! | Held map | its title names the show-map control, then the legend | `the_held_map_names_its_key` |
     //! | Credits page | its lines, ignoring the settings keys | `the_credits_page_lists_the_assets` |
     //! | Scoreboard | no server, waiting for scores, scores (two teams, ties in kills, this player known or not yet) | `the_scores_page_sorts_and_totals` |
 
@@ -445,11 +479,17 @@ mod tests {
     fn q_and_e_turn_pages() {
         let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
         assert_eq!(menu.get_page(), Page::Scores);
-        for expected in [Page::Settings, Page::Map, Page::Credits, Page::Scores] {
+        for expected in [
+            Page::Settings,
+            Page::Map,
+            Page::Credits,
+            Page::Quit,
+            Page::Scores,
+        ] {
             menu.handle(Control::Key(Scancode::E), &mut mine);
             assert_eq!(menu.get_page(), expected);
         }
-        for expected in [Page::Credits, Page::Map] {
+        for expected in [Page::Quit, Page::Credits, Page::Map] {
             menu.handle(Control::Key(Scancode::Q), &mut mine);
             assert_eq!(menu.get_page(), expected);
         }
@@ -469,6 +509,7 @@ mod tests {
     #[test]
     fn the_credits_page_lists_the_assets() {
         let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::Q), &mut mine);
         menu.handle(Control::Key(Scancode::Q), &mut mine);
         assert_eq!(menu.get_page(), Page::Credits);
         menu.handle(Control::Key(Scancode::Down), &mut mine);
@@ -490,8 +531,49 @@ mod tests {
         );
         assert_eq!(
             menu.handle(Control::Key(Scancode::Tab), &mut mine),
+            MenuOutcome::Stay
+        );
+        mine.keys
+            .set_controls(Action::OpenMenu, vec![Control::Key(Scancode::M)])
+            .expect("a key for the menu");
+        assert_eq!(
+            menu.handle(Control::Key(Scancode::M), &mut mine),
             MenuOutcome::Close
         );
+    }
+
+    #[test]
+    fn the_quit_page_leaves_the_level() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        assert_eq!(
+            menu.handle(Control::Key(Scancode::Return), &mut mine),
+            MenuOutcome::Stay
+        );
+        menu.handle(Control::Key(Scancode::Q), &mut mine);
+        assert_eq!(menu.get_page(), Page::Quit);
+        let lines: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
+        assert!(lines[0].0.contains("[QUIT]"));
+        let texts: Vec<&str> = lines[2..].iter().map(|(text, _)| text.as_str()).collect();
+        assert_eq!(texts, QUIT_LINES);
+        assert_eq!(
+            menu.handle(Control::Key(Scancode::N), &mut mine),
+            MenuOutcome::Stay
+        );
+        for key in [Scancode::Return, Scancode::Y] {
+            assert_eq!(
+                menu.handle(Control::Key(key), &mut mine),
+                MenuOutcome::LeaveLevel,
+                "{key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_held_map_names_its_key() {
+        let mine: PerPlayerSettings = PerPlayerSettings::Builtin();
+        let lines: Vec<(String, bool)> = get_held_map_lines(&mine.keys);
+        assert!(lines[0].0.contains("Tab") && lines[0].1);
+        assert_eq!(lines[1], (MAP_LEGEND.to_string(), false));
     }
 
     #[test]

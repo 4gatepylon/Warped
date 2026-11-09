@@ -50,8 +50,8 @@ walking crouched), `Space` jump (Lunar's 1.25 m in 0.58 s; hold it on a lift pad
 ride up; walk off at the top), walk up the stairs in front of your spawn to the glass level, left click shoots, right
 click eases into the gun's zoom, `1` the laser, `2` the rifle (heats up; overheats; a window starts on it), wheel
 switches gun, hold `E` aiming at the other team's console within reach to turn it off (10 s, Lunar's bar below the
-middle), `Esc` releases the mouse and, with the mouse free, asks whether to exit, `Tab` opens the menu (`Q`/`E` change
-page: scores, settings, map, credits), `-` and `=` lower and raise the render resolution. The HUD has Lunar's health,
+middle), `Esc` opens the menu and frees the mouse (`Q`/`E` change page: scores, settings, map, credits, quit; `Esc` again
+closes it), holding `Tab` shows the whole map over the game while you keep playing, `-` and `=` lower and raise the render resolution. The HUD has Lunar's health,
 ammo and energy bars with their pulses, and Lunar's hit effects (red, blur and shake from the edges) whenever health
 drops; an eliminated player sees "YOU DIED" and a countdown and comes back at a spawn after `respawn.delay_s` (3 s).
 The minimap (top right, placed by the player settings' `minimap`) shows the sphere seen from its centre around you, the
@@ -189,7 +189,7 @@ say whether the vsync p99 meets 16.7 ms.
   recoloured per team; it pulses while its console is being turned off and goes dark when off. Each console sits
   inside its pylon. The beacons are drawn once with the still scene; each console's state goes in the uniforms.
 - **Laser colours** come from the map's optional `lasers` (`common/maps/README.md`); City Sphere's are blue and red.
-- **Map page** (`Tab`, then `E`): the whole sphere seen from its centre, unrolled (longitude across, latitude down),
+- **Map page** (held `Tab`, or `Esc` then `E`): the whole sphere seen from its centre, unrolled (longitude across, latitude down),
   rendered by `make map-picture` into `assets/map_picture.png` and cached; consoles, players and you are drawn over
   it. Without the file it falls back to a flat drawing.
 - **Photos**: `make photos WIDTH_PX=2560 HEIGHT_PX=1440` renders photogenic views into `.artifacts/photos/`.
