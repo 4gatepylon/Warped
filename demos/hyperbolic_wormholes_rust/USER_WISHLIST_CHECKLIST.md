@@ -62,7 +62,8 @@ is in [`AGENTS.md`](AGENTS.md).
     "YOU DIED" lines, the hit feedback and the server's damage count shared, `claude/shared-hud-health`, open),
     #461 (City Sphere moves by the shared movement rules and gains Lunar's crouch, `claude/city-crouch`,
     merged), #466 (Dark Forest on the shared crate: its HUD, hit effect, shot noise and settings sections,
-    glam 0.34; `claude/dark-forest-shared-hud`, open).
+    glam 0.34; `claude/dark-forest-shared-hud`, merged), #468 (Dark Forest's guns on the shared `Weapons`,
+    `claude/dark-forest-shared-guns`, open).
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
@@ -114,6 +115,9 @@ is in [`AGENTS.md`](AGENTS.md).
 - [?] **W-138 No aliasing.** The user, 2026-11-09, about W-136 (sharp centre, soft edges): "I think middle sharp is fine but there has to be enough blur to remove aliasing elsewhere", "aliasing is a big issue", "like no one ever ever like aliasing so you gota figure out how to deal with. that in particular". Applies to every level: the soft edges, half-resolution lenses and the rest of the image.
   #469: Lunar Surface, the match, Dust and Snow Planet: soft edges and Lunar's half-resolution lens shown through a
   smooth cubic B-spline, lasers kept sharp in lenses, and FXAA on every frame (0.2-0.8 ms at 3440x1440).
+  #470: option E is the default sharp centre (the middle half sharp, half resolution to three quarters, a quarter
+  beyond, all smoothed), 0.3-2.4 ms faster than B at 3440x1440.
+  #471: City Sphere: 4x MSAA on its rasterized pass.
   #465: Snow Planet's half-resolution lens, smoothed the same way, with lasers kept sharp in it.
 - [?] **W-136 Sharp centre, soft edges.** The user, 2026-11-09: "if you need to lower resolution in different places, you can just like blur things. One thing you could also consider doing is having like a narrower field of view where like the center of the screen is clear and fully, you know, full resolution, everything, but the edges are blurry or something like that." And: "Try to at least have the ability to see a nice, good resolution for the important things that are right in front of you." Applies to every level's speed work (60 FPS).
   #464: the middle 66% of the width drawn as before and the rest at half resolution, blended (option B, the

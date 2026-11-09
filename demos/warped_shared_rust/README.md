@@ -13,10 +13,11 @@ was byte for byte the same in every level before it moved.
 | Snow Planet | [`../snow_planet_rust/`](../snow_planet_rust/README.md) | `snow-planet` |
 | City Sphere | [`../city_sphere_rust/`](../city_sphere_rust/README.md) | `city-sphere` |
 | The match (and its own Lunar Surface) | [`../warped_match_rust/`](../warped_match_rust/README.md) | `hyperbolic-wormholes` |
+| Dark Forest | [`../dark_forest_rust/`](../dark_forest_rust/README.md) | `dark-forest` |
 
-Dark Forest ([`../dark_forest_rust/`](../dark_forest_rust/README.md)) runs on the `fps_demo` engine and doesn't use
-it yet; [`PLAN.md`](PLAN.md) is the plan for sharing movement, guns, health and the HUD with every level, Dark Forest
-included.
+Dark Forest runs on the `fps_demo` engine; it uses the HUD, the hit effect, the overlay rectangles, `shot_noise`,
+the settings sections and `weapons` so far, and [`PLAN.md`](PLAN.md) is the plan for the rest (its robots and its
+movement).
 
 ## What is in it
 
@@ -39,7 +40,7 @@ included.
 | `overlay` | what is drawn over a frame: HUD rectangles, the wand, the minimap, the text mask, a hit's effect | no (Metal) |
 | `hud_bars` | the HUD's bars: health, ammo, sprint energy, the console bar, and their glows | no (Metal) |
 | `hud` | the HUD: the crosshair, the bars (health, ammo or heat, sprint energy, the console being turned off; `HudBars`, `make_bar_rects`) and their pulses (`HudPulses`), the hit effect's look (`make_hit_effect`), the banner's lobby and "YOU DIED" lines, the HUD line's gun | no (Metal) |
-| `weapons` | the two guns' state (`Weapons`: fire, reload, heat and overheat, recoil, aim, each shot's noise), `Gun`, how much a hit weighs, the gun in hand's place and sway (`make_wand`, `get_sway`), `MUZZLE_M` | no (Metal) |
+| `weapons` | the two guns' state (`Weapons`: fire, reload, heat and overheat, recoil, aim, each shot's noise), `Gun`, how much a hit weighs, the gun in hand's place and sway (`make_wand`, `get_sway`; `make_wand_camera_from_muzzle` for a level that draws a gun model there), `MUZZLE_M` | no (Metal) |
 
 `overlay` and `texture_arrays` are parts of files that differ per level, taken out verbatim: the overlay types of
 each level's `render_metal.rs` (which re-exports them, so `render_metal::OverlayRect` still works) and `make_mips` and

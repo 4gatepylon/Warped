@@ -21,7 +21,7 @@ use objc2_metal::{
     MTLLibrary, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder,
     MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineState,
     MTLResourceOptions, MTLScissorRect, MTLStorageMode, MTLStoreAction, MTLTexture,
-    MTLTextureDescriptor, MTLTextureUsage, MTLViewport,
+    MTLTextureDescriptor, MTLTextureType, MTLTextureUsage, MTLViewport,
 };
 use rayon::prelude::*;
 
@@ -36,6 +36,7 @@ type Pipeline = Retained<ProtocolObject<dyn MTLRenderPipelineState>>;
 type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
 
 const SHADER_SOURCE: &str = include_str!("render_city.metal");
+const MSAA_SAMPLE_COUNT: usize = 4;
 pub const MAX_HOLE_COUNT: usize = 8;
 const ROUND_HOLE_SIDE_DOT: f64 = 2.0;
 const MOUTH_RING_SEGMENT_COUNT: usize = 32;
@@ -1111,7 +1112,7 @@ pub struct CityGpu {
     albedo: Texture,
     scene_id: u64,
     scene_buffers: Option<(Buffer, usize, Buffer, usize)>,
-    depth: Option<(Texture, (usize, usize))>,
+    samples: Option<(Texture, Texture, (usize, usize))>,
 }
 
 /// `make_buffer` copies `items` into a shared buffer.
@@ -1167,6 +1168,7 @@ fn make_pipeline(
         attachment.setDestinationAlphaBlendFactor(destination);
     }
     descriptor.setDepthAttachmentPixelFormat(MTLPixelFormat::Depth32Float);
+    descriptor.setRasterSampleCount(MSAA_SAMPLE_COUNT);
     Ok(device
         .newRenderPipelineStateWithDescriptor_error(&descriptor)
         .map_err(|e| {
@@ -1175,6 +1177,32 @@ fn make_pipeline(
                 e.localizedDescription()
             )
         })?)
+}
+
+/// `make_sample_texture` makes a memoryless `MSAA_SAMPLE_COUNT`-sample render target of `format`
+/// and `size_px` (W-138, no aliasing): its samples live only in tile memory while the pass draws,
+/// and the colour pass resolves them into the target.
+///
+/// Example: `let depth = make_sample_texture(device, MTLPixelFormat::Depth32Float, (2560, 1440))?;`
+fn make_sample_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    format: MTLPixelFormat,
+    size_px: (usize, usize),
+) -> Result<Texture> {
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A RENDER TARGET OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+    let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            format, size_px.0, size_px.1, false,
+        )
+    };
+    descriptor.setTextureType(MTLTextureType::Type2DMultisample);
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A SAMPLE COUNT THE PIPELINES DON'T MATCH WILL HAPPEN
+    unsafe { descriptor.setSampleCount(MSAA_SAMPLE_COUNT) };
+    descriptor.setUsage(MTLTextureUsage::RenderTarget);
+    descriptor.setStorageMode(MTLStorageMode::Memoryless);
+    Ok(device
+        .newTextureWithDescriptor(&descriptor)
+        .ok_or("Metal: no memory for a multisample render target")?)
 }
 
 /// `make_depth_state` tests depth (less) and writes it if `is_write`.
@@ -1229,7 +1257,7 @@ impl CityGpu {
             albedo: make_array(device, MTLPixelFormat::RGBA8Unorm_sRGB, 4, &layers)?,
             scene_id: 0,
             scene_buffers: None,
-            depth: None,
+            samples: None,
         })
     }
 
@@ -1254,26 +1282,17 @@ impl CityGpu {
         }
         let target_px: (usize, usize) = (target.width(), target.height());
         if self
-            .depth
+            .samples
             .as_ref()
-            .is_none_or(|(_, size)| *size != target_px)
+            .is_none_or(|(_, _, size)| *size != target_px)
         {
-            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DEPTH TEXTURE OF THE WRONG SIZE WILL HAPPEN
-            let descriptor: Retained<MTLTextureDescriptor> = unsafe {
-                MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                    MTLPixelFormat::Depth32Float,
-                    target_px.0,
-                    target_px.1,
-                    false,
-                )
-            };
-            descriptor.setUsage(MTLTextureUsage::RenderTarget);
-            descriptor.setStorageMode(MTLStorageMode::Private);
-            let texture = device
-                .newTextureWithDescriptor(&descriptor)
-                .ok_or("Metal: no memory for the depth")?;
-            self.depth = Some((texture, target_px));
+            self.samples = Some((
+                make_sample_texture(device, MTLPixelFormat::BGRA8Unorm, target_px)?,
+                make_sample_texture(device, MTLPixelFormat::Depth32Float, target_px)?,
+                target_px,
+            ));
         }
+        let (color_samples, depth_samples, _) = self.samples.as_ref().expect("made above");
         let mut holes: [[f32; 4]; MAX_HOLE_COUNT] = [[0.0; 4]; MAX_HOLE_COUNT];
         let mut hole_sides: [[f32; 4]; MAX_HOLE_COUNT] = [[0.0; 4]; MAX_HOLE_COUNT];
         for (slot, hole) in holes.iter_mut().zip(&frame.scene.holes) {
@@ -1312,9 +1331,10 @@ impl CityGpu {
         let beams: Buffer = make_buffer(device, &frame.beams)?;
         let pass: Retained<MTLRenderPassDescriptor> = MTLRenderPassDescriptor::new();
         let color = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
-        color.setTexture(Some(target));
+        color.setTexture(Some(color_samples));
+        color.setResolveTexture(Some(target));
         color.setLoadAction(MTLLoadAction::Clear);
-        color.setStoreAction(MTLStoreAction::Store);
+        color.setStoreAction(MTLStoreAction::MultisampleResolve);
         color.setClearColor(MTLClearColor {
             red: f64::from(SKY_COLOR[0]),
             green: f64::from(SKY_COLOR[1]),
@@ -1322,7 +1342,7 @@ impl CityGpu {
             alpha: 1.0,
         });
         let depth = pass.depthAttachment();
-        depth.setTexture(Some(&self.depth.as_ref().expect("made above").0));
+        depth.setTexture(Some(depth_samples));
         depth.setLoadAction(MTLLoadAction::Clear);
         depth.setStoreAction(MTLStoreAction::DontCare);
         depth.setClearDepth(1.0);

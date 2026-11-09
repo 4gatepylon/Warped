@@ -245,16 +245,16 @@ impl MatchPlay {
             let is_firing: bool = session.is_trigger_down && !is_dead;
             let eye: DMat4 = session.player.camera_world().as_dmat4();
             let frame: DMat4 = if is_firing {
-                session.guns.shot_offset.aim(eye)
+                session.weapons.shot_offset.aim(eye)
             } else {
                 eye
             };
             client.send_state(
                 frame,
                 is_firing,
-                session.guns.gun == Gun::Rifle,
+                session.weapons.gun == Gun::Rifle,
                 self.held_console.map(|i| i as u8),
-                session.guns.beam_speckle_frac,
+                session.weapons.beam_speckle_frac,
                 PlayerWormholes::default(),
             )?;
         }
