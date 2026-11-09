@@ -140,9 +140,9 @@ is in [`AGENTS.md`](AGENTS.md).
   pass. These can be like blizzard zones or something like that."
   Merged into `staging/user-4gatepylon` with #396, 2026-11-08. The looping world (DESIGN.md's T² × ℝ), stacked and
   open: #423 (layer 1, paired-band layout), #424 (layer 2, walking), #430 (layer 3, seeing), #438 (layer 4, shooting),
-  layer 5 (minimap and MAP page). Known gap, 2026-11-09: a robot's pose jumps when its player crosses a seam, because
-  `avatar_animation.rs` (shared by every level) doesn't know the seams; it is to be fixed once `claude/shared-level-code`
-  has merged and moved that file to `demos/warped_shared_rust`.
+  #446 (layer 5, minimap and MAP page). Known gap, 2026-11-09: a robot's pose jumps when its player crosses a seam,
+  because `avatar_animation.rs` (shared by every level) doesn't know the seams; it is to be fixed once
+  `claude/shared-level-code` has merged and moved that file to `demos/warped_shared_rust`.
 - [?] **W-121 Dust demo.** Part of W-124 (four map demos): "Dust has, by default, a fog of sorts, like there's kind of
   a sandstorm going on, and that should refract the light. There should be like a wind always happening, and the light
   should kind of bend in the direction of the wind. There will be no black hole there, but there will still be
