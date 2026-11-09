@@ -7,7 +7,8 @@
 //! brings it back to the eye while held. The window draws the player's own body from there, as the
 //! others see it, and a shot still leaves the eye, turned toward the point the crosshair covers.
 //!
-//! Interface: `ViewSwitch`, `ThirdPersonCamera`, `place_camera`, `aim_at_crosshair`.
+//! Interface: `ViewSwitch`, `ThirdPersonCamera` (both `warped_shared::third_person`'s, every level's),
+//! `place_camera`, `aim_at_crosshair`.
 //!
 //! Example: `let placed = third_person::place_camera(&world, eye, switch.get_boom_frac(0.0));`
 
@@ -19,78 +20,10 @@ use crate::geometry::{
 };
 use crate::voxel_world::VoxelWorld;
 
-pub(crate) const PIVOT_UP_M: f64 = 0.6;
-pub(crate) const BOOM_BACK_M: f64 = 3.0;
-pub(crate) const MIN_PIVOT_UP_M: f64 = 0.45;
-pub(crate) const WALL_GAP_M: f64 = 0.25;
-const SWITCH_S: f64 = 0.3;
+pub use warped_shared::third_person::{BOOM_BACK_M, MIN_PIVOT_UP_M, PIVOT_UP_M, WALL_GAP_M};
+pub use warped_shared::third_person::{ThirdPersonCamera, ViewSwitch};
 const MAX_AIM_TURN_RAD: f64 = 0.6;
 const MIN_AIM_DISTANCE_M: f64 = 0.01;
-
-/// `ViewSwitch` is whether this player chose the third-person view, and how far the camera has
-/// moved toward it: from 0 (at the eye) to 1 (out on its boom), over `SWITCH_S`.
-pub struct ViewSwitch {
-    is_third_person: bool,
-    out_frac: f64,
-}
-
-impl ViewSwitch {
-    /// `FirstPerson` is the view a game starts in: first person, the camera at the eye.
-    ///
-    /// Example: `let switch = ViewSwitch::FirstPerson();`
-    #[allow(non_snake_case)]
-    pub fn FirstPerson() -> ViewSwitch {
-        ViewSwitch {
-            is_third_person: false,
-            out_frac: 0.0,
-        }
-    }
-
-    /// `toggle` switches between first and third person; the camera then moves over `SWITCH_S`.
-    ///
-    /// Example: `switch.toggle();`
-    pub fn toggle(&mut self) {
-        self.is_third_person = !self.is_third_person;
-    }
-
-    /// `update` moves the camera `dt_s` seconds further toward the chosen view.
-    ///
-    /// Example: `switch.update(1.0 / 60.0);`
-    pub fn update(&mut self, dt_s: f64) {
-        let step: f64 = dt_s / SWITCH_S;
-        self.out_frac = if self.is_third_person {
-            (self.out_frac + step).min(1.0)
-        } else {
-            (self.out_frac - step).max(0.0)
-        };
-    }
-
-    /// `get_boom_frac` gives how far out along its boom the camera is now, from 0 to 1: the
-    /// switch's progress, eased in and out, brought back to the eye as aiming (`aim_frac`, 0 to 1)
-    /// eases in, so aiming looks from the eye.
-    ///
-    /// Example: `let boom_frac = switch.get_boom_frac(session.aim_frac);`
-    pub fn get_boom_frac(&self, aim_frac: f64) -> f64 {
-        smoothstep(self.out_frac) * (1.0 - smoothstep(aim_frac))
-    }
-}
-
-/// `smoothstep` eases `t` (clamped to 0 to 1) in and out: 3t² - 2t³.
-///
-/// Example: `let eased = smoothstep(0.25);`
-fn smoothstep(t: f64) -> f64 {
-    let t: f64 = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// `ThirdPersonCamera` is where `place_camera` put the camera: its frame, and whether the player's
-/// own body shows from there (the camera is up at a pivot clear of the head, or behind it) rather
-/// than the gun in hand.
-#[derive(Clone, Copy, Debug)]
-pub struct ThirdPersonCamera {
-    pub frame: DMat4,
-    pub is_body_shown: bool,
-}
 
 /// `place_camera` gives the camera `boom_frac` (0 to 1) of the way out its boom from the eye frame
 /// `eye` in `world`. The boom goes up `PIVOT_UP_M` along the vertical, to a pivot above the head,
@@ -167,6 +100,7 @@ mod tests {
     //! | Crosshair's ray | ahead and straight, ahead through the black hole's reach (bent alike), behind the player (the eye doesn't turn) | `a_shot_lands_where_the_crosshair_points` |
 
     use super::*;
+    use warped_shared::third_person::SWITCH_S;
     use crate::geometry::{AXIS_X, invert_lorentz, make_rotation};
     use crate::map::{Map, get_map_folder};
     use crate::voxel_world::{Shot, VoxelPlayer};
