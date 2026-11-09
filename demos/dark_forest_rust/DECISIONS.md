@@ -132,6 +132,17 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   Heuristic: gives up the cone's sharp edge and lights a little around the spot. Others don't see your flashlight, as
   on Lunar. `Esc` frees the mouse and, pressed again, shows Lunar's exit prompt (`exit_prompt.rs`, copied); `Tab`
   alone opens the menu.
+- **D29. The forest's shadows are kept between frames.** The four shadow cascades took about 6.5 ms of every frame
+  redrawing the static forest. Each cascade is now a square centred on the camera (as wide as the sphere around its
+  slice, so its texels and depth bias are unchanged) that stays put until the camera walks out of its spare margin
+  (about 4 m for the nearest, 70 m and more for the farthest; turning never moves it). The static casters are drawn
+  into a cache only when a cascade moves; each frame the cache is copied into the shadow map and only robots and
+  other moving casters are drawn on top. Shadows look the same (a few hundred pixels differ by up to 7/255).
+- **D30. The lit passes get only the point lights whose reach meets the view.** A candle's light reaches 3.5 m, so a
+  light whose sphere is outside the view frustum can't light anything visible; the lens's live faces, which look
+  from the mouths, still get them all.
+- **D31. The lens pass draws only over the mouths in view.** It is scissored to the screen rectangle of every
+  in-view mouth's reach, and skipped (with the tone map's lens test) when none is in view; the result is the same.
 
 ## Follow-ups for the next agent
 

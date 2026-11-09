@@ -398,6 +398,7 @@ fn capture_wormhole_lens(
                 &FrameDescription {
                     camera,
                     world_draws: &scene.static_draws,
+                    static_draw_count: scene.static_draws.len(),
                     viewmodel_draws: &[],
                     joint_matrices: &[],
                     point_lights: &frame.point_lights,
@@ -726,6 +727,7 @@ fn run_title_screen(
             &FrameDescription {
                 camera: frame.camera,
                 world_draws: &frame.world_draws,
+                static_draw_count: frame.lens_draws.start,
                 viewmodel_draws: &frame.viewmodel_draws,
                 joint_matrices: &frame.joint_matrices,
                 point_lights: &frame.point_lights,
@@ -1424,6 +1426,7 @@ fn main() {
             &FrameDescription {
                 camera: frame.camera,
                 world_draws: &frame.world_draws,
+                static_draw_count: frame.lens_draws.start,
                 viewmodel_draws: &frame.viewmodel_draws,
                 joint_matrices: &frame.joint_matrices,
                 point_lights: &frame.point_lights,
