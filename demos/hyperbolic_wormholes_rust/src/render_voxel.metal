@@ -299,6 +299,10 @@ constant int THROWN_TINT_FIRST_BIT = 1;
 constant int THROWN_TINT_MASK = 3;
 constant int BEAM_RIFLE_BIT = 3;
 constant int BEAM_SPECKLE_FIRST_BIT = 4;
+constant int BEAM_SPECKLE_MASK = 1023;
+constant int STRAIGHT_RAY_BIT = 14;
+constant float FINE_SAMPLE_SPACING_PX = 2.0;
+constant float COARSE_SAMPLE_SPACING_PX = 4.0;
 constant int RIFLE_BEAM_CODE = 2;
 constant int BEACON_BEAM_CODE = 4;
 constant float BEACON_BEAM_RADIUS_M = 0.12;
@@ -681,8 +685,9 @@ struct Hit {
  * travelled, the hit cell with its material (`MAT_GROUND` for the ground), the outcome with the structure (-1 for the
  * ground), face axis and laser and tint (bit 0 the laser's team, 1 for red; from `THROWN_TINT_FIRST_BIT`, two bits
  * for the thrown wormhole it went through, 0 for none; `BEAM_RIFLE_BIT` set for the rifle's laser, clear for the
- * sniper's blade; from `BEAM_SPECKLE_FIRST_BIT`, the laser's speckle share in steps of 1 / `BEAM_SPECKLE_STEPS`), the
- * face's side with the glass count and the laser's core and halo, and the dust and zone walls in front of it
+ * sniper's blade; from `BEAM_SPECKLE_FIRST_BIT`, the laser's speckle share in steps of 1 / `BEAM_SPECKLE_STEPS`;
+ * `STRAIGHT_RAY_BIT` set for a ray that went straight from the eye, through no warp's reach), the face's side with the
+ * glass count and the laser's core and halo, and the dust and zone walls in front of it
  * (`scan_dust`, `scan_zone_walls`).
  */
 struct VoxelRayEnd {
@@ -1028,9 +1033,10 @@ static bool can_reach_sphere(float4 x, float4 v, float4 centre, float cosh_radiu
 }
 
 /**
- * @brief `trace_structures` runs `trace_structure` on every structure a chord can reach: the static ones group by group
- * (`structure_groups`: how many groups, where their headers start in `warp_lists`, how many structures are static),
- * skipping each group whose bounding sphere the chord can't reach, then the avatars and markers after them one by one.
+ * @brief `trace_structures` runs `trace_structure` on every structure a chord can reach: the static ones block by block
+ * and group by group (`structure_groups`: how many groups, where their headers start in `warp_lists`, how many
+ * structures are static, how many blocks of groups, whose headers follow the groups'), skipping each block and group
+ * whose bounding sphere the chord can't reach, then the avatars and markers after them one by one.
  * A shadow ray stops at its first hit.
  * @par Example
  * @code
@@ -1040,13 +1046,18 @@ static bool can_reach_sphere(float4 x, float4 v, float4 centre, float cosh_radiu
 template <bool is_shadow>
 static void trace_structures(thread const Scene &scene, float4 x, float4 v, thread Hit &hit, thread float &glass_s) {
     int4 groups = scene.u.structure_groups;
-    for (int g = 0; g < groups.x; g++) {
-        float4 centre = scene.warp_lists[groups.y + 2 * g], info = scene.warp_lists[groups.y + 2 * g + 1];
-        if (!can_reach_sphere(x, v, centre, info.x, hit.s)) continue;
-        int first = int(info.y);
-        for (int j = first; j < first + int(info.z); j++) {
-            trace_structure(scene, int(scene.warp_lists[j].x), x, v, 0.0, is_shadow, hit, glass_s);
-            if (is_shadow && hit.mat != 0) return;
+    int first_block = groups.y + 2 * groups.x;
+    for (int b = 0; b < groups.w; b++) {
+        float4 block_centre = scene.warp_lists[first_block + 2 * b], block = scene.warp_lists[first_block + 2 * b + 1];
+        if (!can_reach_sphere(x, v, block_centre, block.x, hit.s)) continue;
+        for (int g = int(block.y); g < int(block.y) + int(block.z); g++) {
+            float4 centre = scene.warp_lists[groups.y + 2 * g], info = scene.warp_lists[groups.y + 2 * g + 1];
+            if (!can_reach_sphere(x, v, centre, info.x, hit.s)) continue;
+            int first = int(info.y);
+            for (int j = first; j < first + int(info.z); j++) {
+                trace_structure(scene, int(scene.warp_lists[j].x), x, v, 0.0, is_shadow, hit, glass_s);
+                if (is_shadow && hit.mat != 0) return;
+            }
         }
     }
     for (int k = groups.z; k < scene.u.structure_count; k++) {
@@ -1130,9 +1141,18 @@ static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
     return mix(mix(q.w, q.z, f.x), mix(q.x, q.y, f.x), f.y);
 }
 
-/** @brief `get_fermi` gives a point's Fermi (u, v, h) in meters. @par Example @code float3 f = get_fermi(x, r); @endcode */
+/**
+ * @brief `get_fermi` gives a point's Fermi (u, v, h) in meters. It takes u from ln((w + |z|) / √(1 + x² + y²)), which
+ * is atanh(|z| / w) on the hyperboloid but, unlike atanh(z / w) with z / w near 1, stays exact to a few micrometres
+ * far from the origin, so neighbouring rays meet the ground smoothly.
+ * @par Example
+ * @code
+ * float3 f = get_fermi(x, r);
+ * @endcode
+ */
 static float3 get_fermi(float4 x, float r) {
-    return float3(-r * clamp_atanh(x.z / x.w), r * asinh(x.x * rsqrt(1.0 + x.y * x.y)), r * asinh(x.y));
+    float u_s = log((x.w + abs(x.z)) * rsqrt(1.0 + x.x * x.x + x.y * x.y));
+    return float3(-r * copysign(u_s, x.z), r * asinh(x.x * rsqrt(1.0 + x.y * x.y)), r * asinh(x.y));
 }
 
 /**
@@ -1158,7 +1178,9 @@ static float get_safe_step_m(thread const Scene &scene, float3 f, float gap, flo
  * @brief `trace_terrain` is terrain.rs's `find_hit_s` on the chord from x along v from `s_start` to `hit.s`: steps of a
  * fraction of the gap to the ground, at least a little more each meter out, then bisection of the step that went under; with
  * `should_track_lit` (shadow rays only), it lowers `hit.lit` to the least gap over the distance travelled times
- * `SHADOW_PENUMBRA_TAN`. A camera ray steps instead as far as it safely can (`get_safe_step_m`) when that is longer.
+ * `SHADOW_PENUMBRA_TAN`. A ray steps instead as far as it safely can (`get_safe_step_m`) when that is longer: a shadow
+ * ray only as far as its gap can't fall below `hit.lit` times its penumbra's width, so the penumbra stays. A camera ray
+ * ends its bisection with a secant step, so its hit lies on the ground rather than up to a bisection's width under it.
  * @par Example
  * @code
  * trace_terrain<false>(scene, x, v, 0.0, hit);
@@ -1166,28 +1188,35 @@ static float get_safe_step_m(thread const Scene &scene, float3 f, float gap, flo
  */
 template <bool should_track_lit>
 static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s_start, thread Hit &hit) {
-    float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = s_start, previous = s_start;
+    float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = s_start, previous = s_start, previous_gap = 0.0;
     for (int i = 0; i < TERRAIN_MAX_STEPS; i++) {
         float4 p = geodesic_point(x, v, s);
         float3 f = get_fermi(p, r);
         float gap = f.z - terrain_height_m(scene, f.x, f.y);
         if (gap < 0.0) {
-            float lo = previous, hi = s;
+            float lo = previous, hi = s, gap_lo = previous_gap, gap_hi = gap;
             for (int b = 0; b < TERRAIN_BISECTIONS; b++) {
                 float mid = 0.5 * (lo + hi);
                 float3 g = get_fermi(geodesic_point(x, v, mid), r);
-                if (g.z < terrain_height_m(scene, g.x, g.y)) hi = mid; else lo = mid;
+                float gap_mid = g.z - terrain_height_m(scene, g.x, g.y);
+                if (gap_mid < 0.0) { hi = mid; gap_hi = gap_mid; } else { lo = mid; gap_lo = gap_mid; }
             }
+            if (!should_track_lit) hi -= (hi - lo) * gap_hi / min(gap_hi - gap_lo, -TINY);
             if (hi < hit.s) { hit.s = hi; hit.mat = MAT_GROUND; hit.k = -1; }
             return;
         }
         if (should_track_lit) hit.lit = min(hit.lit, gap / max(s * r * SHADOW_PENUMBRA_TAN, TINY));
         if (f.z > top_m && geodesic_tangent(x, v, s).y > 0.0) return;
         previous = s;
+        previous_gap = gap;
         float step_m = max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * s * r);
-        if (!should_track_lit) {
-            float4 t = geodesic_tangent(x, v, s);
-            step_m = max(step_m, get_safe_step_m(scene, f, gap, max(-t.y * rsqrt(1.0 + p.y * p.y), 0.0)));
+        float4 t = geodesic_tangent(x, v, s);
+        float descent = max(-t.y * rsqrt(1.0 + p.y * p.y), 0.0);
+        if (should_track_lit) {
+            float lit_tan = hit.lit * SHADOW_PENUMBRA_TAN;
+            step_m = max(step_m, get_safe_step_m(scene, f, gap - lit_tan * s * r, descent + lit_tan));
+        } else {
+            step_m = max(step_m, get_safe_step_m(scene, f, gap, descent));
         }
         s += step_m / r;
         if (s > hit.s) return;
@@ -2594,6 +2623,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     for (int w = 0; w < u.warp_count; w++) {
         if (-mdot(x, warps[w].centre) < cosh(warps[w].params.z)) inside = w;
     }
+    bool is_straight = inside < 0;
     float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, code = 0.0, speckle = 0.0;
     float4 dust = float4(0.0);
     Hit hit;
@@ -2636,6 +2666,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             x = xn;
             travelled += s_end;
             inside = entering;
+            is_straight = false;
             continue;
         }
         if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho, local);
@@ -2678,7 +2709,8 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     int beam_code = int(code + HALF_KIND);
     VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0),
                        int4(outcome, -1, -1, (beam_code & 1) | tint << THROWN_TINT_FIRST_BIT | ((beam_code & RIFLE_BEAM_CODE) != 0 ? 1 : 0) << BEAM_RIFLE_BIT
-                                                 | int(round(speckle * BEAM_SPECKLE_STEPS)) << BEAM_SPECKLE_FIRST_BIT),
+                                                 | int(round(speckle * BEAM_SPECKLE_STEPS)) << BEAM_SPECKLE_FIRST_BIT
+                                                 | (is_straight ? 1 : 0) << STRAIGHT_RAY_BIT),
                        float4(0.0, glass, core, halo), dust};
     if (outcome == OUTCOME_HIT) {
         end.point = geodesic_point(hit_x, hit_v, hit.s);
@@ -2796,7 +2828,7 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id
         lit = mix(lit, mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS, saturate(core));
         glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
     }
-    color = speckle_beam(scene, color, lit, glow, float(end.surface.w >> BEAM_SPECKLE_FIRST_BIT) / BEAM_SPECKLE_STEPS, id);
+    color = speckle_beam(scene, color, lit, glow, float(end.surface.w >> BEAM_SPECKLE_FIRST_BIT & BEAM_SPECKLE_MASK) / BEAM_SPECKLE_STEPS, id);
     return max(color, 0.0);
 }
 
@@ -2851,7 +2883,7 @@ kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> im
  * @brief `is_same_surface` says whether two samples ended the same way with no laser core, so the pixels between them
  * can be interpolated: both on one face plane of one structure (same axis, side and layer of cells), both on the
  * ground, both in the sky or both lost, behind the same number of glass faces, with nearly as much dust and as much of
- * the same beam's haze.
+ * the same beam's haze (whether each went straight from the eye may differ).
  * @par Example
  * @code
  * if (!is_same_surface(a, b)) return false;
@@ -2860,7 +2892,8 @@ kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> im
 static bool is_same_surface(VoxelRayEnd a, VoxelRayEnd b) {
     int axis = a.surface.z;
     bool is_inside_cell = a.surface.x == OUTCOME_HIT && a.surface.y >= 0 && axis < 0;
-    return all(a.surface == b.surface) && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
+    return all(a.surface.xyz == b.surface.xyz) && ((a.surface.w ^ b.surface.w) & ~(1 << STRAIGHT_RAY_BIT)) == 0 && a.glow.x == b.glow.x
+        && a.glow.y == b.glow.y && !is_inside_cell
         && (axis < 0 || a.cell[axis] == b.cell[axis]) && b.glow.z < GLOW_FLOOR && abs(b.glow.w - a.glow.w) <= HALO_SMOOTH_DEPTH
         && abs(b.dust.w - a.dust.w) <= DUST_SMOOTH_DEPTH;
 }
@@ -2880,25 +2913,48 @@ static bool is_line_smooth(float4 p0, float4 p1, float4 p2, float4 p3, float rat
 }
 
 /**
- * @brief `is_cell_smooth` says whether the cell between samples (i, j) and (i + 1, j + 1) of a grid `columns` ×
- * `grid_rows` can be interpolated: the twelve samples around it (a 4×4 block without its corners) ended on the
- * corner's surface and map nearly linearly along the cell's two rows and two columns. Border cells never are.
+ * @brief `get_eye_point` gives where a sample at `pixel` ended, for `is_cell_smooth`: a straight ray's hit as its
+ * direction from the eye (in the camera's frame) times its distance, else the ray end's point. Far from the origin a
+ * point's float coordinates are only good to a millimetre or so, more than the step between nearby pixels' hits, while
+ * a straight ray's distance stays exact, and both are smooth in the pixel where the scene is.
  * @par Example
  * @code
- * bool is_smooth = is_cell_smooth(samples, columns, sample_rows, i, j, SMOOTH_SECOND_DIFFERENCE_PER_FIRST);
+ * float4 p = get_eye_point(u, sample, 2.0 * float2(i, j) + 0.5);
  * @endcode
  */
-static bool is_cell_smooth(device const VoxelRayEnd *grid, int columns, int grid_rows, int i, int j, float ratio) {
+static float4 get_eye_point(constant VoxelUniforms &u, VoxelRayEnd end, float2 pixel) {
+    if (end.surface.x != OUTCOME_HIT || (end.surface.w >> STRAIGHT_RAY_BIT & 1) == 0) return end.point;
+    float2 ndc = float2(2.0 * pixel.x / float(u.width_px) - 1.0, 1.0 - 2.0 * pixel.y / float(u.height_px));
+    return float4(normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0)) * end.grid.w, 0.0);
+}
+
+/**
+ * @brief `is_cell_smooth` says whether the cell between samples (i, j) and (i + 1, j + 1) of a grid `columns` ×
+ * `grid_rows`, `spacing_px` pixels apart, can be interpolated: the twelve samples around it (a 4×4 block without its
+ * corners) ended on the corner's surface and map nearly linearly along the cell's two rows and two columns: their
+ * `get_eye_point`s when all twelve went straight from the eye, else their points. Border cells never are.
+ * @par Example
+ * @code
+ * bool is_smooth = is_cell_smooth(u, samples, columns, sample_rows, i, j, FINE_SAMPLE_SPACING_PX, SMOOTH_SECOND_DIFFERENCE_PER_FIRST);
+ * @endcode
+ */
+static bool is_cell_smooth(constant VoxelUniforms &u, device const VoxelRayEnd *grid, int columns, int grid_rows, int i, int j, float spacing_px,
+                           float ratio) {
     if (i < 1 || j < 1 || i + 2 >= columns || j + 2 >= grid_rows) return false;
     VoxelRayEnd corner = grid[j * columns + i];
     float4 p[4][4];
+    bool is_all_straight = true;
     for (int b = 0; b < 4; b++) {
         for (int a = 0; a < 4; a++) {
             if ((a == 0 || a == 3) && (b == 0 || b == 3)) continue;
             VoxelRayEnd sample = grid[(j - 1 + b) * columns + (i - 1 + a)];
             if (!is_same_surface(corner, sample)) return false;
-            p[b][a] = sample.point;
+            is_all_straight = is_all_straight && (sample.surface.w >> STRAIGHT_RAY_BIT & 1) != 0;
+            p[b][a] = get_eye_point(u, sample, spacing_px * float2(i - 1 + a, j - 1 + b) + 0.5);
         }
+    }
+    for (int b = 0; b < 4 && !is_all_straight; b++) {
+        for (int a = 0; a < 4; a++) p[b][a] = grid[(j - 1 + b) * columns + (i - 1 + a)].point;
     }
     return is_line_smooth(p[1][0], p[1][1], p[1][2], p[1][3], ratio) && is_line_smooth(p[2][0], p[2][1], p[2][2], p[2][3], ratio)
         && is_line_smooth(p[0][1], p[1][1], p[2][1], p[3][1], ratio) && is_line_smooth(p[0][2], p[1][2], p[2][2], p[3][2], ratio);
@@ -2910,8 +2966,8 @@ static bool is_cell_smooth(device const VoxelRayEnd *grid, int columns, int grid
  * beam haze blend, and the rest is the first sample's. On a block face the cell under the blended grid point gives the
  * material, and the result is false (trace the ray instead) unless that cell is solid and the one in front of the
  * face is open. On the ground the four samples' sun (`with_ground_sun`) carries over when they are all fully in the
- * sun with no structure near their shadow rays (`NEAR_STRUCTURE_LIT`), and is otherwise `SUN_UNKNOWN`, so the pixel
- * traces its own.
+ * sun with no structure near their shadow rays (`NEAR_STRUCTURE_LIT`) or all blocked (`SHADOW_FLOOR`), and is
+ * otherwise `SUN_UNKNOWN`, so the pixel traces its own.
  * @par Example
  * @code
  * if (!interpolate_ray_end(scene, a, b, c, d, 0.5, 0.0, end)) end = trace_ray(scene, pixel);
@@ -2930,7 +2986,7 @@ static bool interpolate_ray_end(thread const Scene &scene, VoxelRayEnd a, VoxelR
     end.view = normalize_tangent(end.point, mix(mix(a.view, b.view, wx), mix(c.view, d.view, wx), wy));
     if (a.surface.y < 0) {
         float sun = a.grid.x;
-        bool is_shared = sun == 1.0 && b.grid.x == sun && c.grid.x == sun && d.grid.x == sun;
+        bool is_shared = (sun == 1.0 || sun == SHADOW_FLOOR) && b.grid.x == sun && c.grid.x == sun && d.grid.x == sun;
         end.grid.x = is_shared ? sun : SUN_UNKNOWN;
         return true;
     }
@@ -3005,7 +3061,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
     }
     Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, terrain_slope_bounds, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     VoxelRayEnd end;
-    if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
+    if (is_cell_smooth(u, coarse, coarse_columns, coarse_rows, ci, cj, COARSE_SAMPLE_SPACING_PX, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
                                0.5 * float(di), 0.5 * float(dj), end)) {
         samples[j * columns + i] = with_ground_sun(scene, end);
@@ -3058,7 +3114,7 @@ kernel void classify_cells(constant VoxelUniforms &u [[buffer(16)]], device cons
     int columns = get_sample_columns(u), sample_rows = u.height_px / 2 + 2;
     int i = int(id.x), j = int(id.y);
     if (i >= columns || j >= sample_rows) return;
-    uchar is_smooth = is_cell_smooth(samples, columns, sample_rows, i, j, SMOOTH_SECOND_DIFFERENCE_PER_FIRST) ? 1 : 0;
+    uchar is_smooth = is_cell_smooth(u, samples, columns, sample_rows, i, j, FINE_SAMPLE_SPACING_PX, SMOOTH_SECOND_DIFFERENCE_PER_FIRST) ? 1 : 0;
     smooth_cells[j * columns + i] = is_smooth;
     if (is_smooth == 0 && 2 * i < u.width_px && 2 * j < u.height_px) {
         refine_cells[atomic_fetch_add_explicit(refine_count, 1, memory_order_relaxed)] = uint(j * columns + i);
