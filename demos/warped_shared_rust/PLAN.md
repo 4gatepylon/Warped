@@ -12,7 +12,7 @@ Dark Forest's column is as of #439 (merged 2026-11-08), which ported Lunar's gun
 
 | Part | Lunar Surface, Dust, Snow Planet, the match | City Sphere | Dark Forest |
 | --- | --- | --- | --- |
-| Walking, sprinting, crouching, jumping, sprint energy, head bob | `VoxelPlayer::step` in `voxel_world.rs` (H³, voxels and shapes), settings `movement`, `sprint_energy`, `view.head_bob` | `CityWorld::move_player` in `city_world.rs` (inside a sphere, gravity outward), the same settings, its own code | `Player::update` in `src/game/player.rs` (flat, f32, boxes, ladders): Lunar's jump (1.25 m, 0.58 s) and sprint energy as constants, its own speeds (walk 4.4 m/s, sprint 7 m/s, crouch 2.2 m/s) |
+| Walking, sprinting, crouching, jumping, sprint energy, head bob | `VoxelPlayer::step` in `voxel_world.rs` (H³, voxels and shapes), settings `movement`, `sprint_energy`, `view.head_bob` | `CityWorld::move_player` in `city_world.rs` (inside a sphere, gravity outward), the same settings; the rules (crouch included) by the shared `MoveState` | `Player::update` in `src/game/player.rs` (flat, f32, boxes, ladders): Lunar's jump (1.25 m, 0.58 s) and sprint energy as constants, its own speeds (walk 4.4 m/s, sprint 7 m/s, crouch 2.2 m/s) |
 | The two guns: fire, reload (sniper), heat and overheat (rifle), recoil, aim zoom, shot noise, the gun's motion | `Session` in `main.rs` (`update_gun`, `update_rifle`, `switch_gun`, `can_shoot`, `get_zoom`, `make_wand`, `get_sway`), `shot_noise.rs`, settings `sniper`, `rifle`, `aim`, `beam_speckle` | the same copy | `src/game/guns.rs`: Lunar's `main.rs` gun code ported out of the `Session` (`Guns::update(&GunInput, &settings, can_shoot, &GunStep, dt_s)`, `Tracer`, `take_hit_weight`, `get_aim_zoom`), `shot_noise.rs` and most of `dust.rs` copied line for line, a `settings.rs` holding the subset of Lunar's settings it uses (same names and values), f32 and glam 0.30 |
 | Health, damage, respawn | the server counts `damage_frac += 1 / hits_to_kill` (`net.rs`); the shooter picks `hits_to_kill` (`take_hit_weight`: sniper 1, rifle 2 to the head or 12 to the body); `respawn.delay_s` 3 s; `when_hit` slows for 1 s | the same copy | Lunar's hits and 3 s respawn (online through the same `net.rs` copy; offline, a bot loses `1 / hits_to_kill` of its health per hit); the player's own 100 HP still regenerates after 5 s |
 | Hit effects | `HitEffect` (red edges, blur, shake) from `hit_effects` | the same | its own copy of `HitEffect` in `render/overlay.rs` |
@@ -98,7 +98,8 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
    `settings` (`menu` once `credits` and `net::Score` are parameters).
 3. `movement` with the `Ground` trait. Done for the rules (`claude/shared-movement`): `MoveState::step` is
    the first part of every `VoxelPlayer::step`, and each level has a play trace (`play_trace.rs`) that
-   showed the five levels' paths unchanged bit for bit. The `Ground` trait comes with its second user (City
+   showed the five levels' paths unchanged bit for bit; City Sphere's `CityWorld::move_player` steps it too,
+   which gave City Lunar's crouch (`claude/city-crouch`). The `Ground` trait comes with its second user (City
    Sphere's `CityWorld` or Dark Forest's player), since `VoxelWorld` alone needs no trait. Then: `VoxelWorld` first (four levels at once, since they share `voxel_world.rs`'s
    walking code), then City Sphere's `CityWorld`.
 4. Dark Forest, in this order: raise its `glam` from 0.30 to 0.34 (this crate's); depend on `warped_shared`; replace

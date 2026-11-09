@@ -45,7 +45,8 @@ make join-game SERVER=127.0.0.1 TEAM=red    # terminal 3: window 2
 
 Controls and play are Lunar Surface's (W-126 (same play in every level); `player_settings.yaml` and
 `server_settings.yaml` are the hyperbolic demo's, except a faster sprint): `WASD` walk, mouse look (click to capture
-the mouse), `Shift` sprint (Lunar's sprint energy), `Space` jump (Lunar's 1.25 m in 0.58 s; hold it on a lift pad to
+the mouse), `Shift` sprint (Lunar's sprint energy), `Ctrl` crouch (Lunar's: lower and slower, and the guns fire while
+walking crouched), `Space` jump (Lunar's 1.25 m in 0.58 s; hold it on a lift pad to
 ride up; walk off at the top), walk up the stairs in front of your spawn to the glass level, left click shoots, right
 click eases into the gun's zoom, `1` the laser, `2` the rifle (heats up; overheats; a window starts on it), wheel
 switches gun, hold `E` aiming at the other team's console within reach to turn it off (10 s, Lunar's bar below the
@@ -88,7 +89,12 @@ laser. `make play-route ROUTE=wormholes` throws both mouths, shoots and walks th
   hole) and the boxes (three spheres up the body); a player on the ground steps up onto a box at most 0.2 m higher (a
   stair). Holding jump in a lift hole (a hole over a lift pad, not the stairs') raises the player at 6 m/s to 1 m over
   the glass level and holds them there until they walk off. Speeds, jump and gravity follow Lunar Surface's
-  `VoxelWorld::set_settings`: the map's numbers times `server_settings.yaml`'s `movement`.
+  `VoxelWorld::set_settings`: the map's numbers times `server_settings.yaml`'s `movement`. Before moving, each step
+  runs the rules every level shares (`warped_shared::movement::MoveState`, kept in `CityPlayer::move_state`):
+  crouching, sprint energy, the head bob's steps and a hit's slow (DECISIONS 36). The ignored test
+  `record_city_play_trace` walks a player through a fixed script of keys on the City Sphere map and writes every
+  step's state exactly (`PLAY_TRACE_FILE=<file>`; `PLAY_TRACE_CROUCH=0` and `PLAY_TRACE_HIT=0` leave out the crouch
+  and the hit), to compare two builds byte for byte.
 - **Shots** (`CityWorld::trace_shot`): a ray from the eye stops at the nearest of the street, a box, the core, another
   player (torso and head spheres) or the glass met from outside; the glass met from inside reflects it (`d - 2(d·n)n`)
   while bounces are left; the total length is capped at `glass.range_m`.

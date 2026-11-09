@@ -2,10 +2,11 @@
 //! level), apart from the space it moves in: crouching (its share of the way down), sprint energy
 //! (draining while sprinting, refilling faster while crouched), the head bob's steps, and how much
 //! a hit and crouching slow a player. A level turns the speed this gives into motion in its own
-//! space, with its own collisions (Lunar Surface's, Dust's, Snow Planet's, the match's and City
-//! Sphere's `VoxelPlayer::step`).
+//! space, with its own collisions (the `VoxelPlayer::step` of Lunar Surface, Dust, Snow Planet
+//! and the match, and City Sphere's `CityWorld::move_player`).
 //!
-//! Interface: `MoveState` (`step`), `MoveInput`, `MoveRules`.
+//! Interface: `MoveState` (`step`), `MoveInput`, `MoveRules`, `get_crouched_height_frac`,
+//! `encode_crouch_level`, `decode_crouch_level`, `CROUCH_LEVEL_COUNT`.
 //!
 //! Example: `let slow_frac: f64 = state.step(&input, &rules, 1.0 / 60.0);`
 //!
@@ -16,6 +17,34 @@
 use crate::play_settings::{
     HeadBobSettings, MovementSettings, SprintEnergySettings, WhenHitSettings,
 };
+
+/// `CROUCH_LEVEL_COUNT` is how many steps above 0 the network sends a player's crouch in, so it
+/// fits 4 bits.
+pub const CROUCH_LEVEL_COUNT: u8 = 15;
+
+/// `get_crouched_height_frac` gives how tall a player `crouch_frac` of the way down a crouch is, as
+/// a share of standing: their eye height's share, from 1 standing to
+/// `movement.crouch_eye_height_frac` crouched. Other windows squash and place a crouched player's
+/// robot by it (W-137 (crouched robots sink)).
+///
+/// Example: `let height_frac: f64 = get_crouched_height_frac(1.0, &settings.movement);`
+pub fn get_crouched_height_frac(crouch_frac: f64, movement: &MovementSettings) -> f64 {
+    1.0 - crouch_frac * (1.0 - movement.crouch_eye_height_frac)
+}
+
+/// `encode_crouch_level` gives the step, 0 to `CROUCH_LEVEL_COUNT`, nearest a crouch share.
+///
+/// Example: `let level: u8 = encode_crouch_level(0.5);`
+pub fn encode_crouch_level(crouch_frac: f64) -> u8 {
+    (crouch_frac.clamp(0.0, 1.0) * f64::from(CROUCH_LEVEL_COUNT)).round() as u8
+}
+
+/// `decode_crouch_level` gives the crouch share of a step from `encode_crouch_level`.
+///
+/// Example: `let crouch_frac: f64 = decode_crouch_level(15);`
+pub fn decode_crouch_level(level: u8) -> f64 {
+    f64::from(level) / f64::from(CROUCH_LEVEL_COUNT)
+}
 
 /// `MoveState` is what the rules keep between steps: how far down a crouch is (0 standing, 1
 /// crouched), the sprint energy (0 to 1), whether the player sprints, the head bob's phase and
@@ -110,6 +139,8 @@ mod tests {
     //! | Crouch key | held (crouches over `crouch_s`, refills energy faster, slows to `crouch_speed_frac`), released (stands) | `crouching_takes_its_time_and_slows`, `sprint_drains_and_refills` |
     //! | Where | on the ground (the head bob steps), in the air or flying (no steps, no crouch slow when flying) | `bob_steps_only_on_the_ground` |
     //! | After a hit | slowed (for `slow_s`), not | `a_hit_slows_for_a_while` |
+    //! | Crouch share sent | 0, between steps, 1, out of range | `crouch_levels_round_trip` |
+    //! | Crouch share's height | standing (1), crouched (the eye's share) | `crouch_levels_round_trip` |
 
     use super::*;
     use serde::Deserialize;
@@ -329,5 +360,23 @@ mod tests {
             server.when_hit.slow_s,
         );
         assert_eq!((slow_frac, state.slowed_s), (1.0, 0.0));
+    }
+
+    #[test]
+    fn crouch_levels_round_trip() {
+        let (server, _) = read_settings();
+        assert_eq!(decode_crouch_level(encode_crouch_level(0.0)), 0.0);
+        assert_eq!(decode_crouch_level(encode_crouch_level(1.0)), 1.0);
+        assert_eq!(encode_crouch_level(1.5), CROUCH_LEVEL_COUNT);
+        let between_frac: f64 = 0.37;
+        assert!(
+            (decode_crouch_level(encode_crouch_level(between_frac)) - between_frac).abs()
+                <= 0.5 / f64::from(CROUCH_LEVEL_COUNT)
+        );
+        assert_eq!(get_crouched_height_frac(0.0, &server.movement), 1.0);
+        assert_eq!(
+            get_crouched_height_frac(1.0, &server.movement),
+            server.movement.crouch_eye_height_frac
+        );
     }
 }
