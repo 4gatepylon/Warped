@@ -531,8 +531,8 @@ fn save_photo(
 }
 
 /// `VERTICAL_ROUTE` is `--play-route`'s loop from red's spawn: up a ladder to the treehouse, over
-/// the bridges, up the lookout, down and back.
-const VERTICAL_ROUTE: [Vec3; 17] = [
+/// the bridges, up the lookout, down, round a clump of trees and back.
+const VERTICAL_ROUTE: [Vec3; 20] = [
     Vec3::new(0.0, 0.0, 50.0),
     Vec3::new(11.0, 0.0, 49.5),
     Vec3::new(11.0, 7.0, 45.0),
@@ -548,6 +548,9 @@ const VERTICAL_ROUTE: [Vec3; 17] = [
     Vec3::new(1.0, 12.0, 3.5),
     Vec3::new(-3.8, 7.0, 3.5),
     Vec3::new(-4.0, 0.0, 9.0),
+    Vec3::new(-6.0, 0.0, 10.25),
+    Vec3::new(-7.0, 0.0, 13.0),
+    Vec3::new(-5.5, 0.0, 15.25),
     Vec3::new(0.0, 0.0, 30.0),
     Vec3::new(0.0, 0.0, 46.0),
 ];
