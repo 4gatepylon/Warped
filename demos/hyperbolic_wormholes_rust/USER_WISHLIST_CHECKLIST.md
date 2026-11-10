@@ -139,6 +139,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-163 Aim through a scope.** The user, 2026-11-09: "being able to aim through a scope for both rifles". Today aiming zooms the view (2.5x sniper, 1.5x rifle) without a scope picture.
 - [ ] **W-164 More weapons.** The user, 2026-11-09: "adding more weapons". Today there are two guns, the sniper and the rifle.
 - [ ] **W-165 Money to buy wormholes.** The user, 2026-11-09: "money mechanics that allow you buy wormholes". Today each player has two thrown wormholes (Q) for free.
+- [ ] **W-166 Clear rules for destroying thrown wormholes.** The user, 2026-11-09: "generally understanding and determinising the user wormhole destruction mechanics (Can be they be destroyed after placement?) and how to do it right so taht the wormhole doesn't have wierd non-determinism about whether it bends bullets or is killed by them". Today (Lunar's rules, also in Dark Forest since #479) a shot through an enemy pair's throat damages it (2 sniper or 5 rifle hits break it) while the shot is also carried through, and a shot at a lone mouth's ball destroys it at once; first step: write down exactly when a shot bends, damages or both, on server and window, and make it the same every time.
 
 ## Pending user review
 
