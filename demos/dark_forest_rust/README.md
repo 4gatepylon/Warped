@@ -66,7 +66,8 @@ health bar (a segment per rifle hit to the body), the gun's ammo bar (the sniper
 rifle's heat in 20 segments, red once it overheats) and the sprint energy bar (sprinting empties it in 7.5 s),
 with glows that run along a bar while it changes; Lunar's crosshair; the console bar below the middle while `E` is
 held on an enemy console; red, blurred edges and a shake when you take any damage; and "YOU DIED" with the respawn
-countdown.
+countdown and a bar filling over the wait: 20 s, 10 s more for every 5 minutes into the level (online the server's
+wait, alone the same rule on the session's clock; W-142 (growing respawn time)).
 
 ## The level
 
@@ -74,6 +75,11 @@ countdown.
   `src/forest_layout.rs` (`make export-map`, compact JSON, 8.6 MB) and read by both the game and the server. It is
   60 m by 112 m, fenced by rock walls. Red's base is at +z and blue's is red's turned half a turn about the centre, so
   the two sides are the same.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): every wormhole mouth, the map's
+  gates and the linked thrown ones, pulls the player's middle along the ground (`Warps::get_walk_pull_m_per_s`, set as
+  `Player::pull_m_per_s` before each `update`, added to the walk off ladders): faster toward a mouth, slower away, a
+  slow drift standing still, stopping at the throat. The offline bots add the same pull to their walk.
 - **Bamboo labyrinth:** `add_labyrinth` carves red's half into a seeded maze of 4 m cells (a winding depth-first tree
   plus about 12% extra openings for loops, so there are dead ends and loops), grows a wall of bamboo clumps on every
   closed side where nothing else stands, and mirrors it onto blue's half. Corridors are about 1.5-3 m wide. The seed

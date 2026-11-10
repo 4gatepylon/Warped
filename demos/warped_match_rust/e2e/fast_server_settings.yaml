@@ -67,8 +67,12 @@ consoles:
   hold_to_disable_s: 1.0  # Shortened for the end-to-end bot match (e2e/README in the demo README).
   reach_m: 3.0  # How close a player must be to a console to turn it off.
 
-respawn:
-  delay_s: 3.0  # Seconds a player who was hit waits before coming back (0 for at once).
+respawn:  # How long a player who was hit waits before coming back: start_s, plus step_s for every period_s
+  # since the level (its round) started (W-142 (growing respawn time)). A file with only delay_s still loads, as
+  # a flat wait.
+  start_s: 3.0  # Seconds of waiting when the level starts (0 for at once).
+  step_s: 1.0  # Seconds more for every period_s the level has gone on (0 for a flat wait).
+  period_s: 20.0  # Seconds between steps (above 0).
 
 shooting:  # The game master's switches for shots (true or false). A file without this section plays as below.
   can_shoot_while_jumping: false  # Whether a jump lets a player shoot; if not, shots wait movement.shoot_after_moving_s after it.

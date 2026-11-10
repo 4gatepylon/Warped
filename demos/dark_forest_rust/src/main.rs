@@ -32,7 +32,7 @@ mod text_overlay;
 mod thrown_wormholes;
 mod title;
 
-use warped_shared::hud::get_death_lines;
+use warped_shared::hud::{get_death_lines, make_respawn_bar_rects};
 use warped_shared::menu_and_map::{Cover, MenuAndMap};
 use warped_shared::shot_noise;
 
@@ -1464,6 +1464,11 @@ fn main() {
                 },
             };
             menu_picture.draw(&open_menu.get_lines(&menu_settings, scoreboard), false);
+            if let (menu::Page::Scores, Some((team, lines))) =
+                (open_menu.get_page(), menu::get_own_team_lines(scoreboard))
+            {
+                menu_picture.draw_team_box(team, lines);
+            }
             frame.hud_rects.push(HudRect {
                 x_px: 0.0,
                 y_px: 0.0,
@@ -1501,10 +1506,13 @@ fn main() {
             hud_images.push(minimap.get_minimap_image(window_width_px, window_height_px));
         }
         if !menu_and_map.is_menu_open()
-            && let Some(respawn_in_s) = session
-                .player
-                .get_respawn_in_s(session.settings.respawn.delay_s as f32)
+            && let Some(respawn_wait_s) = session.respawn_wait_s
+            && let Some(respawn_in_s) = session.player.get_respawn_in_s(respawn_wait_s)
         {
+            frame.overlay_rects.extend(make_respawn_bar_rects(
+                f64::from(respawn_in_s),
+                f64::from(respawn_wait_s),
+            ));
             death_picture.draw(
                 &{
                     let [title, countdown] = get_death_lines(f64::from(respawn_in_s));

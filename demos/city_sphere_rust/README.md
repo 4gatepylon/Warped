@@ -53,7 +53,9 @@ switches gun, hold `E` aiming at the other team's console within reach to turn i
 middle), `Esc` opens the menu and frees the mouse (`Q`/`E` change page: scores, settings, map, credits, quit; `Esc` again
 closes it), holding `Tab` shows the whole map over the game while you keep playing, `-` and `=` lower and raise the render resolution. The HUD has Lunar's health,
 ammo and energy bars with their pulses, and Lunar's hit effects (red, blur and shake from the edges) whenever health
-drops; an eliminated player sees "YOU DIED" and a countdown and comes back at a spawn after `respawn.delay_s` (3 s).
+drops; an eliminated player sees "YOU DIED", a countdown and a bar filling over the wait, and comes back at a spawn
+after the server's growing respawn wait (`respawn`: 20 s, 10 s more every 5 minutes into the level; W-142 (growing
+respawn time)).
 The minimap (top right, placed by the player settings' `minimap`) shows the sphere seen from its centre around you, the
 way you face up, with straight Cartesian grid lines every 5 m: buildings, covers, each team's stairs in its colour,
 lifts and holes, consoles in team colours (grey when off), other players and shots in team colours, and you as the
@@ -82,6 +84,11 @@ laser. `make play-route ROUTE=wormholes` throws both mouths, shoots and walks th
   types, the maps' models and the robot body, the smooth shapes, the key bindings, finding assets) are in
   [`../warped_shared_rust/`](../warped_shared_rust/README.md), a library this crate depends on; the rest of the
   copied Lunar Surface code is still in `src/`.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): City Sphere has no warps of its
+  own, so only linked thrown mouths pull: `CityWorld::move_player` adds their pull along the sphere's ground, measured
+  from the body's middle, to the walk (faster toward a mouth, slower away, a slow drift standing still); the window
+  and the bots pass every linked pair in the game. Voxel maps played here pull as Lunar Surface does.
 - **World** (`src/city_world.rs`): reads the map (boxes as oriented boxes, the street sphere, the glass and core
   shells, the lift holes, spawns, consoles in the server's order). A player is feet, body axes (up toward the centre)
   and head pitch; each step turns the body the least way to keep up toward the centre, walks along the ground,

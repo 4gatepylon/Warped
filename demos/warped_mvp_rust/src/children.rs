@@ -24,7 +24,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use warped_shared::app_bundle::get_app_resources_folder;
+use warped_shared::app_bundle::{get_app_logs_folder, get_app_resources_folder};
 use warped_shared::match_protocol::stop_child;
 use warped_shared::match_state::Team;
 
@@ -36,7 +36,6 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 pub const SIT_OUT_ROUND_COUNT: usize = 255;
 const MATCH_PROGRAM_IN_APP: &str = "warped-match";
 const CHECKOUT_MATCH_PROGRAM: &str = "../warped_match_rust/.build/release/hyperbolic-wormholes";
-const LOGS_HOME_PATH: &str = "Library/Logs/Warped";
 const CHECKOUT_ARTIFACTS_FOLDER: &str = ".artifacts";
 
 /// `GameKind` is the game the player starts from the main menu: hosted for others, alone, or
@@ -195,16 +194,14 @@ pub fn make_bot_command(programs: &Programs, server: SocketAddr, plan: &BotPlan)
 
 /// `make_run_folder` makes the folder of a run of `script` (`warped` for the children's logs,
 /// `screen_pictures`): in the checkout's `.artifacts/<script>/<run_id>/`, or in
-/// `~/Library/Logs/Warped/<run_id>/` when the app runs from `Warped.app`; it holds
-/// `command.txt` (the command line and the commit).
+/// `~/Library/Logs/Warped/<script>/<run_id>/` when the app runs from `Warped.app`; it holds
+/// `command.txt` (the command line and the commit, `app` inside the app).
 ///
 /// Example: `let folder = make_run_folder("warped", "20261109-120000")?;`
 pub fn make_run_folder(script: &str, run_id: &str) -> Result<PathBuf> {
-    let folder: PathBuf = match get_app_resources_folder() {
-        Some(_) => {
-            let home: String = std::env::var("HOME")?;
-            Path::new(&home).join(LOGS_HOME_PATH).join(run_id)
-        }
+    let app_logs: Option<PathBuf> = get_app_logs_folder();
+    let folder: PathBuf = match &app_logs {
+        Some(logs) => logs.join(script).join(run_id),
         None => Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(CHECKOUT_ARTIFACTS_FOLDER)
             .join(script)
@@ -212,12 +209,15 @@ pub fn make_run_folder(script: &str, run_id: &str) -> Result<PathBuf> {
     };
     fs::create_dir_all(&folder)
         .map_err(|error| format!("can't make {}: {error}", folder.display()))?;
-    let commit: String = Command::new("git")
-        .args(["describe", "--always", "--dirty"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_else(|error| format!("unknown ({error})"));
+    let commit: String = match app_logs {
+        Some(_) => "app".to_string(),
+        None => Command::new("git")
+            .args(["describe", "--always", "--dirty"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .unwrap_or_else(|error| format!("unknown ({error})")),
+    };
     let command: String = std::env::args().collect::<Vec<String>>().join(" ");
     fs::write(
         folder.join("command.txt"),

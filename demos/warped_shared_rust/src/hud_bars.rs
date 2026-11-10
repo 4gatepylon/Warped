@@ -316,7 +316,7 @@ pub fn make_progress_bar(
 /// `rgb`; carrying `pulse`.
 ///
 /// Example: `let rect = make_glass_rect([0.03, 0.87], [0.05, 0.886], rgb, true, NO_RECT_PULSE);`
-fn make_glass_rect(
+pub(crate) fn make_glass_rect(
     min_frac: [f32; 2],
     max_frac: [f32; 2],
     rgb: [f32; 3],

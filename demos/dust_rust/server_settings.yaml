@@ -10,6 +10,9 @@
 #     `make serve-game` or `make host-game` (`--server-settings`). Every key is required, unknown keys
 #     fail, and numbers must be above 0 unless their note says 0 is allowed. Each name ends in its
 #     unit: `_m` meters, `_s` seconds, `_rad` radians, `_per_s` per second.
+#     The `gravity` section (W-144: how black holes and wormhole mouths pull walkers) may be left
+#     out or give only some of its keys; the rest take the values every level shares, from
+#     `warped_shared`'s `GravitySettings`: `max_pull_per_walk_speed`, `full_pull_m`, `reach_m`.
 #
 # Example:
 #     cp server_settings.yaml fast.yaml  # edit fast.yaml, then:
@@ -67,8 +70,12 @@ consoles:
   hold_to_disable_s: 10.0  # Seconds of holding E that turn off one of the other team's consoles.
   reach_m: 3.0  # How close a player must be to a console to turn it off.
 
-respawn:
-  delay_s: 3.0  # Seconds a player who was hit waits before coming back (0 for at once).
+respawn:  # How long a player who was hit waits before coming back: start_s, plus step_s for every period_s
+  # since the level (its round) started (W-142 (growing respawn time)). A file with only delay_s still loads, as
+  # a flat wait.
+  start_s: 20.0  # Seconds of waiting when the level starts (0 for at once).
+  step_s: 10.0  # Seconds more for every period_s the level has gone on (0 for a flat wait).
+  period_s: 300.0  # Seconds between steps (above 0).
 
 shooting:  # The game master's switches for shots (true or false). A file without this section plays as below.
   can_shoot_while_jumping: false  # Whether a jump lets a player shoot; if not, shots wait movement.shoot_after_moving_s after it.

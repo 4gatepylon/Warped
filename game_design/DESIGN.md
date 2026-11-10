@@ -134,13 +134,25 @@ For example:
 
 ### Respawning
 
-A player who is eliminated sees their view darken with "YOU DIED" and a countdown, and comes back
-after the respawn time on a ring around their team's spawn, never on top of another player, with
-full health and energy. A player can't choose to respawn early.
+A player who is eliminated sees their view darken with "YOU DIED", a countdown and a bar that fills
+over the wait, and comes back after the respawn time on a ring around their team's spawn, never on
+top of another player, with full health and energy. A player can't choose to respawn early.
+
+The respawn time grows the longer a level goes on, so dying costs more later (W-142 (growing respawn
+time). In the user's words: "Respawns will happen on a cadence, and every n steps, it will increase in
+time linearly so that it takes longer to respawn as time progresses. This means that as time
+progresses, the stakes get basically higher to dying versus earlier on. The respawn rates should
+start at you being stuck dead for 20 seconds, and they should go up linearly every five minutes by 10
+seconds on a given level in the map." A player eliminated `t` seconds after the level (its round)
+started waits `start_s + step_s × floor(t / period_s)`; the level's server decides the wait and sends
+it with the elimination, so the countdown and bar show the server's wait. A new game on the level
+starts the clock again.
 
 | Parameter | Value |
 | --- | --- |
-| Respawn time | 3 s (`respawn.delay_s`) |
+| Respawn time at the level's start | 20 s (`respawn.start_s`) |
+| Added every period | 10 s (`respawn.step_s`) |
+| Period | 5 minutes (`respawn.period_s`) |
 
 ## Levels
 
@@ -299,6 +311,32 @@ which has nothing to do with the guns' heat.
 | Time to refill from empty while crouched | 7.5 s |
 | Time to refill from empty while walking or standing | 15 s |
 | Energy at spawn | Full |
+
+### Gravity toward warps
+
+Black holes and wormhole mouths pull players along the ground, in every level (W-144): the
+level's own warps, and the thrown mouths once linked. Each adds a speed toward itself to the
+player's walk, so running toward one is faster, running away slower, and a player standing still
+drifts toward it. The pull is relatively weak but noticeable: strongest near the warp, falling off
+with distance, and never stopping a player who walks away.
+
+- The pull points at the warp along the ground; a warp overhead (Lunar Surface's black hole, Snow
+  Planet's) pulls by the part of its direction along the ground, so a player drifts to stand
+  under it.
+- A mouth's pull fades to nothing at its throat, so a player drifting in stops at the mouth
+  rather than being pulled through it; walking in still goes through.
+- All warps' pulls together are capped at the strongest pull. It is a share of walking speed, so
+  it scales with each level's walking speed: more than crouching speed (crouching away from a
+  warp that close is pulled in), less than walking speed.
+- The game server's settings hold it (`gravity` in `server_settings.yaml`, the same built-in
+  values in every level when left out, which a level or the game master can change).
+
+| Parameter | Value |
+| --- | --- |
+| Strongest pull | 0.75 of walking speed (Lunar Surface: 7.5 m/s) (`gravity.max_pull_per_walk_speed`) |
+| Full pull | within 3 m of a black hole's horizon or a mouth's throat (`gravity.full_pull_m`) |
+| Falling off | as the square of the share of the way left to the reach |
+| Reach | 24 m out from the horizon or throat (`gravity.reach_m`) |
 
 ### Map edge
 
@@ -499,8 +537,6 @@ time to kill.
 ## Open questions
 
 - **Consoles:** whether a hit that doesn't eliminate the player interrupts a deactivation.
-- **Respawning:** whether the respawn time should grow as a round goes on. An earlier design had
-  20 s at the start of a round plus 10 s every 5 minutes.
 - **Sprinting:** whether a kill should refill the killer's energy, as an earlier design had.
 - **Hyperbolic levels:** the topology of Dust.
 - **Warp objects:** how many black holes and wormholes each level but Lunar Surface has, and where.

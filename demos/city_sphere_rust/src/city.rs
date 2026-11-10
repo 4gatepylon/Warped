@@ -31,7 +31,8 @@ use super::{
 };
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
-    HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
+    HudBars, HudPulses, PylonSquare, get_death_lines, get_lobby_lines, make_bar_rects,
+    make_hit_effect, make_pylon_square_rects, make_respawn_bar_rects,
 };
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
 use warped_shared::shot_gate::ShotMoves;
@@ -41,12 +42,12 @@ use warped_shared::weapons::{Weapons, take_hit_weight};
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::city_world::{
-    CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,
-    get_up,
+    CityInput, CityPlayer, CityWorld, Console, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M,
+    Target, get_up,
 };
 use crate::city_wormholes::{
     MOUTH_RADIUS_M, can_place_mouth, carry_through, find_crossing, fly_city_throw, get_mouth_frame,
-    land_city_mouth,
+    land_city_mouth, make_mouth_warps,
 };
 use crate::dust::{DustBurst, MAX_DUST_BURST_COUNT};
 use crate::key_bindings::{self, Action, KeyBindings};
@@ -203,7 +204,7 @@ pub fn run(arguments: &Arguments) -> Result<()> {
 /// `step_respawn` counts an eliminated player's `respawn_in_s` down by `dt_s` and asks the server
 /// to rejoin once it runs out; with no countdown running it keeps asking to join until welcomed
 /// (`net::Client::keep_joining`). A player waiting to respawn never asks, so they come back only
-/// after the settings' `respawn.delay_s`, as on Lunar Surface.
+/// after the server's respawn wait (the one their elimination carries), as on Lunar Surface.
 ///
 /// Example: `step_respawn(&mut client, &mut respawn_in_s, dt_s)?;`
 fn step_respawn(client: &mut net::Client, respawn_in_s: &mut Option<f64>, dt_s: f64) -> Result<()> {
@@ -1042,6 +1043,7 @@ struct CitySession {
     player: CityPlayer,
     is_spawned: bool,
     respawn_in_s: Option<f64>,
+    respawn_wait_s: f64,
     spawn_count: usize,
     shots: Vec<LiveShot>,
     weapons: Weapons,
@@ -1139,6 +1141,7 @@ impl CitySession {
             player,
             is_spawned: false,
             respawn_in_s: None,
+            respawn_wait_s: 0.0,
             spawn_count: 0,
             shots: Vec::new(),
             weapons,
@@ -1417,6 +1420,7 @@ impl CitySession {
                     victim_id,
                     shooter_id,
                     is_self,
+                    respawn_wait_s,
                 } => {
                     if !is_self && Some(shooter_id) == self.client.id {
                         self.rifle_log
@@ -1426,7 +1430,8 @@ impl CitySession {
                     }
                     if is_self {
                         self.is_spawned = false;
-                        self.respawn_in_s = Some(self.settings.respawn.delay_s);
+                        self.respawn_in_s = Some(respawn_wait_s);
+                        self.respawn_wait_s = respawn_wait_s;
                         self.disabling = None;
                         self.thrown.clear();
                     }
@@ -1492,6 +1497,20 @@ impl CitySession {
         self.update_wormholes(now_s);
         if self.is_spawned {
             let before: DVec3 = self.player.feet;
+            let pairs: Vec<[MouthPlace; 2]> = self
+                .thrown
+                .placed
+                .get_pair()
+                .into_iter()
+                .chain(
+                    self.client
+                        .players
+                        .iter()
+                        .filter(|p| Some(p.id) != self.client.id)
+                        .filter_map(|p| p.wormholes.get_pair()),
+                )
+                .collect();
+            self.world.mouths = make_mouth_warps(&pairs);
             self.world.move_player(
                 &mut self.player,
                 &input,
@@ -1682,6 +1701,22 @@ impl CitySession {
             &self.settings.rifle,
             &self.hud_pulses,
         )
+    }
+
+    /// `get_pylon_square_rects` gives the row of squares at the top centre of a window of
+    /// `window_px`, one per console, dark once off, with a box around this player's team's
+    /// (`make_pylon_square_rects`; W-146, pylon squares and own-team box).
+    fn get_pylon_square_rects(&self, window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> {
+        let mut consoles: Vec<&Console> = self.world.consoles.iter().collect();
+        consoles.sort_by_key(|console| console.index);
+        let pylons: Vec<PylonSquare> = consoles
+            .iter()
+            .map(|console| PylonSquare {
+                team: console.team,
+                is_off: self.client.game.off_mask >> console.index & 1 == 1,
+            })
+            .collect();
+        make_pylon_square_rects(&pylons, self.client.team, window_px)
     }
 
     /// `get_mouth_pairs` gives every linked pair of wormhole mouths in the game, this player's and
@@ -2309,6 +2344,13 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         };
         if session.is_spawned && !session.menu_and_map.is_menu_open() {
             rects.extend(session.get_bar_rects());
+            rects.extend(session.get_pylon_square_rects(window_px));
+        }
+        if session.menu_and_map.get_cover() == Cover::Nothing
+            && let Some(left_s) = session.respawn_in_s
+            && session.get_banner_lines() == Some(get_death_lines(left_s))
+        {
+            rects.extend(make_respawn_bar_rects(left_s, session.respawn_wait_s));
         }
         let minimap = (session.is_spawned
             && session.menu_and_map.get_cover() == Cover::Nothing
@@ -2555,12 +2597,16 @@ fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
     };
     let mut lines: Vec<(String, bool)> =
         menu.get_lines(&session.player_settings, &save_path, scoreboard);
-    let picture: Option<Picture> = if menu.get_page() == menu::Page::Map {
-        lines.truncate(1);
-        lines.push((CITY_MAP_LEGEND.to_string(), false));
-        Some(make_map_picture(session))
-    } else {
-        None
+    let picture: Option<Picture> = match menu.get_page() {
+        menu::Page::Map => {
+            lines.truncate(1);
+            lines.push((CITY_MAP_LEGEND.to_string(), false));
+            Some(make_map_picture(session))
+        }
+        menu::Page::Scores => {
+            menu::get_own_team_lines(scoreboard).map(super::make_team_box_picture)
+        }
+        _ => None,
     };
     Some(OverlayText {
         lines,
@@ -3491,7 +3537,7 @@ fn find_bot_aim(
 /// (`make_console_route`); if it can't aim at the console for `CONSOLE_REPLAN_S` (it fell off the
 /// glass level, say), it starts the walk again from its stairs.
 fn run_bot(arguments: &Arguments) -> Result<()> {
-    let world: CityWorld = CityWorld::Builtin()?;
+    let mut world: CityWorld = CityWorld::Builtin()?;
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         MAP_NAME,
@@ -3536,10 +3582,14 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                     is_spawned = true;
                     brain.restart();
                 }
-                net::NetEvent::Eliminated { is_self: true, .. } => {
+                net::NetEvent::Eliminated {
+                    is_self: true,
+                    respawn_wait_s,
+                    ..
+                } => {
                     is_spawned = false;
                     eliminated_count += 1;
-                    respawn_in_s = Some(settings.respawn.delay_s);
+                    respawn_in_s = Some(respawn_wait_s);
                 }
                 net::NetEvent::Eliminated { .. } => {}
             }
@@ -3556,6 +3606,12 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
             continue;
         }
         weapons.tick(dt_s);
+        let pairs: Vec<[MouthPlace; 2]> = client
+            .players
+            .iter()
+            .filter_map(|p| p.wormholes.get_pair())
+            .collect();
+        world.mouths = make_mouth_warps(&pairs);
         let mut disabling: Option<u8> = None;
         if arguments.bot_objective == Some(BotObjective::Consoles) {
             if brain.is_done() {
@@ -4192,13 +4248,13 @@ mod tests {
 
     /// `an_eliminated_player_respawns_only_after_the_delay` plays an elimination on a real server:
     /// the victim's window keeps polling and stepping its countdown, and must be welcomed back
-    /// only once `respawn.delay_s` has passed (W-119 (City Sphere demo): they came back at once,
+    /// only once the respawn wait (`respawn.start_s` here) has passed (W-119 (City Sphere demo): they came back at once,
     /// after one 0.5 s join retry), and then at a spawn of their team.
     #[test]
     fn an_eliminated_player_respawns_only_after_the_delay() {
         let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
         let mut settings: ServerSettings = ServerSettings::Builtin();
-        settings.respawn.delay_s = TEST_RESPAWN_DELAY_S;
+        (settings.respawn.start_s, settings.respawn.step_s) = (TEST_RESPAWN_DELAY_S, 0.0);
         let socket: std::net::UdpSocket =
             std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port");
         socket

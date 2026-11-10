@@ -41,7 +41,9 @@ use crate::settings::{HIT_EFFECTS, ServerSettings};
 use crate::shot_noise::ShotNoise;
 use warped_shared::avatar_model::AvatarClip;
 use warped_shared::health::fade_effect_frac;
-use warped_shared::hud::{AmmoBar, HudBars, HudPulses, make_hit_effect};
+use warped_shared::hud::{
+    AmmoBar, HudBars, HudPulses, PylonSquare, make_hit_effect, make_pylon_square_rects,
+};
 use warped_shared::movement::get_crouched_height_frac;
 use warped_shared::shot_gate::ShotMoves;
 use warped_shared::third_person::{ThirdPersonCamera, ViewSwitch, place_camera_flat};
@@ -215,7 +217,9 @@ fn get_flicker_scale(time_s: f32, index: usize, flicker_frac: f32) -> f32 {
     1.0 - flicker_frac * (0.5 + 0.5 * wave)
 }
 
-/// `Session` is one match.
+/// `Session` is one match. While the player is dead, `respawn_wait_s` is how long they wait in all:
+/// online the server's wait (`match_play.rs`), alone the settings' rule at `time_s` when they died
+/// (`RespawnSettings::get_wait_s`).
 pub struct Session {
     pub arena: Arena,
     pub nav: NavGraph,
@@ -229,6 +233,7 @@ pub struct Session {
     pub shot_eye: Mat4,
     pub kill_count: u32,
     pub death_count: u32,
+    pub respawn_wait_s: Option<f32>,
     pub time_s: f32,
     pub is_autopilot: bool,
     pub show_frame_ms: Option<f32>,
@@ -389,6 +394,7 @@ impl Session {
             shot_eye: Mat4::IDENTITY,
             kill_count: 0,
             death_count: 0,
+            respawn_wait_s: None,
             time_s: 0.0,
             is_autopilot,
             show_frame_ms: None,
@@ -488,6 +494,7 @@ impl Session {
             .map_or(0.0, |(_, yaw)| *yaw);
         self.spawn_counter += 1;
         self.player = Player::new(spawn_m, yaw_rad);
+        self.respawn_wait_s = None;
     }
 
     /// `random_signed` returns a pseudo-random number in [-1, 1].
@@ -1293,6 +1300,11 @@ impl Session {
         if !self.is_autopilot {
             player_input.look_delta_rad /= self.weapons.get_zoom(&self.settings.aim) as f32;
         }
+        self.player.pull_m_per_s = self.warps.get_walk_pull_m_per_s(
+            &self.settings.gravity,
+            self.movement.walk_m_per_s,
+            self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M,
+        );
         self.player.update(
             &player_input,
             &self.movement,
@@ -1369,16 +1381,27 @@ impl Session {
         self.was_firing = is_firing;
         self.is_flashlight_on = controls.is_flashlight_held && self.player.is_alive();
         self.is_trigger_down = is_firing;
-        if self
-            .player
-            .should_respawn(self.settings.respawn.delay_s as f32)
+        if !self.player.is_alive() && self.respawn_wait_s.is_none() {
+            let wait_s: f64 = self.settings.respawn.get_wait_s(f64::from(self.time_s));
+            self.respawn_wait_s = Some(wait_s as f32);
+        }
+        if let Some(wait_s) = self.respawn_wait_s
+            && self.player.should_respawn(wait_s)
         {
             self.death_count += 1;
             self.respawn_player();
         }
 
+        let get_warp_pull_m_per_s = |centre_m: Vec3| -> Vec3 {
+            self.warps.get_walk_pull_m_per_s(
+                &self.settings.gravity,
+                self.movement.walk_m_per_s,
+                centre_m,
+            )
+        };
         let context: BotContext = BotContext {
             solids: &scene.solids,
+            get_warp_pull_m_per_s: &get_warp_pull_m_per_s,
             nav: &self.nav,
             ladders: &self.arena.ladders,
             player_eye_m: self.player.eye_position_m(),
@@ -1706,8 +1729,25 @@ impl Session {
         }
     }
 
-    /// `objective_hud` draws the consoles (lit while on, in their team's colour) and the winner's
-    /// banner; the progress of holding `E` on a console is an overlay bar (`hud::build_overlay_rects`).
+    /// `get_pylon_square_rects` gives the row of squares at the top centre of a window of
+    /// `window_px`, one per console, dark once off, with a box around this player's team's once
+    /// it is known (`make_pylon_square_rects`, every level's; W-146, pylon squares and own-team
+    /// box).
+    fn get_pylon_square_rects(&self, window_px: (u32, u32)) -> Vec<OverlayRect> {
+        let pylons: Vec<PylonSquare> = (self.arena.consoles.iter())
+            .enumerate()
+            .map(|(index, console)| PylonSquare {
+                team: console.team,
+                is_off: self.console_off.get(index).copied().unwrap_or(false),
+            })
+            .collect();
+        let own_team: Option<u32> = self.is_team_known.then_some(self.team);
+        make_pylon_square_rects(&pylons, own_team, window_px)
+    }
+
+    /// `objective_hud` draws the winner's banner; the consoles are overlay squares
+    /// (`get_pylon_square_rects`) and the progress of holding `E` on a console an overlay bar
+    /// (`hud::build_overlay_rects`).
     fn objective_hud(&self, width_px: f32, height_px: f32) -> Vec<HudRect> {
         let scale: f32 = height_px / 1080.0;
         let mut rects: Vec<HudRect> = Vec::new();
@@ -1715,33 +1755,6 @@ impl Session {
             Vec4::new(0.2, 0.45, 1.0, 0.95),
             Vec4::new(1.0, 0.25, 0.15, 0.95),
         ];
-        let pip_px: f32 = 34.0 * scale;
-        let gap_px: f32 = 14.0 * scale;
-        let count: usize = self.arena.consoles.len();
-        let total_px: f32 = count as f32 * pip_px + count.saturating_sub(1) as f32 * gap_px;
-        for (index, console) in self.arena.consoles.iter().enumerate() {
-            let x_px: f32 = (width_px - total_px) * 0.5 + index as f32 * (pip_px + gap_px);
-            let is_off: bool = self.console_off.get(index).copied().unwrap_or(false);
-            rects.push(HudRect {
-                x_px: x_px - 3.0 * scale,
-                y_px: 24.0 * scale - 3.0 * scale,
-                width_px: pip_px + 6.0 * scale,
-                height_px: pip_px + 6.0 * scale,
-                color_rgba: Vec4::new(0.0, 0.0, 0.0, 0.5),
-            });
-            let color: Vec4 = colors[console.team as usize % 2];
-            rects.push(HudRect {
-                x_px,
-                y_px: 24.0 * scale,
-                width_px: pip_px,
-                height_px: pip_px,
-                color_rgba: if is_off {
-                    color * Vec4::new(0.2, 0.2, 0.2, 0.8)
-                } else {
-                    color
-                },
-            });
-        }
         if let Some(winner) = self.winner {
             rects.push(HudRect {
                 x_px: 0.0,
@@ -2021,7 +2034,7 @@ impl Session {
             height_px,
         );
         hud_rects.extend(self.objective_hud(width_px, height_px));
-        let overlay_rects: Vec<OverlayRect> = build_overlay_rects(
+        let mut overlay_rects: Vec<OverlayRect> = build_overlay_rects(
             &self.get_hud_bars(),
             &self.get_ammo_bar(),
             &self.settings.rifle,
@@ -2029,6 +2042,7 @@ impl Session {
             self.is_view_covered,
             (width_px as u32, height_px as u32),
         );
+        overlay_rects.extend(self.get_pylon_square_rects((width_px as u32, height_px as u32)));
         let lens_particles: Vec<Particle> = world_particles[..robot_particle_count]
             .iter()
             .chain(&world_particles[beacon_particle_end..])
