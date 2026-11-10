@@ -41,7 +41,9 @@ use crate::settings::{HIT_EFFECTS, ServerSettings};
 use crate::shot_noise::ShotNoise;
 use warped_shared::avatar_model::AvatarClip;
 use warped_shared::health::fade_effect_frac;
-use warped_shared::hud::{AmmoBar, HudBars, HudPulses, make_hit_effect};
+use warped_shared::hud::{
+    AmmoBar, HudBars, HudPulses, PylonSquare, make_hit_effect, make_pylon_square_rects,
+};
 use warped_shared::movement::get_crouched_height_frac;
 use warped_shared::third_person::{ThirdPersonCamera, ViewSwitch, place_camera_flat};
 use warped_shared::weapons::take_hit_weight;
@@ -1719,8 +1721,25 @@ impl Session {
         }
     }
 
-    /// `objective_hud` draws the consoles (lit while on, in their team's colour) and the winner's
-    /// banner; the progress of holding `E` on a console is an overlay bar (`hud::build_overlay_rects`).
+    /// `get_pylon_square_rects` gives the row of squares at the top centre of a window of
+    /// `window_px`, one per console, dark once off, with a box around this player's team's once
+    /// it is known (`make_pylon_square_rects`, every level's; W-146, pylon squares and own-team
+    /// box).
+    fn get_pylon_square_rects(&self, window_px: (u32, u32)) -> Vec<OverlayRect> {
+        let pylons: Vec<PylonSquare> = (self.arena.consoles.iter())
+            .enumerate()
+            .map(|(index, console)| PylonSquare {
+                team: console.team,
+                is_off: self.console_off.get(index).copied().unwrap_or(false),
+            })
+            .collect();
+        let own_team: Option<u32> = self.is_team_known.then_some(self.team);
+        make_pylon_square_rects(&pylons, own_team, window_px)
+    }
+
+    /// `objective_hud` draws the winner's banner; the consoles are overlay squares
+    /// (`get_pylon_square_rects`) and the progress of holding `E` on a console an overlay bar
+    /// (`hud::build_overlay_rects`).
     fn objective_hud(&self, width_px: f32, height_px: f32) -> Vec<HudRect> {
         let scale: f32 = height_px / 1080.0;
         let mut rects: Vec<HudRect> = Vec::new();
@@ -1728,33 +1747,6 @@ impl Session {
             Vec4::new(0.2, 0.45, 1.0, 0.95),
             Vec4::new(1.0, 0.25, 0.15, 0.95),
         ];
-        let pip_px: f32 = 34.0 * scale;
-        let gap_px: f32 = 14.0 * scale;
-        let count: usize = self.arena.consoles.len();
-        let total_px: f32 = count as f32 * pip_px + count.saturating_sub(1) as f32 * gap_px;
-        for (index, console) in self.arena.consoles.iter().enumerate() {
-            let x_px: f32 = (width_px - total_px) * 0.5 + index as f32 * (pip_px + gap_px);
-            let is_off: bool = self.console_off.get(index).copied().unwrap_or(false);
-            rects.push(HudRect {
-                x_px: x_px - 3.0 * scale,
-                y_px: 24.0 * scale - 3.0 * scale,
-                width_px: pip_px + 6.0 * scale,
-                height_px: pip_px + 6.0 * scale,
-                color_rgba: Vec4::new(0.0, 0.0, 0.0, 0.5),
-            });
-            let color: Vec4 = colors[console.team as usize % 2];
-            rects.push(HudRect {
-                x_px,
-                y_px: 24.0 * scale,
-                width_px: pip_px,
-                height_px: pip_px,
-                color_rgba: if is_off {
-                    color * Vec4::new(0.2, 0.2, 0.2, 0.8)
-                } else {
-                    color
-                },
-            });
-        }
         if let Some(winner) = self.winner {
             rects.push(HudRect {
                 x_px: 0.0,
@@ -2034,7 +2026,7 @@ impl Session {
             height_px,
         );
         hud_rects.extend(self.objective_hud(width_px, height_px));
-        let overlay_rects: Vec<OverlayRect> = build_overlay_rects(
+        let mut overlay_rects: Vec<OverlayRect> = build_overlay_rects(
             &self.get_hud_bars(),
             &self.get_ammo_bar(),
             &self.settings.rifle,
@@ -2042,6 +2034,7 @@ impl Session {
             self.is_view_covered,
             (width_px as u32, height_px as u32),
         );
+        overlay_rects.extend(self.get_pylon_square_rects((width_px as u32, height_px as u32)));
         let lens_particles: Vec<Particle> = world_particles[..robot_particle_count]
             .iter()
             .chain(&world_particles[beacon_particle_end..])
