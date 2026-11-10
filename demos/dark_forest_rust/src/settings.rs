@@ -301,6 +301,8 @@ mod tests {
         let movement: MovementSettings = MovementSettings {
             walk_speed_per_map_speed: lunar("walk_speed_per_map_speed"),
             sprint_speed_per_map_speed: lunar("sprint_speed_per_map_speed"),
+            sprint_up_m_per_s_per_s: 15.0,
+            sprint_down_m_per_s_per_s: 15.0,
             ..settings.movement.clone()
         };
         assert_matches_lunar(&movement, file_name, &["movement"]);

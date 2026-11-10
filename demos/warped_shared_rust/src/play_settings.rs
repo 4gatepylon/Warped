@@ -24,22 +24,35 @@
 use serde::{Deserialize, Serialize};
 
 const OLD_FILE_PERIOD_S: f64 = 300.0;
+const BUILTIN_SPRINT_RAMP_M_PER_S_PER_S: f64 = 15.0;
 
 /// `MovementSettings` is walking and sprinting speed as multiples of the map's, a jump's height and
 /// time in the air as a fraction of the map's jump (gravity follows from the two), and crouching:
 /// its speed and eye height as fractions of walking's, and how long it takes to crouch or stand;
-/// and how long after the last movement key a player can shoot.
+/// how long after the last movement key a player can shoot; and how fast the legs' speed rises
+/// from walking to the sprint's top speed while sprinting and falls back when not (W-202, pull
+/// toward wormholes and black holes in the game settings; 15 m/s² each in a file without them).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct MovementSettings {
     pub walk_speed_per_map_speed: f64,
     pub sprint_speed_per_map_speed: f64,
+    #[serde(default = "get_builtin_sprint_ramp_m_per_s_per_s")]
+    pub sprint_up_m_per_s_per_s: f64,
+    #[serde(default = "get_builtin_sprint_ramp_m_per_s_per_s")]
+    pub sprint_down_m_per_s_per_s: f64,
     pub jump_height_m: f64,
     pub jump_time_per_map_jump_time: f64,
     pub crouch_speed_frac: f64,
     pub crouch_eye_height_frac: f64,
     pub crouch_s: f64,
     pub shoot_after_moving_s: f64,
+}
+
+/// `get_builtin_sprint_ramp_m_per_s_per_s` is `MovementSettings`' sprint ramps for a file without
+/// them.
+fn get_builtin_sprint_ramp_m_per_s_per_s() -> f64 {
+    BUILTIN_SPRINT_RAMP_M_PER_S_PER_S
 }
 
 /// `SprintEnergySettings` is how long a full sprint bar lasts, and how long an empty one takes to
@@ -355,6 +368,12 @@ pub const MAX_PULL_PER_WALK_SPEED_EXCL: f64 = 1.0;
 const BUILTIN_MAX_PULL_PER_WALK_SPEED: f64 = 0.75;
 const BUILTIN_FULL_PULL_M: f64 = 3.0;
 const BUILTIN_PULL_REACH_M: f64 = 24.0;
+/// `BUILTIN_PULL_RADIUS_M`, `BUILTIN_PULL_M_PER_S_PER_S` and `BUILTIN_DRIFT_BRAKE_M_PER_S_PER_S` are
+/// the proposal of `demos/warp_pull_js/EQUATIONS.md`: 2.5 bodies of 2 m, and a pull that gives 9 m/s
+/// by a thrown mouth's throat.
+const BUILTIN_PULL_RADIUS_M: f64 = 5.0;
+const BUILTIN_PULL_M_PER_S_PER_S: f64 = 11.9;
+const BUILTIN_DRIFT_BRAKE_M_PER_S_PER_S: f64 = 15.0;
 
 /// `GravitySettings` is how black holes and wormhole mouths pull a player along the ground
 /// (W-144, `gravity.rs`): the strongest pull, as a share of walking speed that it adds toward the
@@ -368,6 +387,40 @@ pub struct GravitySettings {
     pub max_pull_per_walk_speed: f64,
     pub full_pull_m: f64,
     pub reach_m: f64,
+    /// `radius_m`, `acceleration_m_per_s_per_s`, `profile` and `brake_m_per_s_per_s` are the pull
+    /// as an acceleration (W-202, `pull_dynamics.rs`): how far from a warp's centre it reaches,
+    /// how strong it is, how it varies between the throat and the radius, and how fast the drift
+    /// it gave a player is braked outside every radius.
+    pub radius_m: f64,
+    pub acceleration_m_per_s_per_s: f64,
+    pub profile: PullProfile,
+    pub brake_m_per_s_per_s: f64,
+}
+
+/// `PullProfile` is how a warp's pull varies from its throat or horizon (0) out to the pull's
+/// radius (1): the same everywhere, strongest at the warp, or growing with the distance from it
+/// (a harmonic oscillator through a wormhole).
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PullProfile {
+    #[default]
+    Constant,
+    StrongerNearMouth,
+    Harmonic,
+}
+
+impl PullProfile {
+    /// `get_frac` gives the pull's share of full strength `edge_frac` of the way from the throat
+    /// or horizon (0) to the radius (1).
+    ///
+    /// Example: `assert_eq!(PullProfile::Harmonic.get_frac(0.25), 0.25);`
+    pub fn get_frac(self, edge_frac: f64) -> f64 {
+        match self {
+            PullProfile::Constant => 1.0,
+            PullProfile::StrongerNearMouth => 1.0 - edge_frac,
+            PullProfile::Harmonic => edge_frac,
+        }
+    }
 }
 
 impl Default for GravitySettings {
@@ -380,6 +433,10 @@ impl Default for GravitySettings {
             max_pull_per_walk_speed: BUILTIN_MAX_PULL_PER_WALK_SPEED,
             full_pull_m: BUILTIN_FULL_PULL_M,
             reach_m: BUILTIN_PULL_REACH_M,
+            radius_m: BUILTIN_PULL_RADIUS_M,
+            acceleration_m_per_s_per_s: BUILTIN_PULL_M_PER_S_PER_S,
+            profile: PullProfile::Constant,
+            brake_m_per_s_per_s: BUILTIN_DRIFT_BRAKE_M_PER_S_PER_S,
         }
     }
 }
@@ -398,6 +455,15 @@ impl GravitySettings {
                 "gravity needs 0 <= max_pull_per_walk_speed < {MAX_PULL_PER_WALK_SPEED_EXCL} and \
                  0 < full_pull_m < reach_m, not {}, {} and {}",
                 self.max_pull_per_walk_speed, self.full_pull_m, self.reach_m
+            ));
+        }
+        let is_pull_valid: bool = self.radius_m > 0.0
+            && self.acceleration_m_per_s_per_s >= 0.0
+            && self.brake_m_per_s_per_s >= 0.0;
+        if !is_pull_valid {
+            return Err(format!(
+                "gravity needs radius_m above 0 and acceleration_m_per_s_per_s and                  brake_m_per_s_per_s at least 0, not {}, {} and {}",
+                self.radius_m, self.acceleration_m_per_s_per_s, self.brake_m_per_s_per_s
             ));
         }
         Ok(())

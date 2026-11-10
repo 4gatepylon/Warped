@@ -535,6 +535,8 @@ mod tests {
         settings.movement = MovementSettings {
             walk_speed_per_map_speed: lunar("walk_speed_per_map_speed"),
             sprint_speed_per_map_speed: lunar("sprint_speed_per_map_speed"),
+            sprint_up_m_per_s_per_s: 15.0,
+            sprint_down_m_per_s_per_s: 15.0,
             jump_height_m: lunar("jump_height_m"),
             jump_time_per_map_jump_time: lunar("jump_time_per_map_jump_time"),
             crouch_speed_frac: lunar("crouch_speed_frac"),
