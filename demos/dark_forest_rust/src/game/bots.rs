@@ -111,13 +111,12 @@ pub struct Bot {
 }
 
 impl Bot {
-    /// `apply_warps` pulls the bot towards black holes, kills it inside a horizon and carries it
-    /// through a wormhole mouth it walks into.
+    /// `apply_warps` kills the bot inside a black hole's horizon and carries it through a
+    /// wormhole mouth it walks into (the warps' pull acts on players only).
     ///
-    /// Example: `bot.apply_warps(&arena.warps, dt_s);`
-    pub fn apply_warps(&mut self, warps: &Warps, dt_s: f32) {
+    /// Example: `bot.apply_warps(&arena.warps);`
+    pub fn apply_warps(&mut self, warps: &Warps) {
         let centre_m: Vec3 = self.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
-        self.velocity_m_s += warps.get_pull_m_per_s2(centre_m) * dt_s;
         if let Some((exit_m, turn)) = warps.get_mouth_exit_feet_m(self.feet_m, centre_m) {
             self.feet_m = exit_m;
             self.velocity_m_s = turn * self.velocity_m_s;

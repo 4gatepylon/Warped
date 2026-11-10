@@ -118,6 +118,9 @@ mod tests {
     const OFFSET_TOLERANCE_M: f64 = 0.02;
     const GAP_TOLERANCE_M: f64 = 0.01;
     const SPOT_TOLERANCE_M: f64 = 0.05;
+    /// `BENT_SPOT_TOLERANCE_M` is the tolerance where the black hole (lower and larger since W-202)
+    /// bends the shot.
+    const BENT_SPOT_TOLERANCE_M: f64 = 0.1;
     const MIN_PARALLAX_M: f64 = 0.5;
     const TINY_M: f64 = 1e-6;
     const FRAC_TOLERANCE: f64 = 1e-9;
@@ -271,13 +274,20 @@ mod tests {
     fn a_shot_lands_where_the_crosshair_points() {
         let world: VoxelWorld = load_lunar_surface();
         let spot = |shot: Shot| -> DVec4 { shot.spot.expect("the shot lands on the ground") };
-        for (what, at_m, toward_m, pitch_rad) in [
-            ("close ahead", OPEN_AT_M, OPEN_TOWARD_M, AIM_DOWN_RAD),
+        for (what, at_m, toward_m, pitch_rad, tolerance_m) in [
+            (
+                "close ahead",
+                OPEN_AT_M,
+                OPEN_TOWARD_M,
+                AIM_DOWN_RAD,
+                SPOT_TOLERANCE_M,
+            ),
             (
                 "in the black hole's reach",
                 HILL_AT_M,
                 HILL_TOWARD_M,
                 AIM_HILL_RAD,
+                BENT_SPOT_TOLERANCE_M,
             ),
         ] {
             let eye: DMat4 = VoxelPlayer::AtView(&world, at_m, toward_m, None, pitch_rad)
@@ -286,7 +296,7 @@ mod tests {
             let seen: DVec4 = spot(world.trace_laser(camera));
             let aimed: DVec4 = spot(world.trace_laser(aim_at_crosshair(&world, eye, camera)));
             let aimed_m: f64 = get_distance(aimed, seen) * world.r;
-            assert!(aimed_m < SPOT_TOLERANCE_M, "{what}: {aimed_m} m off");
+            assert!(aimed_m < tolerance_m, "{what}: {aimed_m} m off");
             let straight_m: f64 = get_distance(spot(world.trace_laser(eye)), seen) * world.r;
             assert!(
                 straight_m > MIN_PARALLAX_M,

@@ -219,7 +219,7 @@ The level as the Rust game builds it, from the map
   more than 45 m on red's side, and the middle zone, 90 m long, between them. Each team zone's edge
   is a faint see-through wall in the team's colour, 6 m high and 0.6 m thick, that stops neither
   players nor lasers.
-- A black hole hangs about 17 m above the middle of the level; its pull reaches 24 m. A player who falls into
+- A black hole hangs about 7.5 m above the middle of the level (it bends light out to 24 m; its pull reaches 10 m, so about 8 m around the spot under it on the ground). A player who falls into
   it goes back to their spawn.
 - Each console turned off, on either team's pylons, grows the black hole over 4 s, up to full strength with one
   console left. Its black part grows only a little (Schwarzschild radius 1.2 m to 2 m), while the area it distorts
@@ -315,8 +315,7 @@ which has nothing to do with the guns' heat.
 - Sprinting speeds up and slows down (W-202): while Shift is held with energy left, the legs' speed rises from
   walking speed to the sprint's top speed at 15 m/s² (`movement.sprint_up_m_per_s_per_s`); the moment Shift is let
   go or the energy runs out it falls back at 15 m/s² (`movement.sprint_down_m_per_s_per_s`). Walking itself starts
-  and stops at once. (Dust, Snow Planet, Lunar Surface and the match; City Sphere and Dark Forest still switch
-  speed at once.)
+  and stops at once, in every level.
 
 - Energy drains at a steady rate while a player sprints, and refills at a steady rate while they
   don't: as fast as it drains while crouched, and half as fast while walking or standing.
@@ -355,15 +354,13 @@ warp and be fine, but too close the pull wins and the player goes through.
   give only 0.75 of their speed, which still lets a sprinting player get away. Inside its minimum radius it pulls
   no further and holds players out, so nobody is pulled in. The view darkens as a player gets closer (W-168, fading
   out into a black hole): the edges go black and blur, reaching further in, and the whole picture dims, up to 0.85
-  dark at the minimum radius. Lunar Surface's black hole hangs 17 m up, so with these numbers its pull doesn't
-  reach the ground.
+  dark at the minimum radius. Lunar Surface's black hole was made 1.2 times bigger and lowered to 7.5 m (W-202), so
+  its pull and darkening reach the ground as Snow Planet's do; time under it runs as slowly as before the move.
 - The game server's settings hold it (`gravity` in `server_settings.yaml`), and the game master can change it.
-- The user approved the mouths' numbers below (2026-11-10); the black holes' are being tuned in the game
-  (`WARPED_TUNE_PULL=1` turns on keys that change them while playing, until the user approves them). The equations
-  are in `demos/warp_pull_js/EQUATIONS.md`.
-- Dust, Snow Planet, Lunar Surface and the match have this pull. City Sphere and Dark Forest still have the earlier
-  one (a speed of up to 0.75 of walking speed toward a warp, fading out over 24 m, and to nothing at a mouth's
-  throat) until they are moved over.
+- The user approved these numbers after playing with them (2026-11-10). They are game settings only: nothing in a
+  level changes them while playing. The equations are in `demos/warp_pull_js/EQUATIONS.md`.
+- Every level has the same pull, drift, sprint and darkening ("all of the planets should use snow planet physics"):
+  Dust, Snow Planet, Lunar Surface, the match, City Sphere and Dark Forest. Dark Forest's bots are not pulled.
 
 | Parameter | Value |
 | --- | --- |

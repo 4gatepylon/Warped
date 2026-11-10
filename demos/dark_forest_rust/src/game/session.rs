@@ -1353,11 +1353,8 @@ impl Session {
         if !self.is_autopilot {
             player_input.look_delta_rad /= self.weapons.get_zoom(&self.settings.aim) as f32;
         }
-        self.player.pull_m_per_s = self.warps.get_walk_pull_m_per_s(
-            &self.settings.gravity,
-            self.movement.walk_m_per_s,
-            self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M,
-        );
+        self.warps
+            .pull_player(&self.settings.gravity, &mut self.player, dt_s);
         self.player.update(
             &player_input,
             &self.movement,
@@ -1374,7 +1371,6 @@ impl Session {
         if self.player.is_alive() {
             let warps: &Warps = &self.warps;
             let centre_m: Vec3 = self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
-            self.player.velocity_m_s += warps.get_pull_m_per_s2(centre_m) * dt_s;
             if let Some((exit_m, turn)) = warps.get_mouth_exit_feet_m(self.player.feet_m, centre_m)
             {
                 let yaw_rad: f32 = self.player.yaw_rad;
@@ -1391,6 +1387,7 @@ impl Session {
                     );
                 }
                 self.player.velocity_m_s = turn * self.player.velocity_m_s;
+                self.player.pull_m_per_s = turn * self.player.pull_m_per_s;
                 self.player.yaw_rad = (-facing.x).atan2(-facing.z);
             }
             if warps.is_inside_horizon(self.player.eye_position_m()) {
@@ -1446,13 +1443,7 @@ impl Session {
             self.respawn_player();
         }
 
-        let get_warp_pull_m_per_s = |centre_m: Vec3| -> Vec3 {
-            self.warps.get_walk_pull_m_per_s(
-                &self.settings.gravity,
-                self.movement.walk_m_per_s,
-                centre_m,
-            )
-        };
+        let get_warp_pull_m_per_s = |_centre_m: Vec3| -> Vec3 { Vec3::ZERO };
         let context: BotContext = BotContext {
             solids: &scene.solids,
             get_warp_pull_m_per_s: &get_warp_pull_m_per_s,
@@ -1484,7 +1475,7 @@ impl Session {
         }
         for bot in self.bots.iter_mut().filter(|bot| bot.is_alive()) {
             let before_m: Vec3 = bot.feet_m;
-            bot.apply_warps(&self.warps, dt_s);
+            bot.apply_warps(&self.warps);
             if bot.feet_m.distance(before_m) > MIN_WARP_JUMP_M {
                 bot.feet_m = find_clear_exit_feet_m(&self.warps, &scene.solids, bot.feet_m);
             }
@@ -1753,7 +1744,10 @@ impl Session {
     /// shows it (`warped_shared::hud::make_hit_effect`): red edges, a blur from the edges inward,
     /// and a shake in a new direction each frame, fading over `HIT_EFFECTS.effect_s`.
     fn get_hit_effect(&self) -> HitEffect {
-        make_hit_effect(self.hit_effect_frac, self.frame_count, &HIT_EFFECTS)
+        let hit: HitEffect = make_hit_effect(self.hit_effect_frac, self.frame_count, &HIT_EFFECTS);
+        let darkness_frac: f64 = f64::from(self.player.black_hole_depth_frac)
+            * self.settings.gravity.black_hole_darkness_frac;
+        warped_shared::hud::darken_near_black_hole(hit, darkness_frac)
     }
 
     /// `get_hud_bars` is what the HUD's health, energy and console bars show now, as Lunar

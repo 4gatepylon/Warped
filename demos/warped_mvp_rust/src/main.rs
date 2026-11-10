@@ -650,7 +650,7 @@ mod tests {
             "shared.shooting.can_shoot_while_jumping",
             "shared.shooting.is_friendly_fire_on",
             "shared.shooting.drop_m_per_s_per_s",
-            "shared.gravity.reach_m",
+            "shared.gravity.radius_m",
             "shared.movement.walk_speed_per_map_speed",
         ] {
             assert!(keys.contains(&key.to_string()), "{key} in {keys:?}");

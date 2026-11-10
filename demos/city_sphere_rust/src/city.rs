@@ -1808,6 +1808,7 @@ impl CitySession {
             self.player.feet = carry.transform_point3(self.player.feet);
             self.player.body = rotation * self.player.body;
             self.player.velocity = rotation * self.player.velocity;
+            self.player.drift_m_per_s = rotation * self.player.drift_m_per_s;
             self.player.align_to_ground();
         }
     }
@@ -4146,7 +4147,9 @@ mod tests {
     const CROUCH_WALK_S: f64 = 0.5;
     const CROUCH_SPEED_TOLERANCE_FRAC: f64 = 1e-3;
     const LEVEL_OWN_SECTIONS: [&str; 2] = ["glass:", "surface:"];
-    const CITY_ONLY_SETTINGS: [&str; 2] = [
+    const CITY_ONLY_SETTINGS: [&str; 4] = [
+        "  max_schwarzschild_radius_m:",
+        "  time_dilation_per_general_relativity:",
         "  walk_speed_per_map_speed:",
         "  sprint_speed_per_map_speed:",
     ];

@@ -14,9 +14,10 @@ use std::error::Error;
 use glam::{DMat3, DMat4, DQuat, DVec3};
 use serde::Deserialize;
 
-use warped_shared::gravity::{FlatWarp, get_flat_pull_m_per_s};
+use warped_shared::gravity::FlatWarp;
 use warped_shared::laser_drop::{DROP_PIECE_M, turn_flat};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState};
+use warped_shared::pull_dynamics::{get_flat_pull, ramp_legs_speed, step_drift};
 
 use crate::play_settings::HeadBobSettings;
 use crate::settings::{GlassSettings, ServerSettings};
@@ -1086,17 +1087,32 @@ impl CityWorld {
         player.crouch_drop_m = player.move_state.crouch_frac
             * player.eye_height_m
             * (1.0 - settings.movement.crouch_eye_height_frac);
-        let speed_m_per_s: f64 =
-            self.get_speed_m_per_s(settings, player.move_state.is_sprinting) * slow_frac;
+        let walk_m_per_s: f64 = self.get_speed_m_per_s(settings, false);
+        player.legs_m_per_s = ramp_legs_speed(
+            player.legs_m_per_s.max(walk_m_per_s),
+            player.move_state.is_sprinting,
+            walk_m_per_s,
+            self.get_speed_m_per_s(settings, true),
+            &settings.movement,
+            dt_s,
+        );
+        let speed_m_per_s: f64 = player.legs_m_per_s * slow_frac;
         let (jump_m_per_s, gravity_m_per_s2) = self.get_jump(settings);
         let up: DVec3 = get_up(player.feet);
-        let pull_m_per_s: DVec3 = get_flat_pull_m_per_s(
+        let pull: Option<DVec3> = get_flat_pull(
             &settings.gravity,
-            self.get_speed_m_per_s(settings, false),
             player.feet + up * WARP_PULL_HEIGHT_M,
             up,
             &self.mouths,
         );
+        let drift: DVec3 = step_drift(
+            player.drift_m_per_s,
+            pull,
+            settings.gravity.brake_m_per_s_per_s,
+            dt_s,
+        );
+        player.drift_m_per_s = drift - up * drift.dot(up);
+        let pull_m_per_s: DVec3 = player.drift_m_per_s;
         let motion: StepMotion = StepMotion {
             speed_m_per_s,
             jump_m_per_s,
@@ -1328,6 +1344,8 @@ impl CityWorld {
                 bob_frac: 0.0,
                 slowed_s: 0.0,
             },
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
         }
     }
 }
@@ -1367,6 +1385,12 @@ pub struct CityPlayer {
     pub eye_height_m: f64,
     pub crouch_drop_m: f64,
     pub move_state: MoveState,
+    /// `legs_m_per_s` is the speed the legs give (W-202): it rises from walking speed to the
+    /// sprint's top speed while sprinting and falls back when not (0 until the first step).
+    pub legs_m_per_s: f64,
+    /// `drift_m_per_s` is the velocity the thrown mouths' pull has given the player (W-202),
+    /// along the ground.
+    pub drift_m_per_s: DVec3,
 }
 
 impl CityPlayer {
@@ -1433,7 +1457,7 @@ mod tests {
     //! | A player on the glass level beside a stairs' hole: walking its whole length just past the edge (stays on the glass); standing over the stairs (falls in) | `players_walk_on_the_glass_beside_the_stairs_hole` |
     //! | A player climbing each team's stairs at the edge of the steps, either side: reaches the glass level | `players_climb_the_stairs_at_their_edge` |
     //! | The team domes (W-148): the map's (one per team, centred on the glass under its pylon, spanning the share of the circumference asked for: 0.05, 0.2, 0.5; the two apart); a map without zone walls (none); zone walls read with and without zones; a zone of another team (fails); no regions | `each_team_has_a_dome_over_its_pylon` |
-    //! | A linked mouth near a walker (W-144): walking toward it (farther in the same time), away (less far, still away), standing (drifts toward it); past the pull's reach (each the same as with no mouth, bit for bit) | `mouths_pull_walkers_toward_them` |
+    //! | A linked mouth near a walker (W-202): inside its pull's radius, walking toward it (farther in the same time), away (less far, still away), standing (drifts toward it); past the radius (each the same as with no mouth, bit for bit) | `mouths_pull_walkers_toward_them` |
 
     use super::*;
 
@@ -1496,7 +1520,7 @@ mod tests {
     const GLASS_LEVEL_TOLERANCE_M: f64 = 0.05;
     const STEP_S: f64 = 1.0 / 60.0;
     const PULL_WALK_S: f64 = 0.5;
-    const NEAR_MOUTH_M: f64 = 8.0;
+    const NEAR_MOUTH_M: f64 = 4.0;
     const FAR_MOUTH_M: f64 = 40.0;
 
     fn world() -> CityWorld {

@@ -3189,14 +3189,14 @@ mod tests {
         let horizon_m: f64 = hole.m * world.r * settings.time_dilation_per_general_relativity;
         assert_eq!(rate_at(&world, 0.0), min_frac);
         assert_eq!(rate_at(&world, 0.9 * horizon_m), min_frac);
-        let near_frac: f64 = rate_at(&world, 0.25 * reach_m);
+        let near_frac: f64 = rate_at(&world, 0.4 * reach_m);
         let far_frac: f64 = rate_at(&world, 0.75 * reach_m);
         assert!(min_frac < near_frac && near_frac < far_frac && far_frac < 1.0);
         assert_eq!(rate_at(&world, reach_m), 1.0);
         assert_eq!(rate_at(&world, 2.0 * reach_m), 1.0);
         let mut grown: VoxelWorld = world.clone();
         grown.grow_black_hole(1.0);
-        assert!(rate_at(&grown, 0.25 * reach_m) < near_frac);
+        assert!(rate_at(&grown, 0.4 * reach_m) < near_frac);
     }
 
     #[test]
@@ -4149,8 +4149,12 @@ mod parity_tests {
     const GAP_TO_PYLON_M: f64 = 1.0;
     const CONSOLE_COUNT: usize = 6;
     const LUNAR_SETTINGS_PATH: &str = "../hyperbolic_wormholes_rust/server_settings.yaml";
-    const DUST_ONLY_SETTINGS: [&str; 2] =
-        ["jump_time_per_map_jump_time", "curvature_per_map_curvature"];
+    const DUST_ONLY_SETTINGS: [&str; 4] = [
+        "max_schwarzschild_radius_m",
+        "time_dilation_per_general_relativity",
+        "jump_time_per_map_jump_time",
+        "curvature_per_map_curvature",
+    ];
     const LEVEL_OWN_SECTIONS: [&str; 2] = ["sandstorm:", "surface:"];
     const DUST_JUMP_AT_M: [f64; 2] = [-95.0, 6.0];
     const LUNAR_JUMP_AT_M: [f64; 2] = [-27.0, 0.0];

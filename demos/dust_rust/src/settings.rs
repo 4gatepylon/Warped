@@ -48,7 +48,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 30] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 29] = [
     "gravity.black_hole_acceleration_frac",
     "gravity.black_hole_min_radius_m",
     "gravity.black_hole_darkness_frac",
@@ -78,7 +78,6 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 30] = [
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
     "sandstorm.wind_per_map_wind",
-    "gravity.max_pull_per_walk_speed",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
 #[cfg(target_os = "macos")]

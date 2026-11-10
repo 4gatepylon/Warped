@@ -1049,6 +1049,9 @@ struct HitEffect {
  */
 constant float3 HIT_RED_COLOR = float3(0.85, 0.05, 0.03);
 constant float HIT_EDGE_REACH_FRAC = 0.7;
+/** @brief `HIT_DARK_DIM_FRAC` is how much the whole picture dims at a black hole's darkest (W-168): a `red_frac` below
+ * 0 is a black hole's darkness instead of a hit, with black edges. */
+constant float HIT_DARK_DIM_FRAC = 0.55;
 constant int HIT_BLUR_TAP_COUNT = 8;
 
 static float3 get_fxaa_color(texture2d<float> ldr, float2 uv, float is_enabled);
@@ -1084,7 +1087,9 @@ fragment float4 fxaa_fragment(FullscreenVertexOut in [[stage_in]],
         sum += ldr.sample(linear_sampler, clamp(tap_px, float2(0.5), window_px - 0.5) / window_px).rgb;
     }
     float3 blurred = mix(sharp, sum / float(HIT_BLUR_TAP_COUNT + 1), edge);
-    return float4(mix(blurred, HIT_RED_COLOR, edge * hit.red_frac), 1.0);
+    bool is_dark = hit.red_frac < 0.0;
+    float dim = is_dark ? 1.0 - HIT_DARK_DIM_FRAC * hit.strength_frac : 1.0;
+    return float4(mix(blurred, is_dark ? float3(0.0) : HIT_RED_COLOR, edge * abs(hit.red_frac)) * dim, 1.0);
 }
 
 /**
@@ -1262,7 +1267,9 @@ fragment float4 resolve_fragment(FullscreenVertexOut in [[stage_in]],
         sum += aa.sample(linear_sampler, tap_uv).rgb;
     }
     float3 blurred = mix(sharp, sum / float(HIT_BLUR_TAP_COUNT + 1), edge);
-    return float4(mix(blurred, HIT_RED_COLOR, edge * hit.red_frac), 1.0);
+    bool is_dark = hit.red_frac < 0.0;
+    float dim = is_dark ? 1.0 - HIT_DARK_DIM_FRAC * hit.strength_frac : 1.0;
+    return float4(mix(blurred, is_dark ? float3(0.0) : HIT_RED_COLOR, edge * abs(hit.red_frac)) * dim, 1.0);
 }
 
 /** @brief `HudVertexOut` is one corner of a HUD rectangle. */

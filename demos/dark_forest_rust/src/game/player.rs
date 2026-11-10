@@ -13,6 +13,7 @@
 use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
 use warped_shared::map_edge::{SoftEdge, take_step};
 use warped_shared::movement::{Ground, MoveInput, MoveIntent, MoveRules, MoveState};
+use warped_shared::pull_dynamics::ramp_legs_speed;
 
 use super::collision::{Aabb, MoveResult, move_body};
 use super::world::LadderVolume;
@@ -125,9 +126,11 @@ pub struct PlayerInput {
 /// `Player` is the player's body and view: where its feet are, how it moves and looks, whether it
 /// stands on something, how tall it is now, its health and death, the movement rules' state
 /// (`moves`: crouch, sprint energy, sprinting, the head bob and a hit's slow), the landing dip,
-/// whether this frame was a footstep, whether it climbs a ladder, and the warps' pull on it
-/// along the ground (W-144, `Warps::get_walk_pull_m_per_s`), which its owner sets before each
-/// `update`.
+/// whether this frame was a footstep, whether it climbs a ladder, and what the warps' pull does
+/// to it (W-202, `Warps::pull_player`, which its owner calls before each `update`): the drift
+/// it has given the player along the ground (`pull_m_per_s`), the share of the legs' speed a
+/// black hole leaves, how deep the player is in a black hole's pull, and the speed the legs give
+/// (rising to the sprint's top speed and falling back).
 pub struct Player {
     pub feet_m: Vec3,
     pub velocity_m_s: Vec3,
@@ -143,6 +146,9 @@ pub struct Player {
     pub did_step: bool,
     pub is_climbing: bool,
     pub pull_m_per_s: Vec3,
+    pub legs_speed_frac: f32,
+    pub black_hole_depth_frac: f32,
+    pub legs_m_per_s: f32,
 }
 
 /// `Forest` is the forest as the movement rules' `Ground`: its boxes to collide with, its rope
@@ -195,6 +201,9 @@ impl Player {
             did_step: false,
             is_climbing: false,
             pull_m_per_s: Vec3::ZERO,
+            legs_speed_frac: 1.0,
+            black_hole_depth_frac: 0.0,
+            legs_m_per_s: 0.0,
         }
     }
 
@@ -344,12 +353,15 @@ impl Player {
             (self.moves.bob_phase_rad - before.bob_phase_rad).rem_euclid(std::f64::consts::TAU);
         self.did_step = ((before.bob_phase_rad + stepped_rad) / std::f64::consts::PI).floor()
             > (before.bob_phase_rad / std::f64::consts::PI).floor();
-        let speed_m_per_s: f64 = slow_frac
-            * f64::from(if self.moves.is_sprinting {
-                movement.sprint_m_per_s
-            } else {
-                movement.walk_m_per_s
-            });
+        self.legs_m_per_s = ramp_legs_speed(
+            f64::from(self.legs_m_per_s.max(movement.walk_m_per_s)),
+            self.moves.is_sprinting,
+            f64::from(movement.walk_m_per_s),
+            f64::from(movement.sprint_m_per_s),
+            &movement.settings,
+            f64::from(dt_s),
+        ) as f32;
+        let speed_m_per_s: f64 = slow_frac * f64::from(self.legs_m_per_s * self.legs_speed_frac);
         let intent: MoveIntent = MoveIntent {
             forward_frac: f64::from(axes.y),
             right_frac: f64::from(axes.x),
@@ -490,7 +502,6 @@ mod tests {
     use glam::Mat4;
 
     use super::*;
-    use crate::game::bots::BODY_CENTRE_HEIGHT_M;
     use crate::game::warps::{Warps, WormholeMouth};
     use crate::map::{self, MapFile};
     use crate::settings::GravitySettings;
@@ -502,7 +513,7 @@ mod tests {
     const FOREST_WALK_M_PER_S: f32 = 8.0;
     const FOREST_SPRINT_M_PER_S: f32 = 15.48;
     const PULL_WALK_S: f32 = 0.5;
-    const NEAR_MOUTH_M: f32 = 8.0;
+    const NEAR_MOUTH_M: f32 = 4.0;
     const FAR_MOUTH_M: f32 = 40.0;
     const MOUTH_HEIGHT_M: f32 = 1.7;
     const MOUTH_THROAT_M: f32 = 1.6;
@@ -573,11 +584,7 @@ mod tests {
         let mut player: Player = Player::new(Vec3::ZERO, 0.0);
         let dt_s: f32 = 1.0 / 60.0;
         for _ in 0..(PULL_WALK_S / dt_s).round() as usize {
-            player.pull_m_per_s = warps.get_walk_pull_m_per_s(
-                &gravity,
-                movement.walk_m_per_s,
-                player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M,
-            );
+            warps.pull_player(&gravity, &mut player, dt_s);
             player.update(&input, &movement, &open_ground(), &[], None, dt_s);
         }
         player.feet_m
