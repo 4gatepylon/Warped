@@ -60,7 +60,7 @@ through `warped_shared::app_bundle` first; the levels-as-libraries and level-def
   being played and its map picture, the wavefronts, the round, who attacks and defends, free play's
   wins, players per team); your team and switching it; rejoining the round being played; the game
   master's choice of what everyone plays (the match, or any one level: Left/Right on its row, or
-  click a level on the match's status, and "back to the match" there; no authentication yet, so
+  click a level on the match's status (a double click also skips the break before it starts), and "back to the match" there; no authentication yet, so
   anyone may set it); game settings; player settings; leaving to the main menu.
 - **Game settings** (the game master's, W-158, per-map game settings), from the game menu: the match
   server's settings in sections, every level's (a key at least two levels' settings files have,

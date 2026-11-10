@@ -43,6 +43,10 @@ pub const DISABLE_BAR_RGB: [f32; 3] = [1.0, 0.85, 0.3];
 pub const RESPAWN_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.63];
 pub const RESPAWN_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
 pub const RESPAWN_BAR_RGB: [f32; 3] = HEALTH_BAR_RGB;
+/// `BLACK_HOLE_RED_FRAC` marks a `HitEffect` as a black hole's darkness for the shaders (below 0:
+/// black instead of red), and `BLACK_HOLE_BLUR_PX` is how wide its blur is at the edges.
+const BLACK_HOLE_RED_FRAC: f32 = -1.0;
+const BLACK_HOLE_BLUR_PX: f32 = 8.0;
 pub const HIT_SHAKE_TURN_RAD: f64 = 2.399_963_229_728_653;
 pub const TEAM_RGB: [[f32; 3]; 2] = [[0.35, 0.6, 1.0], [1.0, 0.35, 0.3]];
 pub const PYLON_SQUARE_FRAC: f32 = 0.028;
@@ -240,6 +244,25 @@ pub fn make_hit_effect(
         red_frac: hit_effects.red_frac as f32,
         blur_px: hit_effects.blur_px as f32,
         shake_px: [shake_rad.cos(), shake_rad.sin()].map(|c| (c * shake_px) as f32),
+    }
+}
+
+/// `darken_near_black_hole` gives the scene's effect for a player `darkness_frac` (0 to 1) into a
+/// black hole's darkness (W-168, fading out into a black hole: "the world gets darker and darker
+/// from outside in (and dims broadly, blurring)"): while a hit's effect `hit` still shows, or with
+/// no darkness, `hit` itself; else an effect of that strength whose `red_frac` is -1, which the
+/// shaders' `read_hit_scene` reads as black edges with a broad dimming instead of red.
+///
+/// Example: `let effect: HitEffect = darken_near_black_hole(self.get_hit_effect(), 0.4);`
+pub fn darken_near_black_hole(hit: HitEffect, darkness_frac: f64) -> HitEffect {
+    if hit.strength_frac > 0.0 || darkness_frac <= 0.0 {
+        return hit;
+    }
+    HitEffect {
+        strength_frac: darkness_frac.min(1.0) as f32,
+        red_frac: BLACK_HOLE_RED_FRAC,
+        blur_px: BLACK_HOLE_BLUR_PX,
+        shake_px: [0.0, 0.0],
     }
 }
 

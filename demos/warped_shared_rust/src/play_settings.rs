@@ -374,6 +374,11 @@ const BUILTIN_PULL_REACH_M: f64 = 24.0;
 const BUILTIN_PULL_RADIUS_M: f64 = 5.0;
 const BUILTIN_PULL_M_PER_S_PER_S: f64 = 11.9;
 const BUILTIN_DRIFT_BRAKE_M_PER_S_PER_S: f64 = 15.0;
+const BUILTIN_BLACK_HOLE_RADIUS_PER_RADIUS: f64 = 2.0;
+const BUILTIN_BLACK_HOLE_ACCELERATION_FRAC: f64 = 0.5;
+const BUILTIN_BLACK_HOLE_SPEED_FRAC: f64 = 0.75;
+const BUILTIN_BLACK_HOLE_MIN_RADIUS_M: f64 = 3.0;
+const BUILTIN_BLACK_HOLE_DARKNESS_FRAC: f64 = 0.85;
 
 /// `GravitySettings` is how black holes and wormhole mouths pull a player along the ground
 /// (W-144, `gravity.rs`): the strongest pull, as a share of walking speed that it adds toward the
@@ -395,6 +400,17 @@ pub struct GravitySettings {
     pub acceleration_m_per_s_per_s: f64,
     pub profile: PullProfile,
     pub brake_m_per_s_per_s: f64,
+    /// `black_hole_*` are how a black hole's pull differs from a mouth's (W-202; the user: "black
+    /// holes have 2x the pull radius", "0.5x the pull force", "ALSO slow you", "cannot pull you in
+    /// so there is also a minimum radius"): its radius and strength as multiples of the mouths',
+    /// the share of the legs' speed left inside its radius, the distance from its centre inside
+    /// which it pulls no further in, and how dark the view is there (W-168, fading out into a
+    /// black hole; 0 for no darkening).
+    pub black_hole_radius_per_radius: f64,
+    pub black_hole_acceleration_frac: f64,
+    pub black_hole_speed_frac: f64,
+    pub black_hole_min_radius_m: f64,
+    pub black_hole_darkness_frac: f64,
 }
 
 /// `PullProfile` is how a warp's pull varies from its throat or horizon (0) out to the pull's
@@ -437,6 +453,11 @@ impl Default for GravitySettings {
             acceleration_m_per_s_per_s: BUILTIN_PULL_M_PER_S_PER_S,
             profile: PullProfile::Constant,
             brake_m_per_s_per_s: BUILTIN_DRIFT_BRAKE_M_PER_S_PER_S,
+            black_hole_radius_per_radius: BUILTIN_BLACK_HOLE_RADIUS_PER_RADIUS,
+            black_hole_acceleration_frac: BUILTIN_BLACK_HOLE_ACCELERATION_FRAC,
+            black_hole_speed_frac: BUILTIN_BLACK_HOLE_SPEED_FRAC,
+            black_hole_min_radius_m: BUILTIN_BLACK_HOLE_MIN_RADIUS_M,
+            black_hole_darkness_frac: BUILTIN_BLACK_HOLE_DARKNESS_FRAC,
         }
     }
 }
@@ -455,6 +476,24 @@ impl GravitySettings {
                 "gravity needs 0 <= max_pull_per_walk_speed < {MAX_PULL_PER_WALK_SPEED_EXCL} and \
                  0 < full_pull_m < reach_m, not {}, {} and {}",
                 self.max_pull_per_walk_speed, self.full_pull_m, self.reach_m
+            ));
+        }
+        let is_black_hole_valid: bool = self.black_hole_radius_per_radius > 0.0
+            && self.black_hole_acceleration_frac >= 0.0
+            && self.black_hole_speed_frac > 0.0
+            && self.black_hole_speed_frac <= 1.0
+            && self.black_hole_min_radius_m >= 0.0
+            && (0.0..=1.0).contains(&self.black_hole_darkness_frac);
+        if !is_black_hole_valid {
+            return Err(format!(
+                "gravity needs black_hole_radius_per_radius above 0, black_hole_acceleration_frac \
+                 and black_hole_min_radius_m at least 0, black_hole_speed_frac above 0 and at most \
+                 1, and black_hole_darkness_frac from 0 to 1, not {}, {}, {}, {} and {}",
+                self.black_hole_radius_per_radius,
+                self.black_hole_acceleration_frac,
+                self.black_hole_min_radius_m,
+                self.black_hole_speed_frac,
+                self.black_hole_darkness_frac
             ));
         }
         let is_pull_valid: bool = self.radius_m > 0.0

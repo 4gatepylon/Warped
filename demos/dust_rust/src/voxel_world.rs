@@ -43,7 +43,9 @@ use crate::zone_walls::ZoneWalls;
 use warped_shared::gravity::{HyperbolicWarp, add_pull};
 use warped_shared::laser_drop::{DROP_PIECE_M, get_drop_curvature_per_m, turn_hyperbolic};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
-use warped_shared::pull_dynamics::{get_hyperbolic_pull, ramp_legs_speed, step_drift, turn_drift};
+use warped_shared::pull_dynamics::{
+    WarpPulls, get_hyperbolic_warp_pulls, ramp_legs_speed, step_drift, turn_drift,
+};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
@@ -1813,13 +1815,14 @@ impl VoxelWorld {
             .position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
     }
 
-    /// `get_warp_pull` gives the pull of every warp, the map's and the linked thrown mouths (W-202,
-    /// pull toward wormholes and black holes in the game settings; `pull_dynamics::get_hyperbolic_pull`),
-    /// on a player whose body's frame is `body` and whose eye is `eye`, as an acceleration along
-    /// the body's right (x) and back (z) axes, or `None` out of every warp's reach.
+    /// `get_warp_pulls` gives what every warp, the map's and the linked thrown mouths, does to a
+    /// player whose body's frame is `body` and whose eye is `eye` (W-202, pull toward wormholes
+    /// and black holes in the game settings; `pull_dynamics::get_hyperbolic_warp_pulls`): the
+    /// pull in the body's axes, the slowing and darkening near a black hole, and whether a black
+    /// hole's minimum radius holds the player out.
     ///
-    /// Example: `let pull: Option<DVec3> = world.get_warp_pull(player.body, eye);`
-    pub fn get_warp_pull(&self, body: DMat4, eye: DVec4) -> Option<DVec3> {
+    /// Example: `let pulls: WarpPulls = world.get_warp_pulls(player.body, eye);`
+    pub fn get_warp_pulls(&self, body: DMat4, eye: DVec4) -> WarpPulls {
         let warps: Vec<HyperbolicWarp> = self
             .warps
             .iter()
@@ -1829,7 +1832,7 @@ impl VoxelWorld {
                 is_mouth: warp.is_mouth,
             })
             .collect();
-        get_hyperbolic_pull(&self.settings.gravity, body, eye, self.r, &warps)
+        get_hyperbolic_warp_pulls(&self.settings.gravity, body, eye, self.r, &warps)
     }
 
     /// `get_time_rate_frac` gives how fast time runs at x (W-107), as a share of time far from every
@@ -2228,6 +2231,9 @@ pub struct VoxelPlayer {
     /// `drift_m_per_s` is the velocity the warps' pull has given the player (W-202), along the
     /// body's right (x) and back (z) axes.
     pub drift_m_per_s: DVec3,
+    /// `black_hole_depth_frac` is how deep the player is in a black hole's pull (W-168): 0 at
+    /// its edge or outside, 1 at its minimum radius; the window darkens the view by it.
+    pub black_hole_depth_frac: f64,
     pub bob_phase_rad: f64,
     pub bob_frac: f64,
     pub slowed_s: f64,
@@ -2254,6 +2260,7 @@ impl VoxelPlayer {
             is_sprinting: false,
             legs_m_per_s: 0.0,
             drift_m_per_s: DVec3::ZERO,
+            black_hole_depth_frac: 0.0,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2307,6 +2314,7 @@ impl VoxelPlayer {
             is_sprinting: false,
             legs_m_per_s: 0.0,
             drift_m_per_s: DVec3::ZERO,
+            black_hole_depth_frac: 0.0,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2345,6 +2353,7 @@ impl VoxelPlayer {
             is_sprinting: false,
             legs_m_per_s: 0.0,
             drift_m_per_s: DVec3::ZERO,
+            black_hole_depth_frac: 0.0,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2380,6 +2389,7 @@ impl VoxelPlayer {
             is_sprinting: false,
             legs_m_per_s: 0.0,
             drift_m_per_s: DVec3::ZERO,
+            black_hole_depth_frac: 0.0,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2492,7 +2502,8 @@ impl VoxelPlayer {
     /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
     /// pulled along the ground toward black holes and wormhole mouths (`get_warp_pull`, W-202: the
     /// pull builds a drift inside a warp's radius, kept through a mouth and braked outside every
-    /// radius; a move a wall refuses ends the drift), the legs' speed rising to the sprint's top
+    /// radius; a move a wall refuses ends the drift; a black hole pulls wider, weaker and upward
+    /// too, slows the legs, and holds the player out of its minimum radius), the legs' speed rising to the sprint's top
     /// speed and falling back (`ramp_legs_speed`),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to the spawn
     /// of index `spawn_index`, the player's team),
@@ -2577,16 +2588,31 @@ impl VoxelPlayer {
             };
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
+        let pulls: WarpPulls = if self.is_flying {
+            WarpPulls::NONE
+        } else {
+            world.get_warp_pulls(self.body, eye)
+        };
+        let speed_m_per_s: f64 = speed_m_per_s * pulls.legs_speed_frac;
+        self.black_hole_depth_frac = pulls.black_hole_depth_frac;
         self.drift_m_per_s = if self.is_flying {
             DVec3::ZERO
         } else {
-            step_drift(
+            let along_ground: Option<DVec3> = pulls
+                .pull_m_per_s_per_s
+                .map(|pull| DVec3::new(pull.x, 0.0, pull.z));
+            let drift: DVec3 = pulls.hold_out(step_drift(
                 self.drift_m_per_s,
-                world.get_warp_pull(self.body, eye),
+                along_ground,
                 world.settings.gravity.brake_m_per_s_per_s,
                 dt_s,
-            )
+            ));
+            DVec3::new(drift.x, 0.0, drift.z)
         };
+        let lift_m_per_s_per_s: f64 = pulls.pull_m_per_s_per_s.map_or(0.0, |pull| pull.y);
+        self.vertical_m_per_s = pulls
+            .hold_out(DVec3::Y * (self.vertical_m_per_s + lift_m_per_s_per_s * dt_s))
+            .y;
         let pull_m_per_s: [f64; 2] = [self.drift_m_per_s.x, self.drift_m_per_s.z];
         let walk_dir: [f64; 2] = if len > 0.0 {
             [side / len, -forward / len]

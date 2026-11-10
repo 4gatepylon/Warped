@@ -114,3 +114,8 @@ gravity:  # How black holes and wormhole mouths pull walkers along the ground (W
   acceleration_m_per_s_per_s: 11.9  # W-202: how hard a warp pulls inside that radius (0 for none); a fall from the radius reaches a thrown mouth's throat at 9 m/s.
   profile: constant  # W-202: how the pull varies from the throat out to the radius: constant, stronger_near_mouth or harmonic.
   brake_m_per_s_per_s: 15.0  # W-202: how fast the drift the pull gave a player dies away outside every radius (0 for never).
+  black_hole_radius_per_radius: 2.0  # W-202: a black hole's pull reaches this many times radius_m from its centre (10 m).
+  black_hole_acceleration_frac: 0.5  # W-202: a black hole pulls with this share of acceleration_m_per_s_per_s (0 for none), upward too.
+  black_hole_speed_frac: 0.75  # W-202: the share of the legs' speed left inside a black hole's radius (above 0, at most 1).
+  black_hole_min_radius_m: 3.0  # W-202: inside this distance from its centre a black hole pulls no further and holds players out (0 for none).
+  black_hole_darkness_frac: 0.85  # W-168: how dark the view gets by the minimum radius, from the edges in (0 for none, at most 1).

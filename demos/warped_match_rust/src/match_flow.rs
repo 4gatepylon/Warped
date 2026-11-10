@@ -35,7 +35,8 @@ use crate::match_state::{MatchState, Team};
 use crate::net;
 use warped_shared::game_settings::{GameSettings, SettingsMessage, parse_settings_message};
 use warped_shared::match_protocol::{
-    CLIENT_TIMEOUT_S, MAX_DATAGRAM_BYTES, MatchAnnouncer, MatchBeacon, parse_hello, parse_play,
+    CLIENT_TIMEOUT_S, MAX_DATAGRAM_BYTES, MatchAnnouncer, MatchBeacon, is_play_now, parse_hello,
+    parse_play,
 };
 pub use warped_shared::match_protocol::{
     LevelEntry, LoadLevels, MATCH_PORT, MatchClient, MatchTimes, MatchView, Phase, SELF_PROGRAM,
@@ -262,6 +263,14 @@ pub fn serve_match_on(
                     }
                 }
             };
+        }
+        if let Some((length, _)) = received
+            && is_play_now(&buffer[..length])
+            && parse_play(&buffer[..length], levels.len()).is_ok()
+            && matches!(phase, Phase::Intermission { .. })
+        {
+            println!("The game master skipped the break.");
+            phase_ends_at = Some(Instant::now());
         }
         let team_counts: [u32; 2] = [Team::Blue, Team::Red].map(|team| {
             clients
@@ -543,7 +552,7 @@ mod tests {
             MatchClient::Connect(server, Some(Team::Red)).unwrap(),
         ];
         poll_until(&mut clients, |view| view.team_counts == [1, 1]);
-        clients[0].send_play(Some(0)).unwrap();
+        clients[0].send_play(Some(0), true).unwrap();
         let free: Vec<usize> = poll_until(&mut clients, |view| {
             view.state
                 .get_free_play()
@@ -554,7 +563,7 @@ mod tests {
             free[first_free..].iter().all(|&level| level == 0),
             "{free:?}"
         );
-        clients[1].send_play(None).unwrap();
+        clients[1].send_play(None, false).unwrap();
         let back: Vec<usize> = poll_until(&mut clients, |view| {
             view.state.get_free_play().is_none() && matches!(view.phase, Phase::Playing { .. })
         });

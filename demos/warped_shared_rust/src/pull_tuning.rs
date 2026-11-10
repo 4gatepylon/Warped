@@ -13,7 +13,9 @@
 //! Must know:
 //! - The keys: `[` `]` the pull's radius, `;` `'` its strength, `\` its shape, `5` `6` the drift's
 //!   braking, `7` `8` how fast the sprint slows down, `9` `0` how fast it speeds up, `Backspace`
-//!   back to the built-in numbers, `P` approve.
+//!   back to the built-in numbers, `P` approve; and for black holes `U` `I` their radius (times the
+//!   pull's), `J` `K` their strength (a share of the pull's), `N` `M` the share of the legs' speed
+//!   they leave, `,` `.` their minimum radius, `T` `Y` how dark the view gets.
 //! - Gotchas: the changes are this window's only (movement is computed in the window); other
 //!   players keep the server's settings.
 
@@ -30,8 +32,7 @@ use crate::play_settings::{GravitySettings, MovementSettings, PullProfile};
 /// `TUNE_PULL_VARIABLE` is the environment variable that turns the tuning keys on when it is 1.
 pub const TUNE_PULL_VARIABLE: &str = "WARPED_TUNE_PULL";
 /// `TUNING_KEYS_HELP` names the tuning keys in one line, for a level to show when tuning starts.
-pub const TUNING_KEYS_HELP: &str =
-    "Tune: [ ] radius  ; ' pull  \\ shape  5 6 brake  7 8 sprint down  9 0 up  P ok";
+pub const TUNING_KEYS_HELP: &str = "Tune: [ ] radius  ; ' pull  \\ shape  5 6 brake  7 8 sprint down  9 0 up  P ok; black hole: U I radius  J K pull  N M legs  , . min  T Y dark";
 const LATEST_FILE: &str = "settings_latest.json";
 const LOG_FILE: &str = "settings_log.jsonl";
 const APPROVED_FILE: &str = "approved.json";
@@ -44,10 +45,15 @@ enum Knob {
     Brake,
     SprintDown,
     SprintUp,
+    HoleRadius,
+    HoleStrength,
+    HoleSpeed,
+    HoleMinRadius,
+    HoleDarkness,
 }
 
 /// `KNOB_KEYS` is each knob's key down and key up, its step, and its lowest and highest value.
-const KNOB_KEYS: [(Knob, Scancode, Scancode, f64, f64, f64); 5] = [
+const KNOB_KEYS: [(Knob, Scancode, Scancode, f64, f64, f64); 10] = [
     (
         Knob::Radius,
         Scancode::LeftBracket,
@@ -67,6 +73,18 @@ const KNOB_KEYS: [(Knob, Scancode, Scancode, f64, f64, f64); 5] = [
     (Knob::Brake, Scancode::_5, Scancode::_6, 1.0, 0.0, 60.0),
     (Knob::SprintDown, Scancode::_7, Scancode::_8, 1.0, 1.0, 80.0),
     (Knob::SprintUp, Scancode::_9, Scancode::_0, 1.0, 1.0, 80.0),
+    (Knob::HoleRadius, Scancode::U, Scancode::I, 0.25, 0.5, 10.0),
+    (Knob::HoleStrength, Scancode::J, Scancode::K, 0.05, 0.0, 4.0),
+    (Knob::HoleSpeed, Scancode::N, Scancode::M, 0.05, 0.1, 1.0),
+    (
+        Knob::HoleMinRadius,
+        Scancode::Comma,
+        Scancode::Period,
+        0.25,
+        0.0,
+        30.0,
+    ),
+    (Knob::HoleDarkness, Scancode::T, Scancode::Y, 0.05, 0.0, 1.0),
 ];
 
 /// `PullTuner` is the tuning keys' state: the run folder once a change has made it, and how many
@@ -110,7 +128,9 @@ impl PullTuner {
         make_folder: impl FnOnce() -> Result<PathBuf, E>,
     ) -> Option<String> {
         let mut is_approved: bool = false;
+        let mut is_hole_knob: bool = false;
         if let Some((knob, sign)) = find_knob(scancode) {
+            is_hole_knob = knob as usize >= Knob::HoleRadius as usize;
             let (_, _, _, step, low, high) = KNOB_KEYS[knob as usize];
             let slot: &mut f64 = match knob {
                 Knob::Radius => &mut gravity.radius_m,
@@ -118,6 +138,11 @@ impl PullTuner {
                 Knob::Brake => &mut gravity.brake_m_per_s_per_s,
                 Knob::SprintDown => &mut movement.sprint_down_m_per_s_per_s,
                 Knob::SprintUp => &mut movement.sprint_up_m_per_s_per_s,
+                Knob::HoleRadius => &mut gravity.black_hole_radius_per_radius,
+                Knob::HoleStrength => &mut gravity.black_hole_acceleration_frac,
+                Knob::HoleSpeed => &mut gravity.black_hole_speed_frac,
+                Knob::HoleMinRadius => &mut gravity.black_hole_min_radius_m,
+                Knob::HoleDarkness => &mut gravity.black_hole_darkness_frac,
             };
             *slot = (*slot + sign * step).clamp(low, high);
         } else {
@@ -135,6 +160,11 @@ impl PullTuner {
                     gravity.acceleration_m_per_s_per_s = builtin.acceleration_m_per_s_per_s;
                     gravity.profile = builtin.profile;
                     gravity.brake_m_per_s_per_s = builtin.brake_m_per_s_per_s;
+                    gravity.black_hole_radius_per_radius = builtin.black_hole_radius_per_radius;
+                    gravity.black_hole_acceleration_frac = builtin.black_hole_acceleration_frac;
+                    gravity.black_hole_speed_frac = builtin.black_hole_speed_frac;
+                    gravity.black_hole_min_radius_m = builtin.black_hole_min_radius_m;
+                    gravity.black_hole_darkness_frac = builtin.black_hole_darkness_frac;
                     movement.sprint_up_m_per_s_per_s = BUILTIN_SPRINT_RAMP_M_PER_S_PER_S;
                     movement.sprint_down_m_per_s_per_s = BUILTIN_SPRINT_RAMP_M_PER_S_PER_S;
                 }
@@ -143,15 +173,27 @@ impl PullTuner {
             }
         }
         self.change_count += 1;
-        let numbers: String = format!(
-            "pull {:.2} m, {:.1} m/s2, {}, brake {:.0}; sprint up {:.0} down {:.0}",
-            gravity.radius_m,
-            gravity.acceleration_m_per_s_per_s,
-            get_profile_name(gravity.profile),
-            gravity.brake_m_per_s_per_s,
-            movement.sprint_up_m_per_s_per_s,
-            movement.sprint_down_m_per_s_per_s
-        );
+        let numbers: String = if is_hole_knob {
+            format!(
+                "black hole: radius x{:.2} ({:.1} m), pull x{:.2}, legs x{:.2}, min {:.2} m, dark {:.2}",
+                gravity.black_hole_radius_per_radius,
+                gravity.radius_m * gravity.black_hole_radius_per_radius,
+                gravity.black_hole_acceleration_frac,
+                gravity.black_hole_speed_frac,
+                gravity.black_hole_min_radius_m,
+                gravity.black_hole_darkness_frac
+            )
+        } else {
+            format!(
+                "pull {:.2} m, {:.1} m/s2, {}, brake {:.0}; sprint up {:.0} down {:.0}",
+                gravity.radius_m,
+                gravity.acceleration_m_per_s_per_s,
+                get_profile_name(gravity.profile),
+                gravity.brake_m_per_s_per_s,
+                movement.sprint_up_m_per_s_per_s,
+                movement.sprint_down_m_per_s_per_s
+            )
+        };
         let saved: Result<(), String> = self.save(gravity, movement, is_approved, make_folder);
         Some(match (saved, is_approved) {
             (Ok(()), true) => format!("APPROVED: {numbers}"),
@@ -181,6 +223,11 @@ impl PullTuner {
                 "acceleration_m_per_s_per_s": gravity.acceleration_m_per_s_per_s,
                 "profile": get_profile_name(gravity.profile),
                 "brake_m_per_s_per_s": gravity.brake_m_per_s_per_s,
+                "black_hole_radius_per_radius": gravity.black_hole_radius_per_radius,
+                "black_hole_acceleration_frac": gravity.black_hole_acceleration_frac,
+                "black_hole_speed_frac": gravity.black_hole_speed_frac,
+                "black_hole_min_radius_m": gravity.black_hole_min_radius_m,
+                "black_hole_darkness_frac": gravity.black_hole_darkness_frac,
             },
             "movement": {
                 "sprint_up_m_per_s_per_s": movement.sprint_up_m_per_s_per_s,
@@ -234,7 +281,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Key | each knob's two keys (one step each way, held at its lowest and highest), the shape key (all three shapes, round), Backspace (the built-in numbers), P (approved), another key (nothing changes, nothing saved) | `keys_change_the_numbers_within_their_ranges` |
+    //! | Key | each knob's two keys, the black hole's among them (one step each way, held at its lowest and highest), the shape key (all three shapes, round), Backspace (the built-in numbers), P (approved), another key (nothing changes, nothing saved) | `keys_change_the_numbers_within_their_ranges` |
     //! | Saving | the first change (the folder is made, the latest and the log written), a later one (the log grows), approval (`approved.json`), a folder that can't be made (the line says not saved, the numbers still change) | `changes_are_saved_to_the_run_folder` |
     //! | Environment | the variable unset, 1, another value | `tuning_is_on_only_when_asked` |
     //! | Help line | fits the menu's 64 characters wide HUD line twice over | `the_help_names_every_key` |
@@ -279,7 +326,25 @@ mod tests {
                 })
             };
         assert_eq!(press(Scancode::W, &mut gravity, &mut movement), None);
-        assert!(!folder.exists());
+        let hole: String = press(Scancode::I, &mut gravity, &mut movement).unwrap();
+        assert_eq!(gravity.black_hole_radius_per_radius, 2.25);
+        assert!(
+            hole.starts_with("black hole: radius x2.25 (11.2 m), pull x0.50"),
+            "{hole}"
+        );
+        for _ in 0..100 {
+            press(Scancode::K, &mut gravity, &mut movement);
+            press(Scancode::N, &mut gravity, &mut movement);
+            press(Scancode::Comma, &mut gravity, &mut movement);
+            press(Scancode::Y, &mut gravity, &mut movement);
+        }
+        assert_eq!(gravity.black_hole_acceleration_frac, 4.0);
+        assert!((gravity.black_hole_speed_frac - 0.1).abs() < 1e-9);
+        assert_eq!(gravity.black_hole_min_radius_m, 0.0);
+        assert_eq!(gravity.black_hole_darkness_frac, 1.0);
+        press(Scancode::Backspace, &mut gravity, &mut movement);
+        assert_eq!(gravity, GravitySettings::default());
+        assert!(!folder.join(APPROVED_FILE).exists());
         let line: String = press(Scancode::RightBracket, &mut gravity, &mut movement).unwrap();
         assert_eq!(gravity.radius_m, 5.25);
         assert!(
@@ -376,9 +441,12 @@ mod tests {
 
     #[test]
     fn the_help_names_every_key() {
-        for key in ["[", "]", ";", "'", "\\", "5", "6", "7", "8", "9", "0", "P"] {
+        for key in [
+            "[", "]", ";", "'", "\\", "5", "6", "7", "8", "9", "0", "P", "U I", "J K", "N M",
+            ", .", "T Y",
+        ] {
             assert!(TUNING_KEYS_HELP.contains(key), "{key}");
         }
-        assert!(TUNING_KEYS_HELP.chars().count() <= 128);
+        assert!(TUNING_KEYS_HELP.chars().count() <= 160);
     }
 }
