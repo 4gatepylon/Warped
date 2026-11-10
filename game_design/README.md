@@ -10,6 +10,8 @@ Designing the game.
   from one to the next, what each shows, which settings it has and who may change them.
 - `inside_game_design/`, `outside_game_design/` and `window_design/`: the pictures that belong to each of the three
   design docs above (diagrams, mock-ups, screenshots), one folder per doc. A folder is made with its first picture.
+  [`window_design/`](window_design/README.md) holds a mock-up of the windows to come, as a website to click
+  through.
 - [`FOUR_MAPS_HANDOFF.md`](FOUR_MAPS_HANDOFF.md): the state of the four level demos and the match on 2026-11-08, for
   whoever continues that work.
 - [`slides/`](slides/README.md): the official slide deck of the game as it is now, with pictures of the game.
