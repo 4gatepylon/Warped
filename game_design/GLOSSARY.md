@@ -95,6 +95,7 @@ the player, 2026-11-10.*
 | **health bar**, **ammo bar**, **energy bar** | The bars in the bottom left: health, the sniper rifle's reload or the rifle's heat, and sprint energy. |
 | **minimap** | A disk in a corner (top right by default) showing the ground within 60 m, with players as dots and shots as lines. |
 | **crosshair**, **console bar**, **readouts** | The mark in the middle of the screen, where shots leave the eye toward; the bar below it that fills while the player holds `E` on a console; and text lines of numbers, such as speed, height, or how fast the player's time runs near a black hole. *Proposed* as HUD, because a player sees them while walking normally; the player hasn't named them. |
+| **pylon squares**, **own-team box** | At the top centre: one square per console of each team, an empty slot once it is turned off, and a box in the player's team's colour around their own team's squares. *Proposed* as HUD, for the same reason. |
 
 The HUD shows during normal play, while a player walks around a level. It does not show on the main menu, the game
 menu, the loading screen or the credits, which are not in a level.
@@ -135,6 +136,62 @@ hurts; City Sphere has a glass floor over the outer floor and walls that make cl
 treehouses on decks, rope ladders, plank bridges, a lookout and five fixed wormholes; Lunar Surface has a black
 hole above the middle, a crater wall as its level edge, and bunkers, domes and a landing pad.
 
+## Moving and looking
+
+| Say | Meaning | Not |
+| --- | --- | --- |
+| **walk**, **sprint**, **crouch**, **jump** | The ways to move on the ground. Sprinting is faster and uses energy, crouching lowers the eye and halves the walking speed, and a jump gets a player onto a 1 m block. *Proposed.* | "run" for sprint, "jog" for walk |
+| **aim** | Holding the right button: the view zooms in, more with the sniper rifle, and turns more slowly. | |
+| **first person**, **third-person view** | The two views `V` switches between: from the player's eye, and from slightly behind and above their robot. | |
+| **head bob** | The view moving up and down with each step. | |
+| **gun sway** | The weapon in hand swinging with each step. | |
+| **flashlight** | A cone of light from the player's eye while `F` is held. Other players don't see it yet. | |
+| **deactivate** | To turn a console off by holding `E` on it for 10 s. *Proposed.* | "capture", "disable" |
+| **throw** | To send out a wormhole mouth with `Q`. A throw that doesn't land **fizzles**. | |
+
+## Space and physics
+
+| Say | Meaning | Not |
+| --- | --- | --- |
+| **space** | The geometry of a level: hyperbolic (Dust, Lunar Surface), inside a sphere (City Sphere), or flat with two looping axes, T² × ℝ (Snow Planet and Dark Forest, which don't loop yet). | |
+| **curvature** | How strongly a level's space is curved. | |
+| **gravity** | What pulls players onto the ground, or outward onto the sphere in City Sphere. | |
+| **pull** | The acceleration that draws a player along the ground toward a black hole or a mouth. It builds a **drift**, a velocity added to the player's walk. *Proposed.* | "gravity" toward a warp object |
+| **time dilation** | Time running slower for a player near a black hole: their movement, energy, console holds and guns slow down. | |
+| **bend** | What a warp object does to light, to lasers and to a player's path near it. | |
+
+## Looks of the world
+
+| Say | Meaning | Not |
+| --- | --- | --- |
+| **sky** | What is drawn beyond a level, for looks only: the sun, a planet, stars, the Milky Way and spaceships that fly over. | |
+| **Milky Way** | The band of stars in the sky. Each player sets its brightness. | |
+| **team colour** | Blue or red, on robots, lasers, pylon beams, boundary planes and the minimap's dots. A player's thrown mouths are purple and green. | |
+| **shimmer** | The slight wavering of what a player sees through a boundary plane, until they cross it. | "haze" for the shimmer |
+| **haze** | Thin fog in a level's air. *Proposed*: older commits also say "haze" for the shimmer and for the glow around a laser. | |
+| **sharp centre, soft edges** | Drawing the middle of the screen at full resolution and the edges blurred, to save time. In progress. | |
+
+## Building, measuring and shipping
+
+| Say | Meaning | Not |
+| --- | --- | --- |
+| **voxel level** | A level drawn from blocks by the levels' shared code: Lunar Surface, Dust, Snow Planet and City Sphere. Dark Forest runs on the `fps_demo` engine instead. | |
+| **model**, **texture** | A 3D shape, and the picture on a surface. The CREDITS page says where each comes from. | |
+| **render scale** | The share of the window's resolution a level's picture is drawn at. `-` and `=` lower and raise it, and the game can adjust it to hold the frame rate. | |
+| **frame rate**, **GPU time**, **render time** | How many pictures a second the game draws, and how long the GPU and the whole renderer take for one. | |
+| **bench view** | A fixed view of a level used to measure GPU time, such as Lunar Surface's `wormhole_exit`. | |
+| **Mac app**, **bundle** | `Warped.app`, the app packaged for macOS, and the zip of it that players download. | |
+| **download page** | The public web page where players get the bundle. | |
+| **playtest** | The user playing a build to judge it. | |
+
+## Tracking work
+
+| Say | Meaning | Not |
+| --- | --- | --- |
+| **wishlist**, **item** | The checklist of what the user has asked for, and one request on it, with an id such as `W-85` and a short name. | |
+| **open**, **claimed**, **pending user review**, **done** | An item's four statuses: nobody started it; an agent is working on it; it is delivered and waits for the user to test it; the user tested it and confirmed it works. | "done" for delivered but unconfirmed |
+| **WIP** | Work in progress: a commit that saves unfinished work so another agent can pick it up. | |
+
 ## Words we retired
 
 | Old | New |
@@ -150,6 +207,9 @@ hole above the middle, a crater wall as its level edge, and bunkers, domes and a
 | team screen | lobby |
 | speckle | beam noise |
 | kazemat | bunker |
+| gravity toward a warp object | pull (*proposed*) |
+| capture a flag, disable a pylon | deactivate a console (*proposed*) |
+| run, jog | sprint, walk (*proposed*) |
 
 ## Questions for the player
 
