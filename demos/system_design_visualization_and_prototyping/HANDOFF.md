@@ -15,6 +15,11 @@ the option that best fits `game_design/OUTSIDE_GAME_DESIGN.md` and what is writt
 its reason in the PR's Decisions section and in `DECISIONS.md` beside this file (create it, numbered, newest
 last), and go on. Stop only for something that can't be undone or that costs money.
 
+**When in doubt, do what Counter-Strike does.** The user's words: "games like this are well known; if in doubt the
+other agent can copy the CSGO semantics". Where the documents are silent or unclear about how ranked play,
+matchmaking, parties, leaving, votes, cooldowns or the like should behave, look up how Counter-Strike (CS:GO or
+CS2) does it, copy that, and record it as a decision with where you found it.
+
 **Work for a long time.** The point is that you and the user work in parallel for as long as possible. Don't stop
 at the end of a part to report or to ask: go straight on to the next. If one thing is blocked, write down why and
 what you tried, and move to the next thing that isn't. Commit and push after every piece that works, and keep this
