@@ -24,6 +24,7 @@ terms.
 - [Programs and places](#programs-and-places)
 - [Pages and SWGs on the window](#pages-and-swgs-on-the-window)
 - [World objects](#world-objects)
+- [Worlds](#worlds)
 
 ## Structure of play
 
@@ -166,3 +167,9 @@ entity.
 | **edge stretch** | What a player sees as they slow down at the level edge (Zeno's paradox): the view stretches out from the middle of the screen, more and more as they slow. Its strength is the player setting `view.edge_stretch_frac`. | "Zeno's paradox", "getting Zeno's-paradoxed" |
 | **haze** | Thin fog in a level's air. | |
 | **sky** | What is drawn beyond a level, for looks only, such as the sun, a planet, stars and the Milky Way. | "skybox" |
+
+## Worlds
+
+Each level's world, with every object's name, is in [`worlds/`](worlds/README.md): one file per level, with its zones,
+its named objects and marked map pictures. An object's name there is its official name, such as "blue left pylon" or
+"blue hesco wall 3". The naming rules are in that folder's README.
