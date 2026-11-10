@@ -125,3 +125,11 @@ black_hole:  # On Lunar Surface, each console turned off grows the black hole, a
   lens_core_per_reach: 0.35  # The wide lens's core radius, as a share of the reach: rays passing that far from the centre turn the most.
   time_dilation_per_general_relativity: 15.0  # How many times stronger than in general relativity time slows near it (1 for real, 0 for none).
   min_time_rate_frac: 0.1  # The slowest a player's time runs near it, as a share of time far away (above 0, so nobody freezes).
+
+gravity:  # How black holes and wormhole mouths pull walkers along the ground (W-144): the built-in values every level shares.
+  max_pull_per_walk_speed: 0.75  # The strongest pull, as a share of walking speed added toward a warp or taken from walking away (below 1; 0 for none).
+  full_pull_m: 3.0  # How far out from a horizon or throat the pull stays that strong.
+  reach_m: 24.0  # How far out the pull reaches, falling off beyond full_pull_m (above it).
+
+sandstorm:  # Dust's own game setting (W-158); a file without this section takes these values.
+  wind_per_map_wind: 1.0  # How strongly the sandstorm's wind blows, times the map's: it bends light and lasers and drifts a shot's dust (0 for calm air).

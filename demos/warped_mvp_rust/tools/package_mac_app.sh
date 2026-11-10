@@ -2,7 +2,8 @@
 # `package_mac_app.sh` builds Warped.app, the one-window game a player double-clicks: the app
 # (`warped`, as `Contents/MacOS/Warped`), the match server and Lunar Surface (`warped-match`), each
 # other level of the levels manifest (`Contents/MacOS/levels/<level>`), the manifest with its map
-# pictures, the shared assets and models, an icon and Info.plist; signs it ad hoc and zips it with
+# pictures and each level's server settings file (at its path from the manifest, for the game
+# master's settings), the shared assets and models, an icon and Info.plist; signs it ad hoc and zips it with
 # its note on opening it. The levels are built one after another into one shared target folder, so
 # their common crates are built once.
 #
@@ -40,8 +41,8 @@ level_lines="$(./.build/release/warped --print-level-programs)"
 if [ "$is_dry_run" -eq 1 ]; then
     echo "app: $APP"
     echo "match server: $MATCH_FOLDER (hyperbolic-wormholes) -> Contents/MacOS/warped-match"
-    while IFS=$'\t' read -r slug folder program picture; do
-        echo "level: $REPO_FOLDER/$folder ($program) -> Contents/MacOS/levels/$slug; picture $picture"
+    while IFS=$'\t' read -r slug folder program picture settings; do
+        echo "level: $REPO_FOLDER/$folder ($program) -> Contents/MacOS/levels/$slug; picture $picture; settings $settings"
     done <<< "$level_lines"
     exit 0
 fi
@@ -52,12 +53,17 @@ cp .build/release/warped "$APP/Contents/MacOS/Warped"
 (cd "$MATCH_FOLDER" && CARGO_TARGET_DIR="$LEVELS_TARGET" cargo build --release --locked --bin hyperbolic-wormholes)
 cp "$LEVELS_TARGET/release/hyperbolic-wormholes" "$APP/Contents/MacOS/warped-match"
 cp "$MATCH_FOLDER/match_levels.yaml" "$APP/Contents/Resources/match_levels.yaml"
-while IFS=$'\t' read -r slug folder program picture; do
+cp "$MATCH_FOLDER/server_settings.yaml" "$APP/Contents/Resources/server_settings.yaml"
+while IFS=$'\t' read -r slug folder program picture settings; do
     (cd "$REPO_FOLDER/$folder" && CARGO_TARGET_DIR="$LEVELS_TARGET" cargo build --release --locked --bin "$program")
     cp "$LEVELS_TARGET/release/$program" "$APP/Contents/MacOS/levels/$slug"
     if [ "$picture" != "-" ]; then
         mkdir -p "$(dirname "$APP/Contents/Resources/$picture")"
         cp "$REPO_FOLDER/$folder/${picture#*"$folder"/}" "$APP/Contents/Resources/$picture"
+    fi
+    if [ "$settings" != "-" ]; then
+        mkdir -p "$(dirname "$APP/Contents/Resources/$settings")"
+        cp "$REPO_FOLDER/$folder/${settings#*"$folder"/}" "$APP/Contents/Resources/$settings"
     fi
 done <<< "$level_lines"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)"

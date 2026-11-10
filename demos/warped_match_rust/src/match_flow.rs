@@ -3,19 +3,22 @@
 //! the level's winner back from the file the level writes, tells the match clients what is on, so
 //! each client can start and stop its level, and announces the match on the local network
 //! (`MatchAnnouncer`). What the server and its clients share (the levels file, the view, the
-//! client, the beacon) is `warped_shared::match_protocol`, re-exported here.
+//! client, the beacon) is `warped_shared::match_protocol`, re-exported here. It keeps the game
+//! master's settings (`warped_shared::game_settings`) and gives each round's level server its
+//! merged settings (`--server-settings`).
 //!
 //! Interface: `serve_match`, `serve_match_on`, `make_level_client_command`, and from `match_protocol`:
 //! `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `MatchTimes`, `MatchClient`,
 //! `describe_outcome`, `is_sitting_out`, `is_level_restart_due`, `stop_child`, `MATCH_PORT`,
 //! `SELF_PROGRAM`.
 //!
-//! Example: `serve_match(&levels, &MatchTimes::default(), &run_folder, MATCH_PORT, 47852)?;`
+//! Example: `serve_match(&levels, settings, &MatchTimes::default(), &run_folder, MATCH_PORT, 47852)?;`
 //!
 //! Must know:
 //! - A level program is started as `<program> --serve --port <port> [--map <map>]
-//!   --level-result-file <path> <server_args>` and joined as `<program> --join <address> --port
-//!   <port> [--map <map>] --team <team> <client_args>` (README, "Level interface").
+//!   --level-result-file <path> [--server-settings <path>] <server_args>` and joined as
+//!   `<program> --join <address> --port <port> [--map <map>] --team <team> <client_args>`
+//!   (README, "Level interface").
 
 use std::error::Error;
 use std::fs;
@@ -26,9 +29,11 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::match_state::{MatchState, Team};
 use crate::net;
+use warped_shared::game_settings::{GameSettings, SettingsMessage, parse_settings_message};
 use warped_shared::match_protocol::{
     CLIENT_TIMEOUT_S, MAX_DATAGRAM_BYTES, MatchAnnouncer, MatchBeacon, parse_hello, parse_play,
 };
@@ -68,24 +73,36 @@ fn resolve_program(level: &LevelEntry) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// `start_level_server` starts `level`'s server on `port`, writing its winner to `result_path`
-/// and its output to `log_path`.
+/// `LevelServerFiles` is where a round's level server writes its winner (`result`) and its
+/// output (`log`), and where it reads its settings (`settings`, written first).
+struct LevelServerFiles {
+    result: PathBuf,
+    log: PathBuf,
+    settings: PathBuf,
+}
+
+/// `start_level_server` starts `level`'s server on `port`, giving it `settings` (the game
+/// settings merged over its own, written to `files.settings`) when it has a settings file.
 ///
-/// Example: `let child = start_level_server(&level, 47852, &result_path, &log_path)?;`
+/// Example: `let child = start_level_server(&level, 47852, &files, Some(&merged))?;`
 fn start_level_server(
     level: &LevelEntry,
     port: u16,
-    result_path: &Path,
-    log_path: &Path,
+    files: &LevelServerFiles,
+    settings: Option<&Value>,
 ) -> Result<Child> {
     let mut command: Command = Command::new(resolve_program(level)?);
     command.args(["--serve", "--port", &port.to_string()]);
     if let Some(map) = &level.map {
         command.args(["--map", map]);
     }
-    command.arg("--level-result-file").arg(result_path);
+    command.arg("--level-result-file").arg(&files.result);
+    if let Some(settings) = settings {
+        fs::write(&files.settings, serde_json::to_string_pretty(settings)?)?;
+        command.arg("--server-settings").arg(&files.settings);
+    }
     command.args(&level.server_args);
-    let log: fs::File = fs::File::create(log_path)?;
+    let log: fs::File = fs::File::create(&files.log)?;
     println!("round level server: {command:?}");
     Ok(command
         .stdin(Stdio::null())
@@ -137,15 +154,18 @@ fn read_level_result(path: &Path) -> Result<Option<Team>> {
 
 /// `serve_match` runs one match on `levels` until it ends and `times.round_over_s` more (so the
 /// clients see the result), on UDP `match_port`, each round's level server on `level_port`, its
-/// results and logs in `run_folder`. A round starts `times.intermission_s` after a player is on
-/// each team; the match ends in a tie `times.match_s` after its first round started. A client's
-/// `play <level>` (the game master's) sets the match aside for free play on that level, round
-/// after round, and `play match` goes back to it; either ends the round being played and starts
-/// the next after an intermission, so every client follows.
+/// results, logs and settings in `run_folder`. A round starts `times.intermission_s` after a
+/// player is on each team; the match ends in a tie `times.match_s` after its first round started.
+/// A client's `play <level>` (the game master's) sets the match aside for free play on that
+/// level, round after round, and `play match` goes back to it; either ends the round being played
+/// and starts the next after an intermission, so every client follows. A client's game settings
+/// message changes `settings` (a refused change is reported, not fatal) and is answered with them;
+/// each round's level plays by them from its start.
 ///
-/// Example: `serve_match(&levels, &MatchTimes::default(), &folder, MATCH_PORT, 47852)?;`
+/// Example: `serve_match(&levels, settings, &MatchTimes::default(), &folder, MATCH_PORT, 47852)?;`
 pub fn serve_match(
     levels: &[LevelEntry],
+    settings: GameSettings,
     times: &MatchTimes,
     run_folder: &Path,
     match_port: u16,
@@ -157,6 +177,7 @@ pub fn serve_match(
     let address: SocketAddr = SocketAddr::from((listen_ip, match_port));
     serve_match_on(
         levels,
+        settings,
         times,
         run_folder,
         (address, level_port),
@@ -168,9 +189,10 @@ pub fn serve_match(
 /// round's level server on `level_port`, announcing itself with `announcer`, or not at all with
 /// `None` (a test on 127.0.0.1: no beacon, nothing open to the network).
 ///
-/// Example: `serve_match_on(&levels, &times, &folder, ("127.0.0.1:48302".parse()?, 48303), None)?;`
+/// Example: `serve_match_on(&levels, settings, &times, &folder, ("127.0.0.1:48302".parse()?, 48303), None)?;`
 pub fn serve_match_on(
     levels: &[LevelEntry],
+    mut settings: GameSettings,
     times: &MatchTimes,
     run_folder: &Path,
     (address, level_port): (SocketAddr, u16),
@@ -205,6 +227,13 @@ pub fn serve_match_on(
         {
             clients.retain(|client| client.0 != address);
             clients.push((address, team, Instant::now()));
+        }
+        let settings_message: Option<SettingsMessage> = received
+            .and_then(|(length, _)| parse_settings_message(&buffer[..length], levels.len()).ok());
+        if let Some(message) = &settings_message
+            && let Err(error) = settings.apply(message)
+        {
+            eprintln!("match: refused a game settings change: {error}");
         }
         if let Some((length, _)) = received
             && let Ok(choice) = parse_play(&buffer[..length], levels.len())
@@ -283,15 +312,18 @@ pub fn serve_match_on(
                         (level, round, format!("round_{round}"))
                     }
                 };
-                let result_path: PathBuf = run_folder.join(format!("{file_stem}.json"));
-                let log_path: PathBuf = run_folder.join(format!("{file_stem}_server.log"));
+                let files: LevelServerFiles = LevelServerFiles {
+                    result: run_folder.join(format!("{file_stem}.json")),
+                    log: run_folder.join(format!("{file_stem}_server.log")),
+                    settings: run_folder.join(format!("{file_stem}_server_settings.yaml")),
+                };
                 level_server = Some(start_level_server(
                     &levels[level],
                     level_port,
-                    &result_path,
-                    &log_path,
+                    &files,
+                    settings.get_level_settings(level).as_ref(),
                 )?);
-                round_result_path = Some(result_path);
+                round_result_path = Some(files.result);
                 match state.get_free_play() {
                     Some(_) => println!("Free round {round}: {}", levels[level].name),
                     None => println!(
@@ -380,8 +412,14 @@ pub fn serve_match_on(
         if let Some(announcer) = &mut announcer {
             announcer.announce(&MatchBeacon::FromView(&view, match_port));
         }
-        if let Some((_, address)) = received {
-            socket.send_to(&serde_json::to_vec(&view)?, address)?;
+        match (received, &settings_message) {
+            (Some((_, address)), Some(_)) => {
+                socket.send_to(&settings.to_answer(), address)?;
+            }
+            (Some((_, address)), None) => {
+                socket.send_to(&serde_json::to_vec(&view)?, address)?;
+            }
+            (None, _) => {}
         }
         if phase == Phase::Over && state.get_free_play().is_none() {
             let at: Instant = *over_at.get_or_insert_with(Instant::now);
@@ -401,10 +439,15 @@ mod tests {
     //! | Levels file | the shipped one (an even count: `warped_shared::match_protocol`) | `the_shipped_levels_file_loads` |
     //! | Level result | none yet, blue, red, garbage | `level_results_are_read` |
     //! | Game master's choice (a match server on 127.0.0.1, no beacon) | free play on a level (every round there, wins counted, no match round), back to the match (its next level) | `the_game_master_switches_levels_and_everyone_follows` |
+    //! | Game master's settings (a match server on 127.0.0.1, no beacon) | a shared and a level's change answered, then in the first round's settings file; a refused change (a level's own key as shared) answered unchanged | `the_game_masters_settings_reach_each_rounds_level` |
 
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use warped_shared::game_settings::SettingsScope;
     use warped_shared::match_state::FreePlay;
+
+    const SETTINGS_TEST_MATCH_PORT: u16 = 48_390;
+    const SETTINGS_TEST_LEVEL_PORT: u16 = 48_391;
 
     const TEST_MATCH_PORT: u16 = 48_302;
     const TEST_LEVEL_PORT: u16 = 48_303;
@@ -432,6 +475,7 @@ mod tests {
                 stand_in_for: None,
                 takes_bot_label: true,
                 map_picture: None,
+                server_settings: None,
             })
             .to_vec()
     }
@@ -485,6 +529,7 @@ mod tests {
             let address: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, TEST_MATCH_PORT));
             let result: Result<MatchState> = serve_match_on(
                 &levels,
+                GameSettings::New(vec![None; 3]),
                 &times,
                 &server_folder,
                 (address, TEST_LEVEL_PORT),
@@ -516,6 +561,93 @@ mod tests {
         let view: &MatchView = clients[0].view.as_ref().unwrap();
         assert_eq!(back.last().copied(), view.state.get_next_level());
         assert!(view.state.rounds().len() <= 1, "{:?}", view.state.rounds());
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_game_masters_settings_reach_each_rounds_level() {
+        let folder: PathBuf =
+            std::env::temp_dir().join(format!("serve_match_settings_{}", std::process::id()));
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(
+            folder.join("defaults.yaml"),
+            "respawn:\n  delay_s: 3.0\nglass:\n  max_bounce_count: 2\n",
+        )
+        .unwrap();
+        fs::write(folder.join("other.yaml"), "respawn:\n  delay_s: 3.0\n").unwrap();
+        let mut levels: Vec<LevelEntry> = make_fake_levels(&folder);
+        levels[0].server_settings = Some("other.yaml".to_string());
+        levels[1].server_settings = Some("defaults.yaml".to_string());
+        let settings: GameSettings = GameSettings::Load(&levels, &folder).unwrap();
+        let times: MatchTimes = MatchTimes {
+            intermission_s: 0.2,
+            round_over_s: 0.2,
+            match_s: 600.0,
+        };
+        let server_folder: PathBuf = folder.clone();
+        std::thread::spawn(move || {
+            let address: SocketAddr =
+                SocketAddr::from((Ipv4Addr::LOCALHOST, SETTINGS_TEST_MATCH_PORT));
+            serve_match_on(
+                &levels,
+                settings,
+                &times,
+                &server_folder,
+                (address, SETTINGS_TEST_LEVEL_PORT),
+                None,
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        });
+        let server: SocketAddr = SocketAddr::from(([127, 0, 0, 1], SETTINGS_TEST_MATCH_PORT));
+        let mut clients: [MatchClient; 2] = [
+            MatchClient::Connect(server, Some(Team::Blue)).unwrap(),
+            MatchClient::Connect(server, Some(Team::Red)).unwrap(),
+        ];
+        for message in [
+            SettingsMessage::Set {
+                scope: SettingsScope::Shared,
+                key: "respawn.delay_s".to_string(),
+                value: 7.5,
+            },
+            SettingsMessage::Set {
+                scope: SettingsScope::Level(1),
+                key: "glass.max_bounce_count".to_string(),
+                value: 4.0,
+            },
+            SettingsMessage::Set {
+                scope: SettingsScope::Shared,
+                key: "glass.max_bounce_count".to_string(),
+                value: 1.0,
+            },
+        ] {
+            clients[0].send_settings(&message).unwrap();
+        }
+        let deadline: Instant = Instant::now() + Duration::from_secs_f64(TEST_TIMEOUT_S);
+        while clients[0]
+            .settings
+            .as_ref()
+            .is_none_or(|settings| settings.levels[1].is_empty())
+        {
+            assert!(Instant::now() < deadline, "no settings answer");
+            std::thread::sleep(Duration::from_millis(20));
+            clients[0].poll().unwrap();
+        }
+        let answered: &GameSettings = clients[0].settings.as_ref().unwrap();
+        assert_eq!(answered.shared.len(), 1, "{answered:?}");
+        let played: Vec<usize> = poll_until(&mut clients, |view| {
+            matches!(view.phase, Phase::Playing { .. })
+        });
+        assert_eq!(played, [1]);
+        let path: PathBuf = folder.join("round_1_server_settings.yaml");
+        let deadline: Instant = Instant::now() + Duration::from_secs_f64(TEST_TIMEOUT_S);
+        while !path.exists() {
+            assert!(Instant::now() < deadline, "no {}", path.display());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let merged: Value = warped_shared::game_settings::read_settings_file(&path).unwrap();
+        assert_eq!(merged["respawn"]["delay_s"], 7.5);
+        assert_eq!(merged["glass"]["max_bounce_count"], 4);
         let _ = fs::remove_dir_all(&folder);
     }
 

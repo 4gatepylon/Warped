@@ -764,6 +764,7 @@ fn connect(args: &Args, files: &LevelFiles) -> Result<Option<net::Client>, Strin
             map_path: files.map_path.clone(),
             level_result_file: args.level_result_file.clone(),
             game_password: Vec::new(),
+            server_settings: args.server_settings.clone(),
         };
         std::thread::spawn(move || {
             if let Err(error) = server::run(&options, &AtomicBool::new(false)) {

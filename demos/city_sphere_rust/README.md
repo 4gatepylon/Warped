@@ -134,7 +134,8 @@ GPU).
   MetalFX upscaling when the render scale is below 1.
 - **Game** (`src/city.rs`): the window, the in-process server (when not joining), the network (the hyperbolic demo's
   `net.rs`: state, hits, consoles, the winner), the bot, `--bench-views` and `--play-route`.
-- **Settings**: `server_settings.yaml`'s new `glass` section (`max_bounce_count: 2`, `range_m: 90.0`) and
+- **Settings**: `server_settings.yaml`'s new `glass` section (`max_bounce_count: 2`, `range_m: 90.0`,
+  `reflectivity_frac: 1.0`, the share of the range left that each reflection keeps, W-158, per-map game settings) and
   `movement.walk_speed_per_map_speed: 1.2` and `movement.sprint_speed_per_map_speed: 1.44` (6 and 13 m/s, 40% slower than before, on the user's request); the rest are the hyperbolic demo's, line for line (a test checks it).
 - **Stairs** (`tools/make_map.py`): 48 steps a team, each a box standing on the street, from 2 to 4 m in front of the
   spawns up through a hole in the glass to the glass level, about 5 m short of the team's pylon, with the map's

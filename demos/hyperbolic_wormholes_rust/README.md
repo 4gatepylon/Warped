@@ -201,8 +201,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
-  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature); it sends them to every
-  player who joins.
+  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature, and Lunar Surface's own
+  `surface.gravity_per_jump_gravity`: the ground's pull times what the jump settings give, the jump's speed kept,
+  W-158); it sends them to every player who joins.
 - `GAME_PASSWORD_FILE=password.txt` (`--game-password-file`) gives a server a password, and players the same file:
   the server challenges each join and admits only players who prove they know it, without the password crossing
   the network, and refuses a game of another version with a clear message. Without it anyone can join, which

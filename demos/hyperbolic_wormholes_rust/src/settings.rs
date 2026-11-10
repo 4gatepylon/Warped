@@ -13,7 +13,8 @@
 //! Must know:
 //! - Every key is required and unknown keys fail, so a typo can't silently keep a default. The only
 //!   exceptions are named: player keys removed since saves began (`REMOVED_PLAYER_KEYS`) are
-//!   dropped, and those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing.
+//!   dropped, those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing, and
+//!   so does the server's `surface` section (W-158), so older server settings files still load.
 //! - The built-in settings are the two files themselves, compiled in.
 //! - `PerPlayerSettings` exists only on macOS, where the game's window runs (its keys are SDL's);
 //!   the game server also builds for Linux.
@@ -121,6 +122,26 @@ pub struct PerPlayerSettings {
     pub minimap: MinimapSettings,
 }
 
+/// `SurfaceSettings` is Lunar Surface's own game setting (W-158, per-map game settings): how
+/// strongly the ground pulls players down, times the gravity the jump settings give, with the
+/// jump's launch speed kept, so 0.5 makes jumps twice as high and twice as long.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct SurfaceSettings {
+    pub gravity_per_jump_gravity: f64,
+}
+
+impl Default for SurfaceSettings {
+    /// `default` is the gravity the jump settings give, unchanged.
+    ///
+    /// Example: `let surface: SurfaceSettings = SurfaceSettings::default();`
+    fn default() -> SurfaceSettings {
+        SurfaceSettings {
+            gravity_per_jump_gravity: 1.0,
+        }
+    }
+}
+
 /// `ServerSettings` is everything in `server_settings.yaml`.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -141,6 +162,8 @@ pub struct ServerSettings {
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
     pub black_hole: BlackHoleSettings,
+    #[serde(default)]
+    pub surface: SurfaceSettings,
     #[serde(default)]
     pub gravity: GravitySettings,
 }
@@ -685,16 +708,26 @@ mod tests {
     #[test]
     fn gravity_defaults_and_overrides() {
         let builtin: ServerSettings = ServerSettings::Builtin();
-        assert!(!BUILTIN_SERVER_YAML.contains("gravity:"));
         assert_eq!(builtin.gravity, GravitySettings::default());
+        let mut is_in_gravity: bool = false;
+        let without_gravity: String = BUILTIN_SERVER_YAML
+            .lines()
+            .filter(|line| {
+                if !line.starts_with(' ') && !line.is_empty() {
+                    is_in_gravity = line.starts_with("gravity:");
+                }
+                !is_in_gravity
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+        let left_out: ServerSettings =
+            ServerSettings::FromYaml(&without_gravity, "test").expect("no gravity section");
+        assert_eq!(left_out.gravity, GravitySettings::default());
         let json_back: ServerSettings =
             ServerSettings::FromJson(&builtin.to_json()).expect("the built-in settings as JSON");
         assert_eq!(json_back, builtin);
         let with_gravity = |section: &str| -> Result<ServerSettings> {
-            ServerSettings::FromYaml(
-                &format!("{BUILTIN_SERVER_YAML}\ngravity: {section}\n"),
-                "test",
-            )
+            ServerSettings::FromYaml(&format!("{without_gravity}\ngravity: {section}\n"), "test")
         };
         let one_key: ServerSettings = with_gravity("{reach_m: 12.0}").expect("one key");
         assert_eq!(

@@ -956,7 +956,8 @@ fn start_server(
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let flag: Arc<AtomicBool> = Arc::clone(&should_stop);
     let should_start_new_game: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    let freezing: net::Freezing = net::Freezing::FromMapName(map_name)?;
+    let freezing: net::Freezing =
+        net::Freezing::FromMapName(map_name, settings.blizzard.radius_per_map_radius)?;
     let map_name: String = map_name.to_string();
     let new_game_flag: Arc<AtomicBool> = Arc::clone(&should_start_new_game);
     std::thread::spawn(move || {

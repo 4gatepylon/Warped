@@ -4,7 +4,8 @@
 //! settings use it alike; it keeps no window state, so a window feeds it inputs and draws its
 //! lines.
 //!
-//! Interface: `SettingsEditor` (`New`, `handle`, `is_rebinding`, `get_lines`, `show_message`),
+//! Interface: `SettingsEditor` (`New`, `handle`, `is_rebinding`, `get_lines`, `show_message`,
+//! `get_selected_row`),
 //! `EditorRow`, `RowKind`, `EditorInput`, `EditorOutcome`, `check_fn_t`, `get_at`, `set_at`.
 //!
 //! Example: `let outcome = editor.handle(EditorInput::Right, &mut values, &defaults, &check);`
@@ -147,6 +148,14 @@ impl SettingsEditor {
     /// Example: `if editor.is_rebinding() { ... }`
     pub fn is_rebinding(&self) -> bool {
         self.is_rebinding
+    }
+
+    /// `get_selected_row` gives the row selected now, so a caller can act on its key (the game
+    /// master's page sends each change to the match server).
+    ///
+    /// Example: `let row: &EditorRow = editor.get_selected_row();`
+    pub fn get_selected_row(&self) -> &EditorRow {
+        &self.rows[self.selected]
     }
 
     /// `show_message` shows `message` under the rows until the next input.

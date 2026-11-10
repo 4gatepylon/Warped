@@ -345,6 +345,7 @@ pub struct VoxelWorld {
     pub gravity_m_per_s2: f64,
     map_player: PlayerSettings,
     map_gravity_m_per_s2: f64,
+    map_wind_k: f64,
     pub settings: ServerSettings,
     pub head_bob: HeadBobSettings,
     pub spawns: Vec<DMat4>,
@@ -1040,6 +1041,10 @@ impl VoxelWorld {
             gravity_m_per_s2: map.gravity_m_per_s2,
             map_player: map.player,
             map_gravity_m_per_s2: map.gravity_m_per_s2,
+            map_wind_k: map
+                .atmosphere
+                .and_then(|a| a.wind)
+                .map_or(0.0, |wind| WindField::FromMap(&wind, r).k),
             settings: ServerSettings::Builtin(),
             head_bob: PerPlayerSettings::Builtin().view.head_bob,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
@@ -1079,10 +1084,14 @@ impl VoxelWorld {
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
-    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
+    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows);
+    /// and the sandstorm's wind at `sandstorm.wind_per_map_wind` times the map's.
     ///
     /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
     pub fn set_settings(&mut self, settings: ServerSettings) {
+        if let Some(wind) = &mut self.wind {
+            wind.k = self.map_wind_k * settings.sandstorm.wind_per_map_wind;
+        }
         let movement = &settings.movement;
         let half_jump_s: f64 = self.map_player.jump_m_per_s / self.map_gravity_m_per_s2
             * movement.jump_time_per_map_jump_time;
@@ -4076,8 +4085,25 @@ mod parity_tests {
     const LUNAR_SETTINGS_PATH: &str = "../hyperbolic_wormholes_rust/server_settings.yaml";
     const DUST_ONLY_SETTINGS: [&str; 2] =
         ["jump_time_per_map_jump_time", "curvature_per_map_curvature"];
+    const LEVEL_OWN_SECTIONS: [&str; 2] = ["sandstorm:", "surface:"];
     const DUST_JUMP_AT_M: [f64; 2] = [-95.0, 6.0];
     const LUNAR_JUMP_AT_M: [f64; 2] = [-27.0, 0.0];
+
+    /// `load_lunar_settings` reads Lunar Surface's server settings without its own `surface`
+    /// section (W-158), which Dust's don't have.
+    fn load_lunar_settings() -> ServerSettings {
+        let text: String = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
+        )
+        .expect("Lunar Surface's server settings");
+        let mut yaml: serde_yaml::Value = serde_yaml::from_str(&text).expect("YAML");
+        yaml.as_mapping_mut()
+            .expect("sections")
+            .remove("surface")
+            .expect("Lunar Surface's own section");
+        ServerSettings::FromJson(&serde_json::to_vec(&yaml).expect("JSON"))
+            .expect("Lunar Surface's server settings")
+    }
 
     /// `load_dust` builds Dust's world as the game does, with Dust's server settings.
     fn load_dust() -> VoxelWorld {
@@ -4114,12 +4140,7 @@ mod parity_tests {
         let lunar_map: Map =
             Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
         let mut lunar: VoxelWorld = VoxelWorld::FromMap(&lunar_map).expect("a voxel world");
-        lunar.set_settings(
-            ServerSettings::Load(
-                &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
-            )
-            .expect("Lunar Surface's server settings"),
-        );
+        lunar.set_settings(load_lunar_settings());
         let (lunar_apex_m, lunar_step_count) = measure_jump(&lunar, LUNAR_JUMP_AT_M);
         let (dust_apex_m, dust_step_count) = measure_jump(&load_dust(), DUST_JUMP_AT_M);
         assert!(
@@ -4167,6 +4188,11 @@ mod parity_tests {
             std::fs::read_to_string(root.join(path))
                 .expect("a settings file")
                 .lines()
+                .take_while(|line| {
+                    !LEVEL_OWN_SECTIONS
+                        .iter()
+                        .any(|section| line.starts_with(section))
+                })
                 .filter(|line| {
                     !DUST_ONLY_SETTINGS
                         .iter()
