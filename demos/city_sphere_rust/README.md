@@ -87,6 +87,11 @@ it); leave it unset to play across computers.
   types, the maps' models and the robot body, the smooth shapes, the key bindings, finding assets) are in
   [`../warped_shared_rust/`](../warped_shared_rust/README.md), a library this crate depends on; the rest of the
   copied Lunar Surface code is still in `src/`.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): City Sphere has no warps of its
+  own, so only linked thrown mouths pull: `CityWorld::move_player` adds their pull along the sphere's ground, measured
+  from the body's middle, to the walk (faster toward a mouth, slower away, a slow drift standing still); the window
+  and the bots pass every linked pair in the game. Voxel maps played here pull as Lunar Surface does.
 - **World** (`src/city_world.rs`): reads the map (boxes as oriented boxes, the street sphere, the glass and core
   shells, the lift holes, spawns, consoles in the server's order). A player is feet, body axes (up toward the centre)
   and head pitch; each step turns the body the least way to keep up toward the centre, walks along the ground,

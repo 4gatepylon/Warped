@@ -9,6 +9,7 @@
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
 //! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
+//! - `gravity`: the pull of black holes and wormhole mouths on a player on the ground.
 //! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
@@ -45,6 +46,7 @@ pub mod avatar_model;
 pub mod fps_demo_assets;
 pub mod gait;
 pub mod geometry;
+pub mod gravity;
 pub mod health;
 #[cfg(target_os = "macos")]
 pub mod hud;

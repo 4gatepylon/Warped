@@ -10,6 +10,9 @@
 #     `make serve-game` or `make host-game` (`--server-settings`). Every key is required, unknown keys
 #     fail, and numbers must be above 0 unless their note says 0 is allowed. Each name ends in its
 #     unit: `_m` meters, `_s` seconds, `_rad` radians, `_per_s` per second.
+#     The `gravity` section (W-144: how black holes and wormhole mouths pull walkers) may be left
+#     out or give only some of its keys; the rest take the values every level shares, from
+#     `warped_shared`'s `GravitySettings`: `max_pull_per_walk_speed`, `full_pull_m`, `reach_m`.
 #
 # Example:
 #     cp server_settings.yaml fast.yaml  # edit fast.yaml, then:

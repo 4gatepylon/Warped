@@ -43,6 +43,11 @@ it); leave it unset to play across computers.
   basin with dunes, sandstone mesas, pillars, ruin walls and an arch, HESCO rows, bunkers, 3 pylons per team
   (mirrored), spawns at u = ±104 m, a wormhole pair near (-50, -40) and (50, 40) m, centred at eye height so
   players walk through it.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): `VoxelPlayer::step` adds the pull
+  of every black hole and wormhole mouth, the map's and the linked thrown ones (`VoxelWorld::get_warp_pull_m_per_s`,
+  along the geodesic to each, across the body's up), to the walk: faster toward a warp, slower away, a slow drift
+  standing still. Bots step by the same rule.
 - **Wind**: the map's `atmosphere.wind` is a refractive-index field, ln n = k d, where d is the signed hyperbolic
   distance (m) to the plane through the origin perpendicular to `direction`, and k is
   `log_index_gradient_per_m` (0.00144 /m). Light follows the ray equation, so it curves toward higher n, i.e.

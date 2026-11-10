@@ -1114,7 +1114,8 @@ pub fn serve(
     );
     let port: u16 = socket.local_addr()?.port();
     let beacon_ip: Ipv4Addr = network_scope::get_beacon_ip(is_loopback_only());
-    let beacon_socket: UdpSocket = network_scope::bind_socket_toward(beacon_ip.into())?;
+    let beacon_target: SocketAddr = SocketAddr::from((beacon_ip, DISCOVERY_PORT));
+    let beacon_socket: UdpSocket = network_scope::bind_socket_toward(beacon_target)?;
     let mut beacon: Vec<u8> = vec![Kind::Beacon as u8];
     beacon.extend_from_slice(BEACON_MAGIC);
     beacon.extend_from_slice(&port.to_le_bytes());
@@ -1176,7 +1177,7 @@ pub fn serve(
             && last_beacon.is_none_or(|time| time.elapsed().as_secs_f64() >= BEACON_PERIOD_S)
         {
             if let Err(error) =
-                beacon_socket.send_to(&beacon, (beacon_ip, DISCOVERY_PORT))
+                beacon_socket.send_to(&beacon, beacon_target)
                 && !has_warned_about_beacon
             {
                 has_warned_about_beacon = true;
@@ -1326,7 +1327,7 @@ impl Client {
     /// Example: `let mut client = Client::Connect("192.168.1.20:47800".parse()?, "lunar_surface", b"")?;`
     #[allow(non_snake_case)]
     pub fn Connect(server: SocketAddr, map_name: &str, game_password: &[u8]) -> Result<Client> {
-        let socket: UdpSocket = network_scope::bind_socket_toward(server.ip())?;
+        let socket: UdpSocket = network_scope::bind_socket_toward(server)?;
         socket.set_nonblocking(true)?;
         socket.send_to(&make_lobby_query().0, server)?;
         Ok(Client {

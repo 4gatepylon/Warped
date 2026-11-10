@@ -3,7 +3,7 @@
 //! firewall permission while real players still find and join games across computers.
 //!
 //! Interface: `LOOPBACK_ONLY_VARIABLE`, `is_loopback_only`, `get_listen_ip`, `get_beacon_ip`,
-//! `bind_socket_toward`.
+//! `get_bind_ip`, `bind_socket_toward`.
 //!
 //! Example: `let socket = UdpSocket::bind((network_scope::get_listen_ip(network_scope::is_loopback_only()), port))?;`
 //!
@@ -14,7 +14,7 @@
 //!   loopback-only without it (`cfg!(test)` in the crate's `net.rs`).
 
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 
 pub const LOOPBACK_ONLY_VARIABLE: &str = "WARPED_LOOPBACK_ONLY";
 
@@ -59,17 +59,25 @@ pub fn get_beacon_ip(is_loopback_only: bool) -> Ipv4Addr {
     }
 }
 
-/// `bind_socket_toward` opens a socket on a free port for talking to `peer_ip`: on 127.0.0.1
-/// when `peer_ip` is loopback (so nothing reaches the network), else on every interface, allowed
-/// to broadcast only when `peer_ip` is the broadcast address.
+/// `get_bind_ip` gives the address a socket talking to `peer` binds to: the loopback interface
+/// for a peer on this Mac (so tests and local games never open a port to the network), else every
+/// interface.
 ///
-/// Example: `let socket = bind_socket_toward(server.ip())?;`
-pub fn bind_socket_toward(peer_ip: IpAddr) -> io::Result<UdpSocket> {
-    if peer_ip.is_loopback() {
-        return UdpSocket::bind((Ipv4Addr::LOCALHOST, 0));
+/// Example: `let socket = UdpSocket::bind((get_bind_ip(server), 0))?;`
+pub fn get_bind_ip(peer: SocketAddr) -> Ipv4Addr {
+    match peer.ip().is_loopback() {
+        true => Ipv4Addr::LOCALHOST,
+        false => Ipv4Addr::UNSPECIFIED,
     }
-    let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-    socket.set_broadcast(peer_ip == IpAddr::V4(Ipv4Addr::BROADCAST))?;
+}
+
+/// `bind_socket_toward` opens a socket on a free port of `get_bind_ip(peer)` for talking to
+/// `peer`, allowed to broadcast only when `peer` is the broadcast address.
+///
+/// Example: `let socket = bind_socket_toward(server)?;`
+pub fn bind_socket_toward(peer: SocketAddr) -> io::Result<UdpSocket> {
+    let socket: UdpSocket = UdpSocket::bind((get_bind_ip(peer), 0))?;
+    socket.set_broadcast(peer.ip() == Ipv4Addr::BROADCAST)?;
     Ok(socket)
 }
 
@@ -83,6 +91,7 @@ mod tests {
     //! | Variable | unset, `0`, `1` | `the_variable_turns_loopback_only_on` |
     //! | Bad variable | `yes` | `a_bad_variable_stops_the_program` |
     //! | Addresses | loopback only, local network | `loopback_only_listens_and_beacons_on_loopback` |
+    //! | Bind address | a peer on this Mac (loopback only), on the network (every interface) | `sockets_to_this_mac_bind_loopback_only` |
     //! | Socket toward a peer | a loopback peer (127.0.0.1, its beacon target when loopback only) | `a_socket_toward_loopback_stays_on_loopback` |
 
     use super::*;
@@ -109,8 +118,21 @@ mod tests {
     }
 
     #[test]
+    fn sockets_to_this_mac_bind_loopback_only() {
+        assert_eq!(
+            get_bind_ip("127.0.0.1:48300".parse().unwrap()),
+            Ipv4Addr::LOCALHOST
+        );
+        assert_eq!(
+            get_bind_ip("10.0.0.2:48300".parse().unwrap()),
+            Ipv4Addr::UNSPECIFIED
+        );
+    }
+
+    #[test]
     fn a_socket_toward_loopback_stays_on_loopback() {
-        let socket: UdpSocket = bind_socket_toward(IpAddr::V4(get_beacon_ip(true))).unwrap();
+        let peer: SocketAddr = SocketAddr::from((get_beacon_ip(true), 48_300));
+        let socket: UdpSocket = bind_socket_toward(peer).unwrap();
         assert_eq!(socket.local_addr().unwrap().ip(), Ipv4Addr::LOCALHOST);
         assert!(!socket.broadcast().unwrap());
     }
