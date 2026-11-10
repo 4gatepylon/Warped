@@ -1200,7 +1200,8 @@ fn bench_voxel_views(
 
 /// `run_bot` plays as a bot without a window for `--exit-after-s` seconds (see
 /// `multiplayer::run_bot`), saving its view at each hit under `.artifacts/bot/<run_id>/`, and
-/// prints how many players it hit and how often it was hit.
+/// prints how many players it hit and how often it was hit. The bot joins the team of `--team`, or
+/// the smaller team without it.
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
@@ -1210,7 +1211,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         arguments.map.get_folder_name(),
         &net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
-    client.join(None)?;
+    client.join(arguments.team.map(city::TeamName::get_index))?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
     let duration_s: f64 = arguments

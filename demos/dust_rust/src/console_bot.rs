@@ -4,11 +4,13 @@
 //! `--bot-objective consoles` bot (`ConsoleWalker`) walks to the other team's consoles and holds `E`
 //! on each only once its view meets it within reach (`ConsolePlace::is_held_from`, the server's own
 //! test), so a bot win shows that every pylon can be reached on foot (W-126). A fighting bot
-//! (`Fighter`) walks to the nearest enemy until it sees them, then faces them and fires.
+//! (`Fighter`) walks to the nearest enemy until it sees them, then faces them and fires. It never
+//! hurts a teammate (`find_enemy_hit`), and steps out from behind one its laser meets
+//! (`Fighter::note_teammate_hit`).
 //!
 //! Interface: `Navigator`, `ConsoleWalker`, `Fighter` (each `New`, `step` or `walk_toward`, and
 //! `restart` after a respawn),
-//! `WalkStep`, `FightStep`, `Danger`, `find_warp_dangers`.
+//! `WalkStep`, `FightStep`, `Danger`, `find_warp_dangers`, `find_enemy_hit`.
 //!
 //! Example: `let walk = walker.step(&world, &mut player, off_mask, team, 3.0, now_s, 1.0 / 60.0);`
 //!
@@ -49,6 +51,8 @@ const LINE_SAMPLE_M: f64 = 1.0;
 const SCAN_TURNS_PER_S: f64 = 1.5;
 const SCAN_GROWTH_RAD_PER_S: f64 = 0.03;
 const MAX_SCAN_RAD: f64 = 0.12;
+const STEP_ASIDE_S: f64 = 0.4;
+const STEP_ASIDE_SLOT_COUNT: u32 = 3;
 
 /// `Danger` is a place a walking bot keeps out of: within `radius_m` of `point`.
 #[derive(Clone, Copy, Debug)]
@@ -348,12 +352,14 @@ impl ConsoleWalker {
 }
 
 /// `Fighter` is a fighting bot's plan: its navigator, the enemy it goes after, how long it has
-/// fired without a hit (`scan_s`), and the aim offset (right and up, radians) of its last hit.
+/// fired without a hit (`scan_s`), the aim offset (right and up, radians) of its last hit, and its
+/// step out from behind a teammate (`step_aside`: to the right or the left, and until when).
 pub struct Fighter {
     navigator: Navigator,
     target_id: Option<u32>,
     scan_s: f64,
     hit_offset_rad: Option<(f64, f64)>,
+    step_aside: Option<(bool, f64)>,
 }
 
 impl Fighter {
@@ -367,6 +373,7 @@ impl Fighter {
             target_id: None,
             scan_s: 0.0,
             hit_offset_rad: None,
+            step_aside: None,
         }
     }
 
@@ -375,7 +382,21 @@ impl Fighter {
     /// Example: `fighter.restart();`
     pub fn restart(&mut self) {
         self.target_id = None;
+        self.step_aside = None;
         self.navigator.stand();
+    }
+
+    /// `note_teammate_hit` tells the fighter, the player `own_id`, that its laser met a teammate at
+    /// time `now_s`: it holds its fire and steps aside (`step`), to a side and for a time that
+    /// differ from one id to the next, so bots standing in one line or on one spot come apart.
+    ///
+    /// Example: `fighter.note_teammate_hit(own_id, now_s);`
+    pub fn note_teammate_hit(&mut self, own_id: u32, now_s: f64) {
+        if self.step_aside.is_none() {
+            let slot: u32 = own_id / 2 % STEP_ASIDE_SLOT_COUNT;
+            let until_s: f64 = now_s + STEP_ASIDE_S * f64::from(slot + 1);
+            self.step_aside = Some((own_id.is_multiple_of(2), until_s));
+        }
     }
 
     /// `note_shot` tells the fighter whether its laser hit the enemy this step (`dt_s` long): it
@@ -408,7 +429,7 @@ impl Fighter {
     /// last), against the nearest of `enemies` (each one's id and eye point): it walks to them
     /// around blocks and dangers (`Navigator`), firing once it sees them within `FIRE_RANGE_M` with
     /// no danger between, and within `CLOSE_M` stands, faces them (offset by `get_scan_offset_rad`)
-    /// and fires.
+    /// and fires. After `note_teammate_hit` it first steps aside with its laser off.
     ///
     /// Example: `let fight = fighter.step(&world, &mut player, &enemies, now_s, 1.0 / 60.0);`
     pub fn step(
@@ -432,6 +453,21 @@ impl Fighter {
             self.target_id = Some(id);
             self.navigator.start_goal();
             (self.scan_s, self.hit_offset_rad) = (0.0, None);
+        }
+        if let Some((is_right, until_s)) = self.step_aside {
+            if now_s < until_s {
+                turn_toward(player, target);
+                let input: Input = Input {
+                    right: is_right,
+                    left: !is_right,
+                    ..Input::default()
+                };
+                return FightStep {
+                    input,
+                    is_laser_on: false,
+                };
+            }
+            self.step_aside = None;
         }
         let distance_m: f64 = get_distance(eye, target) * world.r;
         let toward: DVec4 = normalize_tangent(eye, target);
@@ -498,6 +534,15 @@ fn aim_pitch(player: &mut VoxelPlayer, camera: DMat4, point: DVec4) {
     );
 }
 
+/// `find_enemy_hit` gives the player a bot's laser hit (`hit_player_id`) when they are one of
+/// `enemies` (each one's id and eye point), and nobody when the laser met a teammate: a bot never
+/// hurts its own team, whatever the server's friendly fire setting.
+///
+/// Example: `let victim: Option<u32> = find_enemy_hit(view.hit_player_id, &enemies);`
+pub fn find_enemy_hit(hit_player_id: Option<u32>, enemies: &[(u32, DVec4)]) -> Option<u32> {
+    hit_player_id.filter(|hit_id| enemies.iter().any(|(enemy_id, _)| enemy_id == hit_id))
+}
+
 /// `find_warp_dangers` gives each of `world`'s wormhole mouths and black holes as a danger: a
 /// mouth's throat moves a player elsewhere and a black hole's horizon sends them back to their
 /// spawn.
@@ -525,6 +570,9 @@ mod tests {
     //! | --- | --- | --- |
     //! | Angle to wrap | inside (-π, π], above it, below it | `angles_wrap_into_one_turn` |
     //! | A danger on the way | none, beside the way (kept), across the way (bent around), around the bot (away) | `the_way_bends_around_dangers` |
+    //! | Whom a bot's laser met | nobody, an enemy (hit), a teammate (spared) | `a_bot_hits_enemies_only` |
+    //! | A fighter's id, once its laser met a teammate | even (steps right), odd (steps left); each of the three lengths of step | `a_fighter_steps_out_from_behind_a_teammate` |
+    //! | Time since a fighter's laser met a teammate | within its step aside (laser off, sideways key only), after it (fights again), after a respawn (forgotten) | `a_fighter_steps_out_from_behind_a_teammate` |
     //! | A window's hold on a built-in map's pylon | from each side, near and at the edge of reach, standing (the server takes every hold the window's own aim makes) | `the_server_takes_every_hold_a_window_makes` |
 
     use clap::ValueEnum;
@@ -542,6 +590,11 @@ mod tests {
     const GAPS_M: [f64; 3] = [0.5, 1.5, 2.9];
     const PYLON_RADIUS_M: f64 = 1.35;
     const EYE_HEIGHT_M: f64 = 1.6;
+    const ENEMY_ID: u32 = 7;
+    const TEAMMATE_ID: u32 = 4;
+    const ENEMY_AHEAD_M: f64 = 5.0;
+    const NOW_S: f64 = 10.0;
+    const STEP_S: f64 = 1.0 / 60.0;
 
     /// `point_at` gives the ground point `along_m` ahead (-z) and `right_m` to the right (+x) of
     /// the origin.
@@ -582,6 +635,48 @@ mod tests {
             radius_m: 5.0,
         };
         assert!(heading(vec![around]).abs() < ANGLE_TOLERANCE_RAD);
+    }
+
+    #[test]
+    fn a_bot_hits_enemies_only() {
+        let enemies: [(u32, DVec4); 1] = [(ENEMY_ID, point_at(ENEMY_AHEAD_M, 0.0))];
+        assert_eq!(find_enemy_hit(None, &enemies), None);
+        assert_eq!(find_enemy_hit(Some(ENEMY_ID), &enemies), Some(ENEMY_ID));
+        assert_eq!(find_enemy_hit(Some(TEAMMATE_ID), &enemies), None);
+    }
+
+    #[test]
+    fn a_fighter_steps_out_from_behind_a_teammate() {
+        let map: Map = MapName::value_variants()
+            .iter()
+            .map(|name| Map::Builtin(name.get_folder_name()).expect("a built-in map"))
+            .find(|map| !map.structures.is_empty())
+            .expect("a map with structures");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a world");
+        let mut player: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
+        let ahead: DMat4 =
+            player.get_camera_frame(&world) * make_boost(AXIS_Z, -ENEMY_AHEAD_M / world.r);
+        let enemies: [(u32, DVec4); 1] = [(ENEMY_ID, ahead.col(AXIS_W))];
+        for (own_id, is_right, slot_count) in
+            [(0, true, 1), (1, false, 1), (2, true, 2), (5, false, 3)]
+        {
+            let mut fighter: Fighter = Fighter::New(Vec::new());
+            fighter.note_teammate_hit(own_id, NOW_S);
+            let last_s: f64 = NOW_S + STEP_ASIDE_S * f64::from(slot_count);
+            let aside: FightStep =
+                fighter.step(&world, &mut player, &enemies, last_s - STEP_S, STEP_S);
+            assert!(!aside.is_laser_on, "player {own_id} holds its fire");
+            assert_eq!(
+                (aside.input.right, aside.input.left, aside.input.forward),
+                (is_right, !is_right, false),
+                "player {own_id}"
+            );
+            fighter.step(&world, &mut player, &enemies, last_s + STEP_S, STEP_S);
+            assert!(fighter.step_aside.is_none(), "player {own_id} fights again");
+            fighter.note_teammate_hit(own_id, NOW_S);
+            fighter.restart();
+            assert!(fighter.step_aside.is_none(), "a respawn forgets the step");
+        }
     }
 
     #[test]

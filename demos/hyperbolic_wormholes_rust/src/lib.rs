@@ -1294,9 +1294,10 @@ fn bench_voxel_views(
 /// `run_bot` plays as a bot without a window for `--exit-after-s` seconds (see
 /// `multiplayer::run_bot`), saving its view at each hit under `.artifacts/bot/<run_id>/` with
 /// `--bot-hit-pictures` (no renderer is made without it, so a bot leaves the GPU to the players),
-/// and prints how many players it hit and how often it was hit.
+/// and prints how many players it hit and how often it was hit. The bot joins the team of `--team`,
+/// or the smaller team without it.
 ///
-/// Example: `run_bot(&arguments, renderer)?;`
+/// Example: `run_bot(&arguments)?;`
 fn run_bot(arguments: &Arguments) -> Result<()> {
     let map: map::Map = load_map(arguments.map, &ServerSettings::Builtin())?;
     let mut client: net::Client = net::Client::Connect(
@@ -1304,7 +1305,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         arguments.map.get_folder_name(),
         &net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
-    client.join(None)?;
+    client.join(arguments.team.map(|team| team as u32))?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let duration_s: f64 = arguments
         .exit_after_s

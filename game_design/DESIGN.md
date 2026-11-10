@@ -129,7 +129,8 @@ For example:
 - Friendly fire is a game setting, on by default (`shooting.is_friendly_fire_on`, W-156 (friendly fire, by game
   setting); the user: "add setting in game settings to toggle whether or not friendly fire is possible"). When on, a
   shot eliminates a teammate as it would an enemy, but only an enemy counts as a kill; when off, a shot doesn't
-  hurt teammates.
+  hurt teammates. A bot never hurts a teammate, whatever the setting: a bot whose laser meets a teammate holds its
+  fire and steps aside (W-155 (play against bots)).
 - The game counts each player's kills and deaths, shown on the scoreboard (see [Screen](#screen)).
 
 ### Respawning
