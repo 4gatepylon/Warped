@@ -24,7 +24,8 @@ and the other commit rules are in the "Commits" section of [`SKILL.md`](SKILL.md
   one edits, reorders or drops a bullet, not even after a revert (see "Reverting").
 - An item whose earlier commits don't use this format starts with the header and no bullets.
 
-A whole message:
+A subject and body (the trailers that end the message are in
+[`commit-fields.md`](commit-fields.md)):
 
 ```text
 wishlist(demos/hyperbolic_wormholes_rust): claim W-203 (pull toward black holes)
