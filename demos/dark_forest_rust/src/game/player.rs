@@ -3,13 +3,15 @@
 //! head bob and a hit's slowing come from `MoveState::step`, with the numbers of `Movement` (the
 //! map's own times the server settings, as Lunar's `VoxelWorld::set_settings` works them out);
 //! the forest (`Forest`, a `Ground`) then carries the step out: jumping, gravity, its own rope
-//! ladders, collision and landing dip.
+//! ladders, collision, landing dip, and the soft edge past the playable area, where each step
+//! outward is cut more and more (`warped_shared::map_edge`, W-145, no walls at map edges).
 //!
 //! Example:
-//!     player.update(&input, &movement, &solids, &ladders, dt_s);
+//!     player.update(&input, &movement, &solids, &ladders, arena.soft_edge.as_ref(), dt_s);
 //!     let eye_m: Vec3 = player.eye_position_m();
 
 use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
+use warped_shared::map_edge::{SoftEdge, take_step};
 use warped_shared::movement::{Ground, MoveInput, MoveIntent, MoveRules, MoveState};
 
 use super::collision::{Aabb, MoveResult, move_body};
@@ -141,11 +143,35 @@ pub struct Player {
 }
 
 /// `Forest` is the forest as the movement rules' `Ground`: its boxes to collide with, its rope
-/// ladders, and the map's jump and gravity (`Movement`).
+/// ladders, the map's jump and gravity (`Movement`), and its soft edge, if it has one.
 pub struct Forest<'a> {
     pub movement: &'a Movement,
     pub solids: &'a [Aabb],
     pub ladders: &'a [LadderVolume],
+    pub soft_edge: Option<&'a SoftEdge>,
+}
+
+impl Forest<'_> {
+    /// `cut_at_edge` gives the part of a move `step_m` from feet at `feet_m` that the soft edge
+    /// lets through: its horizontal part cut by `map_edge::take_step` when it heads further into
+    /// the edge, its vertical part whole. It is `step_m` itself on a map without a soft edge.
+    ///
+    /// Example: `let kept_m: Vec3 = forest.cut_at_edge(player.feet_m, velocity_m_s * dt_s);`
+    fn cut_at_edge(&self, feet_m: Vec3, step_m: Vec3) -> Vec3 {
+        let Some(soft_edge) = self.soft_edge else {
+            return step_m;
+        };
+        let get_edge_frac =
+            |at_m: &Vec3| -> f64 { soft_edge.get_edge_frac(f64::from(-at_m.z), f64::from(at_m.x)) };
+        let horizontal_m: Vec3 = step_m.with_y(0.0);
+        let moved_m: Vec3 = take_step(
+            1.0,
+            get_edge_frac(&feet_m),
+            |share: f64| feet_m + horizontal_m * share as f32,
+            get_edge_frac,
+        );
+        (moved_m - feet_m).with_y(step_m.y)
+    }
 }
 
 impl Player {
@@ -264,6 +290,7 @@ impl Player {
         movement: &Movement,
         solids: &[Aabb],
         ladders: &[LadderVolume],
+        soft_edge: Option<&SoftEdge>,
         dt_s: f32,
     ) {
         self.since_hit_s += dt_s;
@@ -330,6 +357,7 @@ impl Player {
             movement,
             solids,
             ladders,
+            soft_edge,
         };
         self.is_on_ground = forest.move_body(self, &intent, f64::from(dt_s));
     }
@@ -409,7 +437,7 @@ impl Ground for Forest<'_> {
                 self.solids,
                 body.feet_m,
                 Player::half_extent_m(body.height_m),
-                delta_m / step_count as f32,
+                self.cut_at_edge(body.feet_m, delta_m / step_count as f32),
                 is_on_ground || body.is_climbing,
             );
             body.feet_m = result.position_m;
@@ -445,6 +473,7 @@ impl Ground for Forest<'_> {
 /// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
 /// | time since death | before the settings' respawn delay, after it | `test_respawn_waits_the_settings_delay` |
 /// | rules' state each step | walking, sprinting, crouching, jumping, standing, hit: the shared `MoveState` stepped with the same keys and ground, bit for bit | `test_the_rules_are_the_shared_ones` |
+/// | walking off the map's soft edge (W-145, no walls at map edges) | out past an end and past a side (slower each second, never at the band's far side), back in from deep in the band (full speed) | `test_walking_off_the_map_slows_without_end` |
 #[cfg(test)]
 mod tests {
     use glam::Mat4;
@@ -532,9 +561,79 @@ mod tests {
         let movement: Movement = forest_movement();
         let dt_s: f32 = 1.0 / 120.0;
         for _ in 0..(seconds / dt_s) as usize {
-            player.update(&input, &movement, &solids, &ladders, dt_s);
+            player.update(&input, &movement, &solids, &ladders, None, dt_s);
         }
         player.feet_m
+    }
+
+    /// `test_walking_off_the_map_slows_without_end` checks the map's soft edge on open ground:
+    /// walking straight out past an end (along −z) or a side (along +x) from just inside, the
+    /// player gets further out every second but by less each second once past the edge, and never
+    /// reaches the band's far side; walking back in from there goes at full walking speed.
+    #[test]
+    fn test_walking_off_the_map_slows_without_end() {
+        const WALK_OFF_S: usize = 12;
+        const STEPS_PER_S: usize = 120;
+        const MIN_DEPTH_M: f32 = 9.0;
+        let map: MapFile = map::load(&map::default_map_path()).expect("the map loads");
+        let boundary: &map::Boundary = map
+            .regions
+            .as_ref()
+            .and_then(|regions| regions.boundary.as_ref())
+            .expect("the map's boundary");
+        let soft_edge_m: f32 = boundary.soft_edge_m.expect("the boundary's soft edge");
+        let soft_edge: SoftEdge = SoftEdge::FromBoundary(
+            &boundary.kind,
+            f64::from(boundary.u_m),
+            f64::from(boundary.v_m),
+            f64::from(soft_edge_m),
+        );
+        let movement: Movement = forest_movement();
+        let solids: [Aabb; 1] = open_ground();
+        let dt_s: f32 = 1.0 / STEPS_PER_S as f32;
+        let walk: PlayerInput = PlayerInput {
+            move_axes: Vec2::Y,
+            ..PlayerInput::default()
+        };
+        let get_past_m = |feet_m: Vec3| -> f32 {
+            soft_edge.get_past_m(f64::from(-feet_m.z), f64::from(feet_m.x)) as f32
+        };
+        for (start_m, yaw_rad) in [
+            (Vec3::new(3.0, 0.0, -boundary.u_m + 2.0), 0.0),
+            (
+                Vec3::new(boundary.v_m - 2.0, 0.0, 5.0),
+                -std::f32::consts::FRAC_PI_2,
+            ),
+        ] {
+            let mut player: Player = Player::new(start_m, yaw_rad);
+            let (mut last_past_m, mut last_gain_m) = (0.0_f32, f32::INFINITY);
+            for second in 0..WALK_OFF_S {
+                let before_m: Vec3 = player.feet_m;
+                for _ in 0..STEPS_PER_S {
+                    player.update(&walk, &movement, &solids, &[], Some(&soft_edge), dt_s);
+                }
+                let past_m: f32 = get_past_m(player.feet_m);
+                let gain_m: f32 = player.feet_m.distance(before_m);
+                let at: String = format!("from {start_m}, second {second}: {past_m} m past");
+                assert!(past_m < soft_edge_m, "{at}");
+                assert!(gain_m > 0.0, "{at}: stopped");
+                if last_past_m > 0.0 {
+                    assert!(gain_m < last_gain_m, "{at}: {gain_m} m, not slower");
+                }
+                (last_past_m, last_gain_m) = (past_m, gain_m);
+            }
+            assert!(last_past_m > MIN_DEPTH_M, "from {start_m}: {last_past_m}");
+            player.yaw_rad += std::f32::consts::PI;
+            let before_m: Vec3 = player.feet_m;
+            for _ in 0..STEPS_PER_S {
+                player.update(&walk, &movement, &solids, &[], Some(&soft_edge), dt_s);
+            }
+            let back_m: f32 = player.feet_m.distance(before_m);
+            assert!(
+                (back_m - movement.walk_m_per_s).abs() < SPEED_TOLERANCE_M_S * 10.0,
+                "from {start_m}: back in {back_m} m in a second"
+            );
+        }
     }
 
     /// `test_walking_into_a_ladder_climbs_onto_the_deck` checks holding W at a ladder's foot
@@ -562,7 +661,7 @@ mod tests {
         let movement: Movement = forest_movement();
         let dt_s: f32 = 1.0 / 120.0;
         for _ in 0..(seconds / dt_s).round() as usize {
-            player.update(input, &movement, &solids, &[], dt_s);
+            player.update(input, &movement, &solids, &[], None, dt_s);
         }
         player
     }
@@ -609,7 +708,7 @@ mod tests {
         assert!((speed(&crouching) - crouch_m_s).abs() < SPEED_TOLERANCE_M_S);
         let mut hit: Player = Player::new(Vec3::ZERO, 0.0);
         hit.slow_down(&movement);
-        hit.update(&walk, &movement, &open_ground(), &[], 1.0 / 120.0);
+        hit.update(&walk, &movement, &open_ground(), &[], None, 1.0 / 120.0);
         let slow_m_s: f32 = movement.walk_m_per_s * movement.when_hit.slow_speed_frac as f32;
         assert!((speed(&hit) - slow_m_s).abs() < SPEED_TOLERANCE_M_S);
     }
@@ -635,7 +734,7 @@ mod tests {
         for dt_s in [1.0 / 60.0, 0.05] {
             let mut player: Player = Player::new(Vec3::ZERO, 0.0);
             for _ in 0..(1.0 / dt_s) as usize {
-                player.update(&sprint, &movement, &solids, &[], dt_s);
+                player.update(&sprint, &movement, &solids, &[], None, dt_s);
             }
             assert!(
                 player.feet_m.z > rail_z_m,
@@ -667,7 +766,14 @@ mod tests {
         ];
         let mut player: Player = crouched;
         for _ in 0..60 {
-            player.update(&PlayerInput::default(), &movement, &solids, &[], 1.0 / 60.0);
+            player.update(
+                &PlayerInput::default(),
+                &movement,
+                &solids,
+                &[],
+                None,
+                1.0 / 60.0,
+            );
         }
         assert!(player.height_m <= roof_m, "stood up into the roof");
         assert!(player.moves.crouch_frac > 0.5);
@@ -709,16 +815,16 @@ mod tests {
         let movement: Movement = forest_movement();
         let dt_s: f32 = 1.0 / 240.0;
         let mut player: Player = Player::new(Vec3::ZERO, 0.0);
-        player.update(&PlayerInput::default(), &movement, &solids, &[], dt_s);
+        player.update(&PlayerInput::default(), &movement, &solids, &[], None, dt_s);
         assert!(player.is_on_ground);
         let jump: PlayerInput = PlayerInput {
             is_jump_pressed: true,
             ..PlayerInput::default()
         };
-        player.update(&jump, &movement, &solids, &[], dt_s);
+        player.update(&jump, &movement, &solids, &[], None, dt_s);
         let (mut apex_m, mut step_count) = (player.feet_m.y, 1_usize);
         while !player.is_on_ground {
-            player.update(&PlayerInput::default(), &movement, &solids, &[], dt_s);
+            player.update(&PlayerInput::default(), &movement, &solids, &[], None, dt_s);
             apex_m = apex_m.max(player.feet_m.y);
             step_count += 1;
             assert!(step_count < 10_000, "the jump never landed");
@@ -800,7 +906,7 @@ mod tests {
                     is_on_ground: player.is_on_ground,
                 };
                 shared.step(&shared_input, &rules, f64::from(dt_s));
-                player.update(&input, &movement, &solids, &[], dt_s);
+                player.update(&input, &movement, &solids, &[], None, dt_s);
                 assert_eq!(player.moves, shared);
             }
         }
@@ -818,7 +924,7 @@ mod tests {
         player.take_damage(f32::MAX);
         let mut temp_waited_s: f32 = 0.0;
         while temp_waited_s < respawn_delay_s - 2.0 * dt_s {
-            player.update(&PlayerInput::default(), &movement, &solids, &[], dt_s);
+            player.update(&PlayerInput::default(), &movement, &solids, &[], None, dt_s);
             temp_waited_s += dt_s;
         }
         assert!(!player.should_respawn(respawn_delay_s));
@@ -828,7 +934,7 @@ mod tests {
             "{left_s}"
         );
         for _ in 0..3 {
-            player.update(&PlayerInput::default(), &movement, &solids, &[], dt_s);
+            player.update(&PlayerInput::default(), &movement, &solids, &[], None, dt_s);
         }
         assert!(player.should_respawn(respawn_delay_s));
     }
