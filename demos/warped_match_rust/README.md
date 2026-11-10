@@ -24,7 +24,14 @@ make join-match TEAM=red                # terminal 3: red's (or: make bot-match 
 popd
 ```
 
-Alone: `make serve-match`, `make join-match TEAM=blue`, `make bot-match TEAM=red`. The bot turns
+Alone, in one command: `make play-alone` (the match server, a bot on red that sits out every round
+so rounds can start, and your window), or with bots: `make play-bots ALLIES=2 ENEMIES=3
+BOT_OBJECTIVE=fight` (bots on your team and on the other, 0 to 4 and 0 to 5, at most 7 since a level
+takes 8 players; `consoles` or `fight`), both `tools/play_with_bots.sh`, logs in
+`.artifacts/play_with_bots/<run_id>/`. **Click a level on the progression page to play it now**
+(free play on that level, round after round; the wavefronts still show the match's way); the
+"back to the match" button or `M` goes back to the match. By hand: `make serve-match`,
+`make join-match TEAM=blue`, `make bot-match TEAM=red`. The bot turns
 off blue's consoles (10 s each, 3 on Lunar Surface), so be quick. From another Mac on the same
 network: `make join-match SERVER=<server's address> TEAM=red`. Without `TEAM`, press 1 (blue) or
 2 (red) in the match window.
