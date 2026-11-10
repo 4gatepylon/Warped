@@ -14,8 +14,9 @@ copies would take far longer than getting the level playable, so the map is Eucl
 `FLAT_CURVATURE_RADIUS_M` = 160 m (`Map::curve_flat`, Fermi coordinates u = −z, v = x, h = y). Over the 112 × 72 m
 playing field that bends things by at most a few percent, which reads as flat.
 
-Cut for now: walking, seeing and shooting across the seams. The torus periods are in the map (so a later renderer
-gets them), but the level ends at its edge like Lunar Surface does. Options for later: (a) a Euclidean ray marcher
+Cut for now: walking, seeing and shooting across the seams. Since W-145 (no walls at map edges) the map is plain
+Euclidean, without its torus periods (the looping branch keeps its own map), and its edge slows players without end
+(S18). Options for later: (a) a Euclidean ray marcher
 with the cell wrapped by `mod` (cheapest, correct), (b) drawing periodic copies of the structures in the current
 renderer (wrong near black holes), (c) keep the edge. I recommend (a) once the gameplay is liked.
 
@@ -186,6 +187,21 @@ blended in over 48 px, so the soft edges show no steps, and FXAA 3.11 anti-alias
 
 As Lunar Surface's D117: the middle half of the width sharp, half resolution out to three quarters, a quarter beyond,
 all smoothed (S15). At 3440x1440: up to 2.4 ms faster than B (`wormhole` 20.2 → 17.8 ms, `laser_open` 20.2 → 18.4).
+
+## S18. No wall at the edge, W-145 (no walls at map edges)
+
+- **Choice:** the map drops `space.torus_periods_m` and gives its boundary ellipse (60 × 40 m half axes)
+  `soft_edge_m` 12. `VoxelWorld::get_edge_frac` is then the distance past the ellipse over 12 m
+  (`warped_shared::map_edge::SoftEdge`; past an ellipse, the distance to first order, exact on its axes), and the
+  player's step goes through the same shared `map_edge::take_step` as Lunar Surface's and Dust's crater walls: a
+  step further out is cut by (1 − that fraction). Walking out at 8 m/s: about 9 m past in 2 s, never 12 m
+  (`walking_off_the_map_slows_without_end`). The view stretches as on Lunar Surface (`get_edge_stretch_frac`, the
+  player's `view.edge_stretch_frac`).
+- **Bots and wormholes:** walking bots (`is_way_clear`) and thrown mouths (`can_place_mouth`) still treat the ellipse
+  as the edge, so bots never crawl into the band and nobody throws a wormhole out of reach; shots fly on as before.
+- **Before:** a step past the ellipse that went further out was refused: an invisible wall.
+- **Alternatives:** the band's width in the server settings (`map_edge`), which every settings file would gain and
+  older windows couldn't read; a wider band (12 m matches Lunar Surface's stop, 10 to 14 m up its wall).
 
 ## S17. Snow Planet slower, halfway to City Sphere
 

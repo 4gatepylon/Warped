@@ -3,10 +3,10 @@
 It checks `map.json` against `map.schema.json`, then what the schema can't say: the name matches the folder,
 material ids are unique with 0 (and only 0) empty, every material used exists, frames are isometries of the map's
 space, points lie in the space, shapes' rounding fits inside them, wormhole mouths pair up, tapered warps'
-reach spheres don't overlap, directions are unit vectors, and the Milky Way's core is perpendicular to its pole. A
-folder that also holds a `level.json` is a level, which it checks as `LEVELS.md` says: the level and `levels.json`
-against their schemas, and the map against the level's engine, pylons, spawns and laser colour. It prints one line
-per map (or `--json`) and exits 1 if any map is invalid.
+reach spheres don't overlap, directions are unit vectors, the Milky Way's core is perpendicular to its pole, and
+only a map without terrain has a soft edge. A folder that also holds a `level.json` is a level, which it checks as
+`LEVELS.md` says: the level and `levels.json` against their schemas, and the map against the level's engine,
+pylons, spawns and laser colour. It prints one line per map (or `--json`) and exits 1 if any map is invalid.
 
 Interface:
     uv run python validate_map.py <map folder>... [--json]
@@ -265,6 +265,26 @@ def _get_geometry_errors(manifest: dict) -> list[str]:
     return errors
 
 
+def _get_edge_errors(manifest: dict) -> list[str]:
+    """`_get_edge_errors` checks that a soft edge (`regions.boundary.soft_edge_m`) is on a map without terrain.
+
+    Args:
+        manifest: The map's manifest (already valid against the schema).
+
+    Returns:
+        One message if a map with terrain has a soft edge (its edge is up the crater's wall); else empty.
+
+    Example:
+        >>> _get_edge_errors(json.loads((Path("snow_planet") / "map.json").read_text()))
+        []
+    """
+    regions: dict = manifest["regions"] if "regions" in manifest else {}
+    boundary: dict = regions["boundary"] if "boundary" in regions else {}
+    if "soft_edge_m" in boundary and "terrain" in manifest["ground"]:
+        return ["regions: a map with terrain has its edge up the crater's wall, not a boundary's soft_edge_m"]
+    return []
+
+
 def _get_schema_errors(document: dict, schema: dict) -> list[str]:
     """`_get_schema_errors` checks a JSON document against a JSON schema.
 
@@ -501,6 +521,7 @@ def _validate_map(folder: Path, schema: dict) -> list[str]:
         + _get_mesh_errors(manifest)
         + _get_warp_errors(manifest)
         + _get_geometry_errors(manifest)
+        + _get_edge_errors(manifest)
     )
 
 

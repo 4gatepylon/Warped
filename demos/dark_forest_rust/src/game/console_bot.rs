@@ -408,8 +408,8 @@ mod tests {
             &solids,
             &arena.ladders,
             &arena.warps,
-            arena.bounds_min_m,
-            arena.bounds_max_m,
+            arena.playable_min_m,
+            arena.playable_max_m,
         );
         let starts: Vec<(Vec3, f32)> = arena.team_spawns.concat();
         let movement: Movement = Movement::New(
@@ -440,7 +440,14 @@ mod tests {
                     now_s,
                     DT_S,
                 );
-                player.update(&walk.input, &movement, &solids, &arena.ladders, DT_S);
+                player.update(
+                    &walk.input,
+                    &movement,
+                    &solids,
+                    &arena.ladders,
+                    arena.soft_edge.as_ref(),
+                    DT_S,
+                );
                 (now_s, walk_s) = (now_s + DT_S, walk_s + DT_S);
                 held_s = if walk.console.is_some() {
                     held_s + DT_S

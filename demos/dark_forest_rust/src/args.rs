@@ -9,6 +9,7 @@
 //!
 //! Example: `let args: Args = Args::parse(); validate_args(&args, &assets_dir)?;`
 
+use std::f32::consts::{FRAC_PI_2, PI};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, ValueEnum};
@@ -21,7 +22,9 @@ use crate::{map, net};
 use warped_shared::visuals::VisualsSettings;
 
 /// `CameraView` is a fixed camera pose for screenshots and repeatable frame-time comparisons;
-/// `--bench-views` runs them all.
+/// `--bench-views` runs them all. `Edge` stands at the playable rectangle's red end looking out,
+/// and `PastEdge` 10 m into the slowing band past its east side looking further out (W-145, no
+/// walls at map edges).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum CameraView {
     Spawn,
@@ -31,11 +34,13 @@ pub enum CameraView {
     Firing,
     Gate,
     Lift,
+    Edge,
+    PastEdge,
 }
 
 impl CameraView {
     /// `ALL` is every view, in `--bench-views` order.
-    pub const ALL: [CameraView; 7] = [
+    pub const ALL: [CameraView; 9] = [
         CameraView::Spawn,
         CameraView::Bridge,
         CameraView::Lookout,
@@ -43,6 +48,8 @@ impl CameraView {
         CameraView::Firing,
         CameraView::Gate,
         CameraView::Lift,
+        CameraView::Edge,
+        CameraView::PastEdge,
     ];
 
     /// `robot_hold` is where the view holds robot 0, if it has robots: just beyond the partner of
@@ -75,6 +82,8 @@ impl CameraView {
             CameraView::Firing => (Vec3::new(-4.0, 0.0, 20.0), 0.1, 0.02),
             CameraView::Gate => (Vec3::new(-2.0, 0.0, 30.5), 0.0, 0.0),
             CameraView::Lift => (Vec3::new(-4.0, 0.0, 40.0), 0.0, 0.05),
+            CameraView::Edge => (Vec3::new(0.0, 0.0, 55.0), PI, 0.05),
+            CameraView::PastEdge => (Vec3::new(40.0, 0.0, 10.0), -FRAC_PI_2, 0.05),
         }
     }
 }

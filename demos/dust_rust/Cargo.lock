@@ -279,6 +279,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "dust"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "getrandom",
+ "glam",
+ "gltf",
+ "hmac",
+ "image",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "objc2-metal",
+ "objc2-metal-fx",
+ "objc2-quartz-core",
+ "png",
+ "rayon",
+ "sdl3",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "warped_shared",
+]
+
+[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -400,32 +426,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
 dependencies = [
  "typenum",
-]
-
-[[package]]
-name = "hyperbolic-wormholes"
-version = "0.1.0"
-dependencies = [
- "clap",
- "getrandom",
- "glam",
- "gltf",
- "hmac",
- "image",
- "objc2",
- "objc2-core-foundation",
- "objc2-foundation",
- "objc2-metal",
- "objc2-metal-fx",
- "objc2-quartz-core",
- "png",
- "rayon",
- "sdl3",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "warped_shared",
 ]
 
 [[package]]

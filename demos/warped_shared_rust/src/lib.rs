@@ -9,6 +9,7 @@
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
 //! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
+//! - `map_edge`: the soft edge of every map: past the playable area players slow without end.
 //! - `gravity`: the pull of black holes and wormhole mouths on a player on the ground.
 //! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
@@ -69,6 +70,7 @@ pub mod laser_drop;
 pub mod level_loop;
 #[cfg(target_os = "macos")]
 pub mod level_test;
+pub mod map_edge;
 pub mod match_menu;
 pub mod match_protocol;
 pub mod match_state;
