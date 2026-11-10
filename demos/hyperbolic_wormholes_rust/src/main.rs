@@ -1019,7 +1019,8 @@ fn get_map_flag(map: MapName) -> String {
 ///
 /// Example: `let address = find_lan_address();`
 fn find_lan_address() -> Option<IpAddr> {
-    let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    let listen_ip: Ipv4Addr = warped_shared::network_scope::get_listen_ip(net::is_loopback_only());
+    let socket: UdpSocket = UdpSocket::bind((listen_ip, 0)).ok()?;
     socket.connect(ROUTE_PROBE_ADDRESS).ok()?;
     Some(socket.local_addr().ok()?.ip())
 }

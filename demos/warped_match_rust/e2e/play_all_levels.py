@@ -34,6 +34,8 @@ Must know:
           check that every pylon was reached on foot covers those levels; City Sphere's own bots don't report it.
     Side effects:
         - When it exits, `play_all_levels.py` stops every process it started, with the levels they started.
+        - `play_all_levels.py` starts every process with `WARPED_LOOPBACK_ONLY=1`, so they listen on 127.0.0.1 and
+          broadcast nothing, and macOS never asks for network permission.
 """
 
 import json
@@ -56,6 +58,7 @@ _CRATE_FOLDER: Path = Path(__file__).resolve().parent.parent
 _REPO_FOLDER: Path = _CRATE_FOLDER.parent.parent
 _PROGRAM: Path = _CRATE_FOLDER / ".build" / "release" / "hyperbolic-wormholes"
 _LEVELS_FILE: Path = _CRATE_FOLDER / "e2e" / "match_levels_fast.yaml"
+_LOOPBACK_ONLY_VARIABLE: str = "WARPED_LOOPBACK_ONLY"
 _PLAN: list[tuple[str, str, str, int]] = [
     ("City Sphere", "none", "blue", 1),
     ("Dark Forest", "blue", "blue", 2),
@@ -125,7 +128,8 @@ def _log(levels_log: TextIO, message: str) -> None:
 
 
 def _start(arguments: list[str], log_path: Path | None, program: Path = _PROGRAM) -> subprocess.Popen[str]:
-    """`_start` runs `program` (this crate's by default) with `arguments` in a process group of its own.
+    """`_start` runs `program` (this crate's by default) with `arguments` in a process group of its own, on loopback
+    only (`WARPED_LOOPBACK_ONLY=1`).
 
     Args:
         arguments: The program's arguments.
@@ -139,14 +143,16 @@ def _start(arguments: list[str], log_path: Path | None, program: Path = _PROGRAM
         >>> server = _start(["--serve-match"], None)
     """
     command: list[str] = [str(program), *arguments]
+    environment: dict[str, str] = {**os.environ, _LOOPBACK_ONLY_VARIABLE: "1"}
     if log_path is None:
         return subprocess.Popen(
-            command, cwd=_CRATE_FOLDER, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            command, cwd=_CRATE_FOLDER, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             start_new_session=True,
         )
     with log_path.open("w") as log:
         return subprocess.Popen(
-            command, cwd=_CRATE_FOLDER, stdout=log, stderr=subprocess.STDOUT, text=True, start_new_session=True
+            command, cwd=_CRATE_FOLDER, env=environment, stdout=log, stderr=subprocess.STDOUT, text=True,
+            start_new_session=True,
         )
 
 
