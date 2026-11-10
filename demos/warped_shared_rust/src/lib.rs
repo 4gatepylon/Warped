@@ -14,6 +14,7 @@
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
 //! - `shot_gate`: when a player may shoot after jumping, walking or sprinting (the `shooting` rules).
+//! - `laser_drop`: bullet drop, how a shot's path bends down (`shooting.drop_m_per_s_per_s`).
 //! - `mesh`, `avatar_model`: glTF models of the maps' structures and the players' robot body.
 //! - `gait`: which of the robot's clips another player shows, and where in it, from their motion.
 //! - `spaceships`: the spaceships in the sky.
@@ -53,6 +54,7 @@ pub mod hud;
 pub mod hud_bars;
 #[cfg(target_os = "macos")]
 pub mod key_bindings;
+pub mod laser_drop;
 pub mod match_menu;
 pub mod match_protocol;
 pub mod match_state;

@@ -82,6 +82,7 @@ shooting:  # The game master's switches for shots (true or false). A file withou
   can_shoot_while_walking: false  # Whether walking upright lets a player shoot (walking crouched always does).
   can_shoot_while_sprinting: false  # Whether sprinting lets a player shoot.
   is_friendly_fire_on: true  # Whether a shot hurts teammates (a teammate eliminated counts a death, no kill).
+  drop_m_per_s_per_s: 0.0  # How fast shots fall, as a ball thrown at the gun's beam speed would (0 for straight shots).
 
 when_hit:  # How a hit slows the player who takes it (how it looks is each player's own choice).
   slow_speed_frac: 0.5  # Their walking and sprinting speed while slowed, as a fraction (1 for not slowed).

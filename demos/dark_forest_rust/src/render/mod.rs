@@ -552,7 +552,7 @@ mod tests {
         let robot_centre_m: Vec3 = Vec3::new(2.0, 1.0, -30.0);
         let robot_radius_m: f32 = 0.5;
         let eye_m: Vec3 = CENTRE_GATE_M[0] + Vec3::new(0.0, -0.1, 6.5);
-        let path: BeamPath = warps.trace_beam(eye_m, Vec3::NEG_Z, 60.0, |x, v, length_m| {
+        let path: BeamPath = warps.trace_beam(eye_m, Vec3::NEG_Z, 60.0, 0.0, |x, v, length_m| {
             let oc: Vec3 = x - robot_centre_m;
             let b: f32 = oc.dot(v);
             let disc: f32 = b * b - (oc.length_squared() - robot_radius_m * robot_radius_m);

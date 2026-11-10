@@ -44,6 +44,7 @@ use warped_shared::health::fade_effect_frac;
 use warped_shared::hud::{
     AmmoBar, HudBars, HudPulses, PylonSquare, make_hit_effect, make_pylon_square_rects,
 };
+use warped_shared::laser_drop::get_drop_curvature_per_m;
 use warped_shared::movement::get_crouched_height_frac;
 use warped_shared::shot_gate::ShotMoves;
 use warped_shared::third_person::{ThirdPersonCamera, ViewSwitch, place_camera_flat};
@@ -478,6 +479,18 @@ impl Session {
         self.settings = settings;
     }
 
+    /// `get_shot_drop_per_m` gives how much a laser turns down per meter under the server
+    /// settings' bullet drop (`shooting.drop_m_per_s_per_s` at the sniper's beam speed; W-157
+    /// (bullet drop, by game setting)), 0 for straight shots.
+    ///
+    /// Example: `let drop_per_m: f32 = session.get_shot_drop_per_m();`
+    pub fn get_shot_drop_per_m(&self) -> f32 {
+        get_drop_curvature_per_m(
+            self.settings.shooting.drop_m_per_s_per_s,
+            self.settings.sniper.beam_speed_m_per_s,
+        ) as f32
+    }
+
     /// `respawn_player` brings the player back, whole, at their team's spawn farthest from the
     /// robots (`farthest_spawn`): after the respawn delay, and when they join
     /// a team.
@@ -689,6 +702,7 @@ impl Session {
             origin_m,
             direction,
             LASER_MAX_LENGTH_M,
+            self.get_shot_drop_per_m(),
             |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
                 let mut nearest_m: f32 = length_m;
                 let mut found: Option<ShotHit> = None;
@@ -1195,7 +1209,7 @@ impl Session {
                     && cast_ray(&scene.solids, eye_m, to_bot.normalize(), to_bot.length()).is_none()
                     && self
                         .warps
-                        .trace_beam(eye_m, to_bot, to_bot.length(), |_, _, _| None)
+                        .trace_beam(eye_m, to_bot, to_bot.length(), 0.0, |_, _, _| None)
                         .end_m
                         .distance(*aim_m)
                         < AUTOPILOT_AIM_SLACK_M
@@ -1608,6 +1622,7 @@ impl Session {
             origin_m,
             direction,
             LASER_MAX_LENGTH_M,
+            self.get_shot_drop_per_m(),
             |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
                 cast_ray(&scene.solids, start_m, piece_direction, length_m).map(|(index, hit)| {
                     hit_box = Some((index, hit.normal));

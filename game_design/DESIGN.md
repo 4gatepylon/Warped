@@ -449,8 +449,12 @@ What a player sees while playing:
 ## Bullets, lasers and light
 
 - Warp objects bend light, so players see the world bent around them.
-- A shot is a laser beam: a light ray from the gun's tip, with no drop. Its front flies out at
+- A shot is a laser beam: a light ray from the gun's tip, with no drop by default. Its front flies out at
   250 m/s, and each point of it fades soon after the front passes.
+- Bullet drop is a game setting, off by default (`shooting.drop_m_per_s_per_s`, W-157 (bullet drop, by game
+  setting); the user: "add setting in game settings for bullet drop"): above 0, every shot's path curves down as a
+  ball thrown at the beam's speed would fall (toward the street in City Sphere), the drawn beam follows it, and
+  every window traces it alike from the server's settings.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
 - A player moving through a wormhole's throat sees the world's colours shift for a moment, as if moving near light

@@ -37,6 +37,7 @@ use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
 use warped_shared::gravity::{HyperbolicWarp, add_pull, get_hyperbolic_pull_m_per_s};
+use warped_shared::laser_drop::{DROP_PIECE_M, get_drop_curvature_per_m, turn_hyperbolic};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -1841,7 +1842,8 @@ impl VoxelWorld {
     }
 
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between the
-    /// warps, bent inside them, through throats, to a block, the ground, a horizon or
+    /// warps (falling by the server settings' `shooting.drop_m_per_s_per_s` in pieces of
+    /// `DROP_PIECE_M`, `laser_drop.rs`), bent inside them, through throats, to a block, the ground, a horizon or
     /// `LASER_MAX_LENGTH_M` (through glass). The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where
     /// the window draws the tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
@@ -1849,6 +1851,15 @@ impl VoxelWorld {
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
     pub fn trace_laser(&self, camera: DMat4) -> Shot {
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
+        let drop_per_m: f64 = get_drop_curvature_per_m(
+            self.settings.shooting.drop_m_per_s_per_s,
+            self.settings.sniper.beam_speed_m_per_s,
+        );
+        let drop_piece_s: f64 = if drop_per_m > 0.0 {
+            DROP_PIECE_M / self.r
+        } else {
+            f64::INFINITY
+        };
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
         let mut pieces: Vec<Vec<DVec4>> = vec![vec![x]];
@@ -1860,8 +1871,15 @@ impl VoxelWorld {
                 break;
             }
             let Some(w) = inside else {
-                let (s_end, entering) = self.find_warp_entry(x, v, max_s - travelled);
-                if let Some(found) = self.trace_scene(x, v, s_end, None) {
+                let s_max: f64 = (max_s - travelled).min(drop_piece_s);
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_max);
+                }
+                let (s_end, entering) = self.find_warp_entry(x, v, s_max);
+                if let Some(found) = self
+                    .trace_scene(x, v, s_end, None)
+                    .filter(|found| found.s.is_finite())
+                {
                     pieces
                         .last_mut()
                         .expect("a piece")
@@ -1875,6 +1893,12 @@ impl VoxelWorld {
                 x = xn;
                 travelled += s_end;
                 pieces.last_mut().expect("a piece").push(x);
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_end);
+                    if entering.is_none() {
+                        continue;
+                    }
+                }
                 if entering.is_none() {
                     break;
                 }
@@ -1883,6 +1907,9 @@ impl VoxelWorld {
             };
             let ds: f64 = self.choose_bend_step(self.compute_bend(w, x, v).1);
             let (v0, x1, v1, rho) = self.step_bent(w, x, v, ds);
+            if !(ds.is_finite() && rho.is_finite()) {
+                break;
+            }
             if let Some(found) = self.trace_scene(x, v0, ds, Some(w)) {
                 pieces
                     .last_mut()
@@ -2488,6 +2515,7 @@ mod tests {
     //! | Thrown pair | walked into (the walker comes out of the other mouth), shot into (the laser goes through, naming the mouth's warp), flashing (both mouths) | `a_thrown_pair_carries_walkers_and_lasers` |
     //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
     //! | Marker | inside a thrown mouth's reach (in its list, hit by a laser) | `a_marker_is_listed_and_hit` |
+    //! | Shot's drop (W-157 (bullet drop, by game setting)) | none (straight into the sky), steep (comes down onto the ground, shorter) | `shots_fall_by_the_settings_drop` |
     //! | Walk near a thrown mouth (W-144) | toward it (faster), away (slower, still away), standing (drifts in), toward it at the full pull's edge (walking plus the strongest pull) | `warps_pull_walkers_toward_them` |
     //! | Distance from every warp | past the pull's reach (each walk and standing as with no thrown mouths, bit for bit) | `warps_pull_walkers_toward_them` |
 
@@ -3167,6 +3195,41 @@ mod tests {
         assert_eq!(
             world.get_mouth_depth_frac(at(black_hole, black_hole.reach / 2.0)),
             0.0
+        );
+    }
+
+    #[test]
+    fn shots_fall_by_the_settings_drop() {
+        const STEEP_DROP_M_PER_S_PER_S: f64 = 2000.0;
+        const GENTLE_DROP_M_PER_S_PER_S: f64 = 300.0;
+        let mut world: VoxelWorld = load_lunar_surface();
+        let camera: DMat4 =
+            VoxelPlayer::AtView(&world, [-107.0, 0.0], [0.0, 0.0], None, SKY_PITCH_RAD)
+                .get_camera_frame(&world);
+        let straight: Shot = world.trace_laser(camera);
+        let mut falling_settings: ServerSettings = world.settings.clone();
+        falling_settings.shooting.drop_m_per_s_per_s = STEEP_DROP_M_PER_S_PER_S;
+        world.set_settings(falling_settings);
+        let falling: Shot = world.trace_laser(camera);
+        assert!(straight.spot.is_none(), "a shot into the sky hits nothing");
+        assert!(falling.spot.is_some(), "a falling shot comes down");
+        assert!(falling.length_m < straight.length_m);
+        let mut gentle_settings: ServerSettings = ServerSettings::Builtin();
+        gentle_settings.shooting.drop_m_per_s_per_s = GENTLE_DROP_M_PER_S_PER_S;
+        let mut map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the map");
+        map.scale_curvature(gentle_settings.space.curvature_per_map_curvature)
+            .expect("the built-in curvature");
+        let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        world.set_settings(gentle_settings);
+        let into_wormhole: Shot = world.trace_laser(
+            VoxelPlayer::AtView(&world, [-22.0, 40.5], [-14.0, 40.0], None, 0.0)
+                .get_camera_frame(&world),
+        );
+        assert!(!into_wormhole.through.is_empty(), "the shot goes through");
+        assert!(
+            into_wormhole.length_m.is_finite(),
+            "{}",
+            into_wormhole.length_m
         );
     }
 
