@@ -172,7 +172,7 @@ is in [`AGENTS.md`](AGENTS.md).
 ## Pending user review
 
 - [?] **W-157 Bullet drop, by game setting.** The user, 2026-11-09: "add setting in game settings for bullet drop".
-  #DROP_PR: `shooting.drop_m_per_s_per_s` (0 by default) curves every shot down as a ball thrown at the beam's
+  #531: `shooting.drop_m_per_s_per_s` (0 by default) curves every shot down as a ball thrown at the beam's
   speed would fall, in every level (Lunar Surface, the match, Dust with its wind, Snow Planet, City Sphere, Dark
   Forest), traced and drawn alike in every window (shared `laser_drop.rs`).
 - [?] **W-147 Shooting while moving, by game setting.** The user, 2026-11-09: "add to wishlist the ability to toggle via game settings whether you can shoot while jumping, and seperately while moving laterally (i.e. while walking) and seperately while sprinting".
