@@ -98,10 +98,10 @@ A value outside these tables needs the user's agreement. Add its row in the same
 
 | Value | The commit is about |
 | --- | --- |
-| `graphics` | rendering, shaders, models, lights, skies, HUD looks |
-| `windowing` | the window, input, menus and the app shell |
-| `engine` | the game loop, rules, players, weapons and bots |
-| `level-layout` | a map's or level's layout: ground, structures, spawns, game settings |
+| `graphics` | how the 3D world is drawn: rendering, shaders, models, lights, skies |
+| `windows` | the game's windows and what they show outside the 3D world: menus, the HUD, screens, and input in them |
+| `engine` | the game engine: the game loop, rules, players, weapons and bots |
+| `level-layout` | a map's, game's or level's layout: ground, structures, spawns, pylons, game settings |
 | `physics` | movement, collisions, bullet paths, curved space |
 | `audio` | sounds and music |
 | `networking` | what client and server send each other |
