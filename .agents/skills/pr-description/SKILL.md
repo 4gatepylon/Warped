@@ -14,6 +14,9 @@ Files in this skill:
 - `SKILL.md` (this file): the PR template and the commit rules.
 - [`wishlist-transitions.md`](wishlist-transitions.md): the line every wishlist commit carries. Read it before
   any commit that changes a wishlist checklist.
+- [`wishlist-history.md`](wishlist-history.md): the append-only history section below that line, and how to
+  revert. Read it with the file above.
+- [`wishlist_history.py`](wishlist_history.py): the command that writes the history section.
 
 > NOTE: If you modify this skill (at the user's request), keep every file in it under 400 lines. Split a longer
 > file by topic, for progressive disclosure, and have each file name the files to read for what it leaves out,
@@ -137,7 +140,9 @@ Projects (classic) error (seen once with gh 2.55 on a Linux machine, 2026-10-30)
   - changes one item in one checklist and nothing else, not code and not another item;
   - has the subject `wishlist(<wishlist>): <what happened to the item>`, naming the checklist's folder;
   - carries one transition line in its body, such as
-    `* [<wishlist>/<id> (<short name>)] (null -> [ ]) ADD TO WISHLIST: <text>`.
+    `* [<wishlist>/<id> (<short name>)] (null -> [ ]) ADD TO WISHLIST: <text>`;
+  - carries the item's append-only HISTORY section below that line, written by `wishlist_history.py`
+    ([`wishlist-history.md`](wishlist-history.md)).
 - **Attribution.** An agent keeps the commit trailer its own default adds (table below).
 
 ## Attribution lines
