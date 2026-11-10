@@ -2220,6 +2220,8 @@ users will want to see where on the map they are pretty often". This replaces D8
   the app's and `play_with_bots.sh`'s bots (5 allies, 6 enemies). Dark Forest has 6 spawns a team (a back row of
   two, seeded and mirrored like its props), and an online player respawns on the first team spawn no other player
   stands on, starting from one their id picks; offline play keeps the farthest spawn from the robots.
+- **Posing:** every voxel level's window poses the other players' robots in parallel (`with_posed_avatars`), since
+  posing 11 robots on the CPU takes about 9 ms a frame (W-198, robots posed on the CPU).
 - **Revisit if:** a level needs more than 12 players, or a player's record grows past 196 bytes (from 185; pages
   would then hold 5).
 
