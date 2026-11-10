@@ -396,3 +396,35 @@ fragment float4 beam_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     }
     return float4(encode_srgb(light), cover);
 }
+
+constant float BOUNDARY_MAX_SLANT = 4.0;
+constant float BOUNDARY_MIN_FACE_COS = 0.001;
+constant float BOUNDARY_RIPPLE_FRAC = 0.15;
+constant float BOUNDARY_SRGB_GAMMA = 2.2;
+
+/**
+ * @brief `boundary_fragment` draws a team boundary plane (W-148, team boundary planes in every level) over what is
+ * behind it (`behind`, read back by programmable blending): its glow in its team's colour, as opaque as the map says at
+ * each floor's foot (the street and the glass) and fading up its height (`get_boundary_profile`), thicker the more it
+ * is seen edge-on (up to `BOUNDARY_MAX_SLANT` times); and what is seen through it shimmers (W-149): its brightness
+ * ripples by up to `BOUNDARY_RIPPLE_FRAC` with `get_boundary_shimmer`'s waves on the plane. A forward renderer can't move
+ * what is behind, so the shimmer here is a ripple of light rather than the voxel levels' bend.
+ * @par Example
+ * @code
+ * drawn after the glass with the boundary pipeline (no blending, depth tested)
+ * @endcode
+ */
+fragment float4 boundary_fragment(Fragment in [[stage_in]], float4 behind [[color(0)]], constant CityUniforms& u [[buffer(1)]]) {
+    float r_m = length(in.world);
+    float floor_m = r_m > u.glass.x ? u.ambient.w : u.glass.x;
+    float shown_frac = get_boundary_profile(max(floor_m - r_m, 0.0), in.uv.x);
+    float3 view = normalize(u.camera_m.xyz - in.world);
+    float slant = min(1.0 / max(abs(view.x), BOUNDARY_MIN_FACE_COS), BOUNDARY_MAX_SLANT);
+    float alpha = 1.0 - pow(1.0 - in.color.a * shown_frac, slant);
+    float2 on_plane_m = in.world.yz;
+    float2 turn = get_boundary_shimmer(on_plane_m, u.hazard.y, length(fwidth(on_plane_m))) / BOUNDARY_SHIMMER_RAD;
+    float3 seen = behind.rgb * (1.0 + BOUNDARY_RIPPLE_FRAC * shown_frac * turn.x);
+    float3 glow = encode_srgb(pow(get_boundary_color(int(in.layer + 0.5)), BOUNDARY_SRGB_GAMMA) * BOUNDARY_BRIGHTNESS);
+    return float4(mix(seen, glow, alpha), behind.a);
+}
+

@@ -900,9 +900,61 @@ static float4 sample_spline(texture2d<float> picture, float2 uv) {
         + g1.y * (g0.x * picture.sample(linear_sampler, float2(h0.x, h1.y)) + g1.x * picture.sample(linear_sampler, h1));
 }
 
+constant uint MAX_BOUNDARY_PLANE_COUNT = 4;
+constant float BOUNDARY_PLANE_MAX_SLANT = 4.0;
+constant float BOUNDARY_PLANE_MIN_COS = 0.001;
+constant float BOUNDARY_PLANE_END_M = 4.0;
+constant float BOUNDARY_PLANE_SRGB_GAMMA = 2.2;
+
 /**
- * @brief `tonemap_fragment` adds bloom, exposes, tone maps with ACES, grades, and stores luma
- * in alpha for FXAA.
+ * @brief `BoundaryPlanes` matches `render::GpuBoundaryPlanes`: per plane (z in meters, team, 0, 0), then (height in
+ * meters, opacity at the foot, the shimmer's clock in seconds, 0), the planes' extent (x from, x to, the ground's height,
+ * 0), and (plane count, 0, 0, 0).
+ */
+struct BoundaryPlanes {
+    float4 planes[MAX_BOUNDARY_PLANE_COUNT];
+    float4 look;
+    float4 extent;
+    int4 counts;
+};
+
+/**
+ * @brief `find_boundary_planes` gives the team boundary planes (W-148) that the view from `eye` along unit `dir` crosses
+ * before the scene (`scene_m` away): their glow over the picture, display-linear and premultiplied (rgb, alpha), each
+ * as opaque as `get_boundary_profile` says at its height and thicker seen at a slant (up to `BOUNDARY_PLANE_MAX_SLANT`
+ * times), fading over its last `BOUNDARY_PLANE_END_M` toward the extent's ends; and how far what is seen through them
+ * turns (`turn`, radians across and up, `get_boundary_shimmer` times how much the plane shows: W-149).
+ * @par Example
+ * @code
+ * float4 glow = find_boundary_planes(boundary, eye, dir, scene_m, pixel_angle_rad, turn);
+ * @endcode
+ */
+static float4 find_boundary_planes(constant BoundaryPlanes& boundary, float3 eye, float3 dir, float scene_m,
+                                   float pixel_angle_rad, thread float2& turn) {
+    float4 glow = float4(0.0);
+    turn = float2(0.0);
+    float face_cos = max(abs(dir.z), BOUNDARY_PLANE_MIN_COS);
+    for (int i = 0; i < boundary.counts.x; i++) {
+        float4 plane = boundary.planes[i];
+        float t_m = (plane.x - eye.z) / dir.z;
+        if (!(t_m > 0.0 && t_m < scene_m)) continue;
+        float3 q = eye + t_m * dir;
+        float above_m = q.y - boundary.extent.z;
+        if (above_m < 0.0 || above_m > boundary.look.x) continue;
+        float end_m = min(q.x - boundary.extent.x, boundary.extent.y - q.x);
+        float shown_frac = get_boundary_profile(above_m, boundary.look.x) * smoothstep(0.0, BOUNDARY_PLANE_END_M, end_m);
+        float alpha = 1.0 - pow(1.0 - boundary.look.y * shown_frac, min(1.0 / face_cos, BOUNDARY_PLANE_MAX_SLANT));
+        float3 color = pow(get_boundary_color(int(plane.y + 0.5)), BOUNDARY_PLANE_SRGB_GAMMA) * BOUNDARY_BRIGHTNESS;
+        glow += (1.0 - glow.a) * float4(color * alpha, alpha);
+        turn += get_boundary_shimmer(q.xy, boundary.look.z, t_m * pixel_angle_rad / face_cos) * shown_frac;
+    }
+    return glow;
+}
+
+/**
+ * @brief `tonemap_fragment` adds bloom, exposes, tone maps with ACES, grades, draws the team boundary planes over
+ * the picture and makes what is seen through them shimmer (`find_boundary_planes`, W-148, W-149; not while capturing
+ * the lens atlas), and stores luma in alpha for FXAA.
  * @par Interface
  * `frame.effect_params.x` turns the color grade on, and `frame.effect_params.w` is the number of
  * bloom levels summed into `bloom`.
@@ -918,17 +970,37 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
                                  constant LensUniforms& lens [[buffer(2)]],
                                  depth2d<float> depth [[texture(2)]],
                                  texture2d<float> lens_picture [[texture(3)]],
-                                 constant rasterization_rate_map_data& rate_map [[buffer(9)]]) {
+                                 constant rasterization_rate_map_data& rate_map [[buffer(9)]],
+                                 constant BoundaryPlanes& boundary [[buffer(4)]]) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float2 screen_px = get_screen_px(frame, rate_map, in.position.xy);
     float2 screen_uv = frame.foveation.z < 0.5 ? in.uv : screen_px * frame.screen_size.zw;
-    float3 color = hdr.sample(linear_sampler, in.uv).rgb;
     float is_kept_plain = lens.params.y;
+    float4 boundary_glow = float4(0.0);
+    float2 boundary_turn = float2(0.0);
+    float pixel_angle_rad = 2.0 / (frame.proj[1][1] * frame.screen_size.y);
+    if (boundary.counts.x > 0 && is_kept_plain < 0.5) {
+        constexpr sampler depth_sampler(coord::normalized, filter::nearest, address::clamp_to_edge);
+        float2 boundary_ndc = float2(screen_uv.x * 2.0 - 1.0, 1.0 - screen_uv.y * 2.0);
+        float4 near_point = frame.inv_view_proj * float4(boundary_ndc, 1.0, 1.0);
+        float3 eye = frame.camera_position_m.xyz;
+        float3 dir = normalize(near_point.xyz / near_point.w - eye);
+        float boundary_depth = depth.sample(depth_sampler, in.uv);
+        float scene_m = 1e30;
+        if (boundary_depth > 0.0) {
+            float4 scene_point = frame.inv_view_proj * float4(boundary_ndc, boundary_depth, 1.0);
+            scene_m = length(scene_point.xyz / scene_point.w - eye);
+        }
+        boundary_glow = find_boundary_planes(boundary, eye, dir, scene_m, pixel_angle_rad, boundary_turn);
+    }
+    float2 hdr_uv = in.uv + boundary_turn / pixel_angle_rad * frame.screen_size.zw;
+    float3 color = hdr.sample(linear_sampler, hdr_uv).rgb;
     float3 bloom_color = bloom.sample(linear_sampler, in.uv).rgb / frame.effect_params.w;
     color = get_graded_color(frame, mix(color, bloom_color, frame.render_params.y));
     float2 centered = screen_uv - 0.5;
     float vignette = 1.0 - VIGNETTE_STRENGTH * (1.0 - is_kept_plain) * smoothstep(0.2, 0.85, length(centered * float2(1.1, 1.0)));
     color *= vignette;
+    color = color * (1.0 - boundary_glow.a) + boundary_glow.rgb;
     float3 encoded = linear_to_srgb(saturate(color));
     float grain = interleaved_gradient_noise(get_noise_px(frame, in.position.xy) + fract(frame.camera_position_m.w) * 97.0) - 0.5;
     encoded = saturate(encoded + grain * GRAIN_STRENGTH * (1.0 - is_kept_plain));

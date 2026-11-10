@@ -42,7 +42,36 @@ pub struct MapFile {
     pub lights: Vec<Light>,
     pub sky: Sky,
     pub spawns: Vec<Spawn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regions: Option<Regions>,
     pub appearance: Appearance,
+}
+
+/// `Regions` is the map's team zones and how their walls look (`common/maps/README.md`): the
+/// team boundary planes stand on the zones' finite edges (W-148, team boundary planes in every
+/// level).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Regions {
+    pub zones: Vec<Zone>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone_walls: Option<ZoneWalls>,
+}
+
+/// `Zone` is a team's band of the world's Fermi u (along −z), `None` for no edge on that side.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Zone {
+    pub team: String,
+    pub u_min_m: Option<f32>,
+    pub u_max_m: Option<f32>,
+}
+
+/// `ZoneWalls` is how the walls on the zones' edges look: their height over the ground, their
+/// thickness and how opaque they are at their foot.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ZoneWalls {
+    pub height_m: f32,
+    pub thickness_m: f32,
+    pub opacity_frac: f32,
 }
 
 /// `Scatter` records how a generator scattered the map's decorative plants: its seed, the grid

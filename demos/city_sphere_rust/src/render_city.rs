@@ -1,7 +1,8 @@
 //! `render_city` draws City Sphere with Metal rasterization (light goes straight in its Euclidean
 //! space, so no ray marching is needed): the street sphere and buildings, textured with the
 //! fps_demo's CC0 Poly Haven textures and lit by the glowing core; consoles, pylons and robots
-//! (per frame); the see-through glass shell with its lift holes; and laser beams.
+//! (per frame); the see-through glass shell with its lift holes; the team boundary planes, which
+//! glow faintly and make what is seen through them shimmer (W-148, W-149); and laser beams.
 //!
 //! Interface: `CityVertex`, `CityScene`, `build_scene`, `CityFrame`, `CityGpu`, `push_rounded_box`,
 //! `push_mesh`, `push_beam`, `MAX_HOLE_COUNT`.
@@ -25,10 +26,11 @@ use objc2_metal::{
 };
 use rayon::prelude::*;
 
-use crate::city_world::{CityWorld, Hole, get_up};
+use crate::city_world::{BoundaryPlane, CityWorld, Hole, get_up};
 use crate::fps_demo_assets::get_asset_path;
 use crate::mesh::{MeshMaterial, MeshModel};
 use crate::texture_arrays::{make_array, make_mips};
+use warped_shared::boundary_planes::{BOUNDARY_PLANES_METAL, get_shimmer_clock_s};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
@@ -40,6 +42,7 @@ const MSAA_SAMPLE_COUNT: usize = 4;
 pub const MAX_HOLE_COUNT: usize = 8;
 const ROUND_HOLE_SIDE_DOT: f64 = 2.0;
 const MOUTH_RING_SEGMENT_COUNT: usize = 32;
+const BOUNDARY_SEGMENT_COUNT: usize = 96;
 const MOUTH_RING_WIDTH_FRAC: f64 = 0.12;
 const MOUTH_DISC_TINT: f32 = 0.25;
 const MOUTH_DISC_OPACITY: f32 = 0.85;
@@ -145,6 +148,8 @@ pub struct CityScene {
     pub id: u64,
     pub opaque: Vec<CityVertex>,
     pub glass: Vec<CityVertex>,
+    /// `boundary` is the team boundary planes' triangles (W-148, `push_boundary_plane`).
+    pub boundary: Vec<CityVertex>,
     pub holes: Vec<[f32; 4]>,
     pub hole_sides: Vec<[f32; 4]>,
     pub lift_hole_count: usize,
@@ -532,15 +537,63 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     }
     push_pylon_beacons(&mut opaque, world);
     push_electronics(&mut opaque, world);
+    let mut boundary: Vec<CityVertex> = Vec::new();
+    for plane in &world.boundary_planes {
+        let inner_m: f64 = f64::from(glass_radius_m) - plane.height_m;
+        push_boundary_plane(&mut boundary, plane, inner_m, street_radius_m);
+    }
     CityScene {
         id: 1,
         opaque,
         glass,
+        boundary,
         holes,
         hole_sides,
         lift_hole_count,
         glass_radius_m,
         street_radius_m: street_radius_m as f32,
+    }
+}
+
+/// `push_boundary_plane` adds a team boundary plane (W-148) as a flat ring in its plane x =
+/// `plane.x_m`, from radius `inner_m` to `outer_m` from the centre (the street), in
+/// `BOUNDARY_SEGMENT_COUNT` pieces. Each vertex carries the plane's height (uv.x), its opacity at
+/// the foot (alpha) and its team (layer); `boundary_fragment` draws its glow and the shimmer.
+///
+/// Example: `push_boundary_plane(&mut boundary, &plane, 11.0, 24.0);`
+fn push_boundary_plane(
+    out: &mut Vec<CityVertex>,
+    plane: &BoundaryPlane,
+    inner_m: f64,
+    outer_m: f64,
+) {
+    let ring_radius = |r_m: f64| (r_m * r_m - plane.x_m * plane.x_m).max(0.0).sqrt();
+    let (inner_ring_m, outer_ring_m) = (ring_radius(inner_m), ring_radius(outer_m));
+    let normal: [f32; 3] = [plane.x_m.signum() as f32, 0.0, 0.0];
+    let vertex = |angle_rad: f64, ring_m: f64| CityVertex {
+        position: [
+            plane.x_m as f32,
+            (ring_m * angle_rad.cos()) as f32,
+            (ring_m * angle_rad.sin()) as f32,
+        ],
+        normal,
+        uv: [plane.height_m as f32, 0.0],
+        color: [1.0, 1.0, 1.0, plane.opacity_frac as f32],
+        layer: plane.team as f32,
+    };
+    for k in 0..BOUNDARY_SEGMENT_COUNT {
+        let (a_rad, b_rad) = (
+            std::f64::consts::TAU * k as f64 / BOUNDARY_SEGMENT_COUNT as f64,
+            std::f64::consts::TAU * (k + 1) as f64 / BOUNDARY_SEGMENT_COUNT as f64,
+        );
+        out.extend([
+            vertex(a_rad, inner_ring_m),
+            vertex(a_rad, outer_ring_m),
+            vertex(b_rad, outer_ring_m),
+            vertex(a_rad, inner_ring_m),
+            vertex(b_rad, outer_ring_m),
+            vertex(b_rad, inner_ring_m),
+        ]);
     }
 }
 
@@ -1107,11 +1160,12 @@ pub struct CityGpu {
     opaque: Pipeline,
     glass: Pipeline,
     beam: Pipeline,
+    boundary: Pipeline,
     depth_write: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     depth_test: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     albedo: Texture,
     scene_id: u64,
-    scene_buffers: Option<(Buffer, usize, Buffer, usize)>,
+    scene_buffers: Option<[(Buffer, usize); 3]>,
     samples: Option<(Texture, Texture, (usize, usize))>,
 }
 
@@ -1224,8 +1278,9 @@ impl CityGpu {
     /// Example: `let gpu = CityGpu::New(&device)?;`
     #[allow(non_snake_case)]
     pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<CityGpu> {
+        let source: String = format!("{BOUNDARY_PLANES_METAL}\n{SHADER_SOURCE}");
         let library = device
-            .newLibraryWithSource_options_error(&NSString::from_str(SHADER_SOURCE), None)
+            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|e| {
                 format!(
                     "Metal: render_city.metal failed: {}",
@@ -1252,6 +1307,7 @@ impl CityGpu {
             opaque: make_pipeline(device, &library, "city_fragment", None)?,
             glass: make_pipeline(device, &library, "glass_fragment", Some(false))?,
             beam: make_pipeline(device, &library, "beam_fragment", Some(false))?,
+            boundary: make_pipeline(device, &library, "boundary_fragment", None)?,
             depth_write: make_depth_state(device, true)?,
             depth_test: make_depth_state(device, false)?,
             albedo: make_array(device, MTLPixelFormat::RGBA8Unorm_sRGB, 4, &layers)?,
@@ -1272,12 +1328,20 @@ impl CityGpu {
         target: &ProtocolObject<dyn MTLTexture>,
     ) -> Result<()> {
         if self.scene_id != frame.scene.id || self.scene_buffers.is_none() {
-            self.scene_buffers = Some((
-                make_buffer(device, &frame.scene.opaque)?,
-                frame.scene.opaque.len(),
-                make_buffer(device, &frame.scene.glass)?,
-                frame.scene.glass.len(),
-            ));
+            self.scene_buffers = Some([
+                (
+                    make_buffer(device, &frame.scene.opaque)?,
+                    frame.scene.opaque.len(),
+                ),
+                (
+                    make_buffer(device, &frame.scene.glass)?,
+                    frame.scene.glass.len(),
+                ),
+                (
+                    make_buffer(device, &frame.scene.boundary)?,
+                    frame.scene.boundary.len(),
+                ),
+            ]);
             self.scene_id = frame.scene.id;
         }
         let target_px: (usize, usize) = (target.width(), target.height());
@@ -1320,7 +1384,12 @@ impl CityGpu {
             ],
             sky_color: SKY_COLOR,
             beacons: frame.beacons,
-            hazard: [frame.scene.lift_hole_count as f32, 0.0, 0.0, 0.0],
+            hazard: [
+                frame.scene.lift_hole_count as f32,
+                get_shimmer_clock_s(f64::from(frame.time_s)),
+                0.0,
+                0.0,
+            ],
             beam_speckle: frame.beam_speckle,
             flashlight_position: frame.flashlight[0],
             flashlight_direction: frame.flashlight[1],
@@ -1364,12 +1433,16 @@ impl CityGpu {
             width: frame.render_px.0.min(target_px.0),
             height: frame.render_px.1.min(target_px.1),
         });
-        let (opaque, opaque_count, glass, glass_count) =
-            self.scene_buffers.as_ref().expect("made above");
-        let draws: [(&Pipeline, bool, &Buffer, usize); 4] = [
+        let [
+            (opaque, opaque_count),
+            (glass, glass_count),
+            (boundary, boundary_count),
+        ] = self.scene_buffers.as_ref().expect("made above");
+        let draws: [(&Pipeline, bool, &Buffer, usize); 5] = [
             (&self.opaque, true, opaque, *opaque_count),
             (&self.opaque, true, &dynamic, frame.dynamic.len()),
             (&self.glass, false, glass, *glass_count),
+            (&self.boundary, false, boundary, *boundary_count),
             (&self.beam, false, &beams, frame.beams.len()),
         ];
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS OR DRAWING PAST THEM WILL HAPPEN
@@ -1414,8 +1487,38 @@ mod tests {
     //! | --- | --- |
     //! | The vertex layout matches the shader's (13 floats) | `vertex_is_13_floats` |
     //! | The scene has the street, boxes, core, hexagonal glass, glowing details, and the lifts' holes (round) before the stairs' (as wide as their stairs) | `scene_has_every_part` |
+    //! | The team boundary planes (W-148): a ring per plane in its plane, from the glass level's height to the street; the shaders with `boundary_planes.metal` compile into its pipeline | `boundary_planes_are_rings_in_their_planes` |
 
     use super::*;
+
+    #[test]
+    fn boundary_planes_are_rings_in_their_planes() {
+        let world: CityWorld = CityWorld::Builtin().unwrap();
+        let scene: CityScene = build_scene(&world);
+        assert_eq!(
+            scene.boundary.len(),
+            world.boundary_planes.len() * BOUNDARY_SEGMENT_COUNT * 6
+        );
+        let inner_m: f64 = f64::from(scene.glass_radius_m) - world.boundary_planes[0].height_m;
+        for (plane, vertices) in world
+            .boundary_planes
+            .iter()
+            .zip(scene.boundary.chunks(BOUNDARY_SEGMENT_COUNT * 6))
+        {
+            for vertex in vertices {
+                let p: DVec3 = Vec3::from(vertex.position).as_dvec3();
+                assert!((p.x - plane.x_m).abs() < 1e-5, "{p}");
+                assert!(p.length() > inner_m - 1e-3 && p.length() < world.street_radius_m + 1e-3);
+                assert_eq!(vertex.layer, plane.team as f32);
+            }
+        }
+        let device = objc2_metal::MTLCreateSystemDefaultDevice().expect("a Metal GPU");
+        let source: String = format!("{BOUNDARY_PLANES_METAL}\n{SHADER_SOURCE}");
+        let library = device
+            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
+            .expect("render_city.metal compiles");
+        make_pipeline(&device, &library, "boundary_fragment", None).expect("the boundary pipeline");
+    }
 
     #[test]
     fn vertex_is_13_floats() {

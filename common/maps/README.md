@@ -230,7 +230,9 @@ ground or on a structure) and their eye `player.eye_height_m` above it, facing t
 
 `{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"},
 "zone_walls": {"height_m", "thickness_m", "opacity_frac"}}`, in the world's Fermi coordinates: a team's zone is a band
-of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1. A zone may instead be a band of v (`"v_min_m"`, `"v_max_m"`,
+optional since version 1, for a map whose teams face each other across v, such as City Sphere); its walls then stand
+on its v edges, and below the u edges read v.
 
 `zone_walls` (optional) marks each finite edge (`u_min_m` or `u_max_m`) of each blue or red zone with a wall in the
 team's colour that stops neither players nor lasers. Its middle is the points straight above the edge (Fermi u equal to

@@ -14,8 +14,9 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use glam::{Mat4, Quat, Vec2, Vec3};
 
 use crate::map::{
-    Appearance, Ground, Ladder, LaserLook, Light, MapBox, MapFile, Material, PlayerSpec, Scatter,
-    Shape, Sky, Space, Spawn, Structure, StructureMesh, Sun, Warp, translation_frame, yaw_frame,
+    Appearance, Ground, Ladder, LaserLook, Light, MapBox, MapFile, Material, PlayerSpec, Regions,
+    Scatter, Shape, Sky, Space, Spawn, Structure, StructureMesh, Sun, Warp, Zone, ZoneWalls,
+    translation_frame, yaw_frame,
 };
 
 /// `HALF_WIDTH_M` is half the forest's extent along x.
@@ -1007,6 +1008,40 @@ fn unit_direction(direction: [f64; 3]) -> [f64; 3] {
 /// `build` makes the whole Dark Forest map.
 ///
 /// Example: `let map: MapFile = build();`
+/// `ZONE_EDGE_U_M` is where each team's zone begins, along Fermi u (−z): blue's spawns and pylons
+/// are beyond +24 m, red's beyond −24 m, and the middle of the forest is between.
+const ZONE_EDGE_U_M: f32 = 24.0;
+/// `ZONE_WALL_HEIGHT_M` is how tall the team boundary planes are: above the treehouses' decks
+/// (7 m) and a player's eye on them.
+const ZONE_WALL_HEIGHT_M: f32 = 10.0;
+/// `ZONE_WALL_THICKNESS_M` and `ZONE_WALL_OPACITY_FRAC` are every map's zone walls' (Lunar Surface's).
+const ZONE_WALL_THICKNESS_M: f32 = 0.6;
+const ZONE_WALL_OPACITY_FRAC: f32 = 0.25;
+
+/// `make_regions` gives the forest's team zones (blue toward −z, red toward +z) and their walls,
+/// the team boundary planes (W-148, team boundary planes in every level).
+///
+/// Example: `let regions: Regions = make_regions();`
+fn make_regions() -> Regions {
+    let zone = |team: &str, u_min_m: Option<f32>, u_max_m: Option<f32>| Zone {
+        team: team.to_string(),
+        u_min_m,
+        u_max_m,
+    };
+    Regions {
+        zones: vec![
+            zone("blue", Some(ZONE_EDGE_U_M), None),
+            zone("middle", Some(-ZONE_EDGE_U_M), Some(ZONE_EDGE_U_M)),
+            zone("red", None, Some(-ZONE_EDGE_U_M)),
+        ],
+        zone_walls: Some(ZoneWalls {
+            height_m: ZONE_WALL_HEIGHT_M,
+            thickness_m: ZONE_WALL_THICKNESS_M,
+            opacity_frac: ZONE_WALL_OPACITY_FRAC,
+        }),
+    }
+}
+
 pub fn build() -> MapFile {
     let mut layout: Layout = Layout {
         map: MapFile {
@@ -1057,6 +1092,7 @@ pub fn build() -> MapFile {
                 fog_m: Some(40.0),
             },
             spawns: Vec::new(),
+            regions: Some(make_regions()),
             appearance: Appearance {
                 style: "forest".to_string(),
             lighting: serde_json::json!({"model": "ambient_sun", "ambient": 0.6, "sun": 3.7}),

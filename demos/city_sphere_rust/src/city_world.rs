@@ -3,7 +3,7 @@
 //! straight, stop at the street, buildings and the core, and reflect off the glass shell's inner
 //! side.
 //!
-//! Interface: `CityWorld::Builtin`, `CityWorld::FromJson`, `CityPlayer`, `CityInput`, `Shot`,
+//! Interface: `CityWorld::Builtin`, `CityWorld::FromJson`, `BoundaryPlane`, `CityPlayer`, `CityInput`, `Shot`,
 //! `ShotHit`, `CityWorld::trace_shot`, `CityWorld::move_player`, `Side`, `get_up`.
 
 use std::cmp::Reverse;
@@ -131,6 +131,89 @@ struct JsonMap {
     lasers: Option<JsonLasers>,
     #[serde(default)]
     variation: Option<JsonVariation>,
+    #[serde(default)]
+    regions: Option<JsonRegions>,
+}
+
+/// `JsonRegions` is the map's team zones, bands of Fermi v (+x here), and how their walls look.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonRegions {
+    zones: Vec<JsonZone>,
+    zone_walls: Option<JsonZoneWalls>,
+}
+
+/// `JsonZone` is one team's band of v, `None` for no edge on that side.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonZone {
+    team: String,
+    v_min_m: Option<f64>,
+    v_max_m: Option<f64>,
+}
+
+/// `JsonZoneWalls` is how the zones' walls look.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonZoneWalls {
+    height_m: f64,
+    thickness_m: f64,
+    opacity_frac: f64,
+}
+
+/// `BoundaryPlane` is one team boundary plane (W-148, team boundary planes in every level): the
+/// plane x = `x_m` on a finite edge of the team `team`'s zone, `height_m` tall above each floor
+/// (the street and the glass), `opacity_frac` opaque at its foot. It stops neither players nor
+/// lasers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoundaryPlane {
+    pub x_m: f64,
+    pub team: u32,
+    pub height_m: f64,
+    pub opacity_frac: f64,
+}
+
+/// `get_boundary_planes` gives a plane on each finite edge of the blue and red zones of
+/// `regions`, if it has `zone_walls`, and fails on another team or a wall that isn't positive.
+///
+/// Example: `let planes = get_boundary_planes(map.regions.as_ref())?;`
+fn get_boundary_planes(regions: Option<&JsonRegions>) -> Result<Vec<BoundaryPlane>> {
+    let Some(JsonRegions {
+        zones,
+        zone_walls: Some(walls),
+    }) = regions
+    else {
+        return Ok(Vec::new());
+    };
+    if walls.height_m <= 0.0
+        || walls.thickness_m <= 0.0
+        || !(walls.opacity_frac > 0.0 && walls.opacity_frac < 1.0)
+    {
+        return Err(
+            "map: zone_walls needs a positive height and thickness and an opacity between 0 and 1"
+                .into(),
+        );
+    }
+    let mut planes: Vec<BoundaryPlane> = Vec::new();
+    for zone in zones {
+        if zone.team == "middle" {
+            continue;
+        }
+        let team: u32 = TEAM_NAMES
+            .iter()
+            .position(|name| *name == zone.team)
+            .ok_or_else(|| format!("map: zone team {:?} isn't blue, red or middle", zone.team))?
+            as u32;
+        for x_m in [zone.v_min_m, zone.v_max_m].into_iter().flatten() {
+            planes.push(BoundaryPlane {
+                x_m,
+                team,
+                height_m: walls.height_m,
+                opacity_frac: walls.opacity_frac,
+            });
+        }
+    }
+    Ok(planes)
 }
 
 /// `JsonLasers` is the map's laser colour: one for every team, or one per team.
@@ -296,6 +379,8 @@ pub struct CityWorld {
     /// (W-144, `move_player`); the window and the bots set them each frame, as Lunar Surface's
     /// `VoxelWorld::set_thrown_wormholes` adds them to its warps.
     pub mouths: Vec<FlatWarp>,
+    /// `boundary_planes` are the team boundary planes from the map's zones (W-148).
+    pub boundary_planes: Vec<BoundaryPlane>,
 }
 
 /// `Side` is which level a point is on: the street, under the glass, or the glass level, on the
@@ -506,6 +591,7 @@ impl CityWorld {
             lift_holes,
             variation_seed: map.variation.as_ref().map_or(0, |v| v.seed),
             mouths: Vec::new(),
+            boundary_planes: get_boundary_planes(map.regions.as_ref())?,
             laser_colors: match &map.lasers {
                 Some(JsonLasers {
                     team_colors: Some(colors),
@@ -1254,9 +1340,35 @@ mod tests {
     //! | A shot at the glass beside a stairs' hole: from the street (stops), from the glass level (reflects); straight down into it (ends on a step) | `shots_beside_the_stairs_hole_meet_the_glass` |
     //! | A player on the glass level beside a stairs' hole: walking its whole length just past the edge (stays on the glass); standing over the stairs (falls in) | `players_walk_on_the_glass_beside_the_stairs_hole` |
     //! | A player climbing each team's stairs at the edge of the steps, either side: reaches the glass level | `players_climb_the_stairs_at_their_edge` |
+    //! | The team boundary planes (W-148): the map's (blue at x = 4 m, red at x = −4 m); zones without zone walls (none); a zone of another team (fails) | `the_map_gives_a_boundary_plane_per_team` |
     //! | A linked mouth near a walker (W-144): walking toward it (farther in the same time), away (less far, still away), standing (drifts toward it); past the pull's reach (each the same as with no mouth, bit for bit) | `mouths_pull_walkers_toward_them` |
 
     use super::*;
+
+    #[test]
+    fn the_map_gives_a_boundary_plane_per_team() {
+        let planes: Vec<BoundaryPlane> = CityWorld::Builtin().expect("the map").boundary_planes;
+        let places: Vec<(f64, u32)> = planes.iter().map(|plane| (plane.x_m, plane.team)).collect();
+        assert_eq!(places, [(4.0, 0), (-4.0, 1)]);
+        assert!(
+            planes
+                .iter()
+                .all(|p| p.height_m > 0.0 && p.opacity_frac < 1.0)
+        );
+        let read = |text: &str| -> Result<Vec<BoundaryPlane>> {
+            let regions: JsonRegions = serde_json::from_str(text)?;
+            get_boundary_planes(Some(&regions))
+        };
+        let blue_zone: &str = r#"{"team": "blue", "v_min_m": 4.0, "v_max_m": null}"#;
+        let walls: &str = r#"{"height_m": 6.0, "thickness_m": 0.6, "opacity_frac": 0.25}"#;
+        let without_walls: String = format!(r#"{{"zones": [{blue_zone}], "zone_walls": null}}"#);
+        assert_eq!(read(&without_walls).expect("no walls"), []);
+        let green: String = format!(
+            r#"{{"zones": [{}], "zone_walls": {walls}}}"#,
+            blue_zone.replace("blue", "green")
+        );
+        assert!(read(&green).is_err());
+    }
 
     const EDGE_M: f64 = 0.1;
     const BESIDE_STAIRS_M: f64 = 0.8;
