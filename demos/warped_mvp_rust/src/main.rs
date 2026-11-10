@@ -22,6 +22,8 @@
 //! - `--tour-levels`: play alone, visit every level in turn (timing its frames, opening its
 //!   menu, leaving), write the frame times to `.artifacts/tour_levels/<run_id>/` and quit.
 //! - `--tour-level <name>`: with `--tour-levels`, visit only that level (repeatable).
+//! - `--tour-ally-bot-count <count>`, `--tour-enemy-bot-count <count>`: with `--tour-levels`, play
+//!   with that many fighting bots on the player's team and on the other (0 and 0: alone).
 //!
 //! Example: `warped --width-px 2560 --height-px 1440`
 //!
@@ -69,7 +71,7 @@ use warped_shared::page::Shape;
 use warped_shared::player_settings::{PerPlayerSettings, get_saved_player_settings_path};
 
 use crate::app_state::{App, Ports, format_utc_now, get_address_shapes, get_credits_shapes};
-use crate::children::make_run_folder;
+use crate::children::{BotObjective, GameKind, MAX_ALLY_COUNT, MAX_ENEMY_COUNT, make_run_folder};
 use crate::game_menu::{GameMenu, LevelMenu, get_level_shapes};
 use crate::game_settings_page::GameSettingsPage;
 use crate::level_link::{AppLink, Tour};
@@ -145,6 +147,30 @@ struct Arguments {
     /// (e.g. "Dark Forest" or dark_forest); repeat for several.
     #[arg(long, requires = "tour_levels")]
     tour_level: Vec<String>,
+    /// With --tour-levels, play with this many fighting bots on the player's team (0 to 5).
+    #[arg(long, requires = "tour_levels", default_value_t = 0,
+          value_parser = clap::value_parser!(u32).range(0..=MAX_ALLY_COUNT as i64))]
+    tour_ally_bot_count: u32,
+    /// With --tour-levels, play against this many fighting bots (0 to 6); with no bots on either
+    /// team the tour plays alone.
+    #[arg(long, requires = "tour_levels", default_value_t = 0,
+          value_parser = clap::value_parser!(u32).range(0..=MAX_ENEMY_COUNT as i64))]
+    tour_enemy_bot_count: u32,
+}
+
+/// `get_tour_game_kind` gives the game a tour plays: alone without bots, else with `ally_count`
+/// fighting bots on the player's team and `enemy_count` on the other.
+///
+/// Example: `assert_eq!(get_tour_game_kind(0, 0), GameKind::Alone);`
+fn get_tour_game_kind(ally_count: u32, enemy_count: u32) -> GameKind {
+    match (ally_count, enemy_count) {
+        (0, 0) => GameKind::Alone,
+        _ => GameKind::Bots {
+            ally_count,
+            enemy_count,
+            objective: BotObjective::Fight,
+        },
+    }
 }
 
 /// `print_level_programs` prints the levels `make package-mac-app` builds and puts in the app (see
@@ -299,6 +325,10 @@ fn run_window(arguments: &Arguments, mut app: App, tour_level_indices: Vec<usize
     let mut tour_run: Option<TourRun> = match arguments.tour_levels {
         true => Some(TourRun::Start(
             &mut app,
+            get_tour_game_kind(
+                arguments.tour_ally_bot_count,
+                arguments.tour_enemy_bot_count,
+            ),
             tour_level_indices,
             window.get_window().size_in_pixels(),
         )?),
@@ -564,6 +594,7 @@ mod tests {
     //! | Keys in menus | arrows, Return, Escape, digits (top row, keypad), a key that does nothing, rebinding (a key, Escape) | `keys_map_to_menu_inputs` |
     //! | Sample match | round 4 of the shipped levels on the attacker's wavefront | `the_sample_match_is_mid_way` |
     //! | Toured levels | none named (all), a name, a slug, a name no level has | `toured_levels_are_picked_by_name` |
+    //! | Toured game | no bots (alone), allies only, enemies only, both; a count over the most | `a_tour_plays_alone_or_with_bots` |
     //! | Shipped settings files | every level's file on the game master's page: shared respawn, shooting switches and gravity, each level's own setting, Dark Forest's none | `the_shipped_settings_all_show` |
 
     use super::*;
@@ -580,6 +611,30 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("no such level"), "{error}");
+    }
+
+    #[test]
+    fn a_tour_plays_alone_or_with_bots() {
+        assert_eq!(get_tour_game_kind(0, 0), GameKind::Alone);
+        for (ally_count, enemy_count) in [(2, 0), (0, 3), (4, 5)] {
+            assert_eq!(
+                get_tour_game_kind(ally_count, enemy_count),
+                GameKind::Bots {
+                    ally_count,
+                    enemy_count,
+                    objective: BotObjective::Fight
+                }
+            );
+        }
+        let too_many: String = (MAX_ENEMY_COUNT + 1).to_string();
+        let flags: [&str; 4] = [
+            "warped",
+            "--tour-levels",
+            "--tour-enemy-bot-count",
+            &too_many,
+        ];
+        assert!(Arguments::try_parse_from(flags).is_err());
+        assert!(Arguments::try_parse_from(["warped", "--tour-ally-bot-count", "1"]).is_err());
     }
 
     #[test]
