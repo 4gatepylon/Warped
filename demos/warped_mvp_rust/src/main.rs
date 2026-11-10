@@ -30,6 +30,8 @@
 //! Must know:
 //! - Gotchas: keys in the menus are fixed (arrows, Return, Escape, R, Backspace, digits), so a bad
 //!   key binding can always be fixed from the player settings page.
+//! - Every level a person plays adds its frame times to
+//!   `.artifacts/play_frame_times/<run_id>/frame_times.md` (`play_log.rs`).
 
 mod app_state;
 mod children;
@@ -41,6 +43,7 @@ mod levels_manifest;
 mod main_menu;
 mod menu_page;
 mod painter;
+mod play_log;
 mod player_settings_page;
 mod screens;
 mod tour_run;
@@ -74,11 +77,12 @@ use crate::app_state::{App, Ports, format_utc_now, get_address_shapes, get_credi
 use crate::children::{BotObjective, GameKind, MAX_ALLY_COUNT, MAX_ENEMY_COUNT, make_run_folder};
 use crate::game_menu::{GameMenu, LevelMenu, get_level_shapes};
 use crate::game_settings_page::GameSettingsPage;
-use crate::level_link::{AppLink, Tour};
+use crate::level_link::{AppLink, FrameTimer, Tour};
 use crate::levels_manifest::{Picture, get_levels_manifest_path, load_levels, load_map_pictures};
 use crate::main_menu::MainMenu;
 use crate::menu_page::{MenuInput, page_t};
 use crate::painter::{Painter, PixelOrder, render_page};
+use crate::play_log::{PLAY_SETTLE_S, PlayLog};
 use crate::player_settings_page::PlayerSettingsPage;
 use crate::tour_run::TourRun;
 
@@ -322,6 +326,7 @@ fn run_window(arguments: &Arguments, mut app: App, tour_level_indices: Vec<usize
     )?;
     let mut painter: Painter = Painter::New(window.get_device())?;
     let mut shown: Option<(Vec<Shape>, (u32, u32))> = None;
+    let mut play_log: PlayLog = PlayLog::New();
     let mut tour_run: Option<TourRun> = match arguments.tour_levels {
         true => Some(TourRun::Start(
             &mut app,
@@ -377,12 +382,26 @@ fn run_window(arguments: &Arguments, mut app: App, tour_level_indices: Vec<usize
         app.update();
         if let Some((play, join)) = app.take_level_to_play() {
             let mut tour: Option<Tour> = tour_run.as_ref().map(TourRun::make_level_tour);
+            let mut timer: Option<FrameTimer> =
+                tour.is_none().then(|| FrameTimer::New(PLAY_SETTLE_S));
             let result: Result<LevelEnd> = autoreleasepool(|_| {
-                let mut link: AppLink = AppLink::New(&mut app, tour.as_mut());
+                let mut link: AppLink = AppLink::New(&mut app, tour.as_mut(), timer.as_mut());
                 let mut level_window: LevelWindow = window.get_level_window(&mut link);
                 play(&mut level_window, &join)
             });
             app.end_level(result.map_err(|error| error.to_string()));
+            if let Some(timer) = &timer {
+                let path: PathBuf = play_log.record(
+                    &join.level.name,
+                    window.get_window().size_in_pixels(),
+                    timer.get_frame_times(),
+                )?;
+                println!(
+                    "warped: {}'s frame times are in {}",
+                    join.level.name,
+                    path.display()
+                );
+            }
             if let (Some(tour_run), Some(tour)) = (&mut tour_run, &tour) {
                 tour_run.after_level(&app, &join.level.name, tour)?;
                 if tour_run.is_done() {

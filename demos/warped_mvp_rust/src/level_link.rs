@@ -2,12 +2,14 @@
 //! frame the level asks it whether the round is over, and it polls the network there, so the
 //! match server keeps hearing this player; it gives the level's menu the match's status. With a
 //! `Tour` (`warped --tour-levels`), it also times the level's frames and presses the keys that
-//! show the map, open the menu and leave the level.
+//! show the map, open the menu and leave the level. With a `FrameTimer` (a person playing), it
+//! times the level's frames for the play log (`play_log.rs`).
 //!
 //! Interface: `AppLink` (`New`), `Tour` (`New`, `on_frame`, `get_frame_times`), `TourStep`,
-//! `summarise_frame_times`, `FrameSummary`.
+//! `FrameTimer` (`New`, `on_frame`, `get_frame_times`), `summarise_frame_times`, `FrameSummary`,
+//! `format_frame_row`, `FRAME_TABLE_HEADER`.
 //!
-//! Example: `let mut link = AppLink::New(&mut app, Some(&mut tour));`
+//! Example: `let mut link = AppLink::New(&mut app, Some(&mut tour), None);`
 
 use std::time::Instant;
 
@@ -21,6 +23,10 @@ use crate::app_state::App;
 const MS_PER_S: f64 = 1000.0;
 const PERCENT: f64 = 100.0;
 const P99_PCT: f64 = 99.0;
+const TARGET_FRAME_MS: f64 = 1000.0 / 60.0;
+
+/// `FRAME_TABLE_HEADER` is the head of a table of `format_frame_row`'s rows.
+pub const FRAME_TABLE_HEADER: &str = "| Level | Frames | Median ms | p99 ms | Max ms | p99 under 16.7 ms |\n| --- | --- | --- | --- | --- | --- |\n";
 
 /// `TourStep` is what a toured level does next, after how long in the level: wait while it loads
 /// and settles, time its frames, open the menu, then leave by its QUIT page. (It can't hold the
@@ -170,30 +176,109 @@ pub fn summarise_frame_times(times_ms: &[f64]) -> Option<FrameSummary> {
     })
 }
 
-/// `AppLink` is the `MatchLink` of a level the app plays: the app, and the tour if one runs.
+/// `format_frame_row` gives the table row of the level `name`'s frame times, ending in a newline:
+/// its `summary`, and whether its 99th percentile is inside 60 fps; or a row saying it had no
+/// frames.
+///
+/// Example: `let row: String = format_frame_row("Dust", summarise_frame_times(&[10.0]));`
+pub fn format_frame_row(name: &str, summary: Option<FrameSummary>) -> String {
+    match summary {
+        Some(s) => format!(
+            "| {name} | {} | {:.2} | {:.2} | {:.2} | {} |\n",
+            s.frame_count,
+            s.median_ms,
+            s.p99_ms,
+            s.max_ms,
+            if s.p99_ms < TARGET_FRAME_MS {
+                "yes"
+            } else {
+                "NO"
+            }
+        ),
+        None => format!("| {name} | 0 | - | - | - | no frames |\n"),
+    }
+}
+
+/// `FrameTimer` times the frames of a level a person plays: how long the level loads and settles
+/// before frames count, when it started, and the frame times since, in ms.
+pub struct FrameTimer {
+    settle_s: f64,
+    started_at: Option<Instant>,
+    last_frame_at: Option<Instant>,
+    frame_times_ms: Vec<f64>,
+}
+
+impl FrameTimer {
+    /// `New` makes a timer that counts frames from `settle_s` into the level.
+    ///
+    /// Example: `let mut timer = FrameTimer::New(5.0);`
+    #[allow(non_snake_case)]
+    pub fn New(settle_s: f64) -> FrameTimer {
+        FrameTimer {
+            settle_s,
+            started_at: None,
+            last_frame_at: None,
+            frame_times_ms: Vec::new(),
+        }
+    }
+
+    /// `on_frame` counts a frame at `now`, recording the time since the frame before it once the
+    /// level has settled.
+    ///
+    /// Example: `timer.on_frame(Instant::now());`
+    pub fn on_frame(&mut self, now: Instant) {
+        let started_at: Instant = *self.started_at.get_or_insert(now);
+        if now.duration_since(started_at).as_secs_f64() >= self.settle_s
+            && let Some(last) = self.last_frame_at
+        {
+            self.frame_times_ms
+                .push(now.duration_since(last).as_secs_f64() * MS_PER_S);
+        }
+        self.last_frame_at = Some(now);
+    }
+
+    /// `get_frame_times` gives the frame times measured, in ms.
+    ///
+    /// Example: `let times = timer.get_frame_times();`
+    pub fn get_frame_times(&self) -> &[f64] {
+        &self.frame_times_ms
+    }
+}
+
+/// `AppLink` is the `MatchLink` of a level the app plays: the app, the tour if one runs, and the
+/// timer of a person's play.
 pub struct AppLink<'a> {
     app: &'a mut App,
     tour: Option<&'a mut Tour>,
+    timer: Option<&'a mut FrameTimer>,
 }
 
 impl<'a> AppLink<'a> {
-    /// `New` links a level to `app`, with `tour` scripting it if given.
+    /// `New` links a level to `app`, with `tour` scripting it and `timer` timing it if given.
     ///
-    /// Example: `let mut link = AppLink::New(&mut app, None);`
+    /// Example: `let mut link = AppLink::New(&mut app, None, Some(&mut timer));`
     #[allow(non_snake_case)]
-    pub fn New(app: &'a mut App, tour: Option<&'a mut Tour>) -> AppLink<'a> {
-        AppLink { app, tour }
+    pub fn New(
+        app: &'a mut App,
+        tour: Option<&'a mut Tour>,
+        timer: Option<&'a mut FrameTimer>,
+    ) -> AppLink<'a> {
+        AppLink { app, tour, timer }
     }
 }
 
 impl MatchLink for AppLink<'_> {
     /// `is_round_over` polls the network and says whether the round the level plays has ended;
-    /// a tour also counts the frame and presses its keys here.
+    /// a tour also counts the frame and presses its keys here, and a timer counts the frame.
     ///
     /// Example: `if link.is_round_over() { ... }`
     fn is_round_over(&mut self) -> bool {
+        let now: Instant = Instant::now();
         if let Some(tour) = &mut self.tour {
-            tour.on_frame(Instant::now());
+            tour.on_frame(now);
+        }
+        if let Some(timer) = &mut self.timer {
+            timer.on_frame(now);
         }
         self.app.poll_network();
         self.app.is_level_round_over()
@@ -224,6 +309,8 @@ mod tests {
     //! | Tour steps | before settling, timing, each key step, done | `tour_steps_follow_the_clock` |
     //! | Frame times | recorded only while timing | `frames_are_timed_only_while_timing` |
     //! | Summary | none, one, many (median, p99, max) | `frame_times_summarise` |
+    //! | A person's frames | while the level settles (not timed), after it (timed) | `a_persons_frames_are_timed_once_the_level_settled` |
+    //! | Table row | inside 60 fps, outside it, no frames | `rows_say_whether_frames_are_inside_60_fps` |
 
     use super::*;
     use std::time::Duration;
@@ -257,6 +344,42 @@ mod tests {
             tour.get_frame_times()
                 .iter()
                 .all(|&ms| (ms - 10.0).abs() < 1e-6)
+        );
+    }
+
+    #[test]
+    fn a_persons_frames_are_timed_once_the_level_settled() {
+        let mut timer: FrameTimer = FrameTimer::New(0.05);
+        let start: Instant = Instant::now();
+        for i in 0..5 {
+            timer.on_frame(start + TOUR_FRAME_STEP * i);
+        }
+        assert!(timer.get_frame_times().is_empty());
+        for i in 5..20 {
+            timer.on_frame(start + TOUR_FRAME_STEP * i);
+        }
+        assert_eq!(timer.get_frame_times().len(), 15);
+        assert!(
+            timer
+                .get_frame_times()
+                .iter()
+                .all(|&ms| (ms - 10.0).abs() < 1e-6)
+        );
+    }
+
+    #[test]
+    fn rows_say_whether_frames_are_inside_60_fps() {
+        assert_eq!(
+            format_frame_row("Dust", summarise_frame_times(&[10.0, 12.0])),
+            "| Dust | 2 | 12.00 | 12.00 | 12.00 | yes |\n"
+        );
+        assert_eq!(
+            format_frame_row("Dust", summarise_frame_times(&[20.0])),
+            "| Dust | 1 | 20.00 | 20.00 | 20.00 | NO |\n"
+        );
+        assert_eq!(
+            format_frame_row("Dust", None),
+            "| Dust | 0 | - | - | - | no frames |\n"
         );
     }
 

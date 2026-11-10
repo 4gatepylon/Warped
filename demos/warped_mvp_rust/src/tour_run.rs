@@ -9,7 +9,6 @@
 //! Example: `let mut tour_run = TourRun::Start(&mut app, vec![0, 1, 2], size_px)?;`
 
 use std::error::Error;
-use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
@@ -17,7 +16,9 @@ use warped_shared::app_bundle::get_level_slug;
 
 use crate::app_state::{App, format_utc_now};
 use crate::children::{GameKind, make_run_folder};
-use crate::level_link::{FrameSummary, Tour, summarise_frame_times};
+use crate::level_link::{
+    FRAME_TABLE_HEADER, FrameSummary, Tour, format_frame_row, summarise_frame_times,
+};
 use crate::painter::{PixelOrder, render_page};
 
 /// `Result` is this module's result type.
@@ -26,7 +27,6 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const SETTLE_S: f64 = 10.0;
 const TIME_S: f64 = 8.0;
 const STEP_S: f64 = 1.2;
-const TARGET_FRAME_MS: f64 = 1000.0 / 60.0;
 
 /// `TourRun` is a tour of levels: the game it plays, the levels' indices in the manifest, how many
 /// are done, the frame summaries so far (level name, summary), the window's size in pixels, and
@@ -126,28 +126,13 @@ impl TourRun {
     /// Example: `tour_run.finish(&mut app)?;`
     pub fn finish(&self, app: &mut App) -> Result<()> {
         let mut table: String = format!(
-            "Frame times inside the app at {}x{} px, {} (wall clock, from one frame's start to the next's)\n\n| Level | Frames | Median ms | p99 ms | Max ms | p99 under 16.7 ms |\n| --- | --- | --- | --- | --- | --- |\n",
+            "Frame times inside the app at {}x{} px, {} (wall clock, from one frame's start to the next's)\n\n{FRAME_TABLE_HEADER}",
             self.size_px.0,
             self.size_px.1,
             describe_game(self.kind)
         );
         for (name, summary) in &self.summaries {
-            match summary {
-                Some(s) => writeln!(
-                    table,
-                    "| {name} | {} | {:.2} | {:.2} | {:.2} | {} |",
-                    s.frame_count,
-                    s.median_ms,
-                    s.p99_ms,
-                    s.max_ms,
-                    if s.p99_ms < TARGET_FRAME_MS {
-                        "yes"
-                    } else {
-                        "NO"
-                    }
-                )?,
-                None => writeln!(table, "| {name} | 0 | - | - | - | no frames |")?,
-            }
+            table.push_str(&format_frame_row(name, *summary));
         }
         fs::write(self.folder.join("frame_times.md"), &table)?;
         println!("{table}");

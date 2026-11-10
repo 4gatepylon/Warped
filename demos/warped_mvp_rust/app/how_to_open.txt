@@ -4,13 +4,16 @@ Warped needs a Mac with Apple silicon (M1 or later) and macOS 13 or later.
 
 1. Drag Warped.app into your Applications folder.
 2. Double-click it. The first time, macOS says it can't check Warped for malware, because the app
-   isn't signed by Apple. Either right-click (or Control-click) Warped.app, choose Open, then Open
-   again; or open System Settings, Privacy & Security, scroll down and click Open Anyway next to
-   Warped; or, in Terminal: xattr -dr com.apple.quarantine /Applications/Warped.app
-   You only do this once.
+   isn't signed by Apple. Click Done (not Move to Trash), then do one of these, once:
+   - Open System Settings, Privacy & Security, scroll down, click Open Anyway next to Warped,
+     and confirm with your password or Touch ID. Then double-click Warped again and choose Open.
+   - On macOS 13 or 14 only: right-click (or Control-click) Warped.app, choose Open, then Open
+     again. (macOS 15 and later no longer offer this.)
+   - In Terminal: xattr -dr com.apple.quarantine /Applications/Warped.app
 3. In the main menu, use the arrow keys and Return (Escape goes back):
    - Join a game found on your Wi-Fi, or host one; play alone or with bots; pick the five-level
      match or any one level.
    - Allow Local Network access when macOS asks, so games on your Wi-Fi can be found.
 
-The logs of games you host are in ~/Library/Logs/Warped/.
+The logs of games you host, and the frame times of each level you play
+(play_frame_times/<date>-<time>/frame_times.md), are in ~/Library/Logs/Warped/.
