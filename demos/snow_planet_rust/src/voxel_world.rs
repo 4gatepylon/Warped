@@ -3803,7 +3803,7 @@ mod blizzard_tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Point | in the white-out, outside it, above it | `points_find_their_blizzard` |
-    //! | Walking | in the white-out (its `speed_frac` of the speed), outside (full speed) | `blizzards_slow_walking` |
+    //! | Walking, with the warps' pull off (W-144) | in the white-out (its `speed_frac` of the speed), outside (full speed) | `blizzards_slow_walking` |
     //! | Laser | into the white-out (stops `shot_reach_m` in, hits nothing), away from every blizzard (hits what it's aimed at) | `lasers_stop_in_a_blizzard` |
 
     use super::*;
@@ -3843,7 +3843,8 @@ mod blizzard_tests {
 
     #[test]
     fn blizzards_slow_walking() {
-        let world: VoxelWorld = load_snow_planet();
+        let mut world: VoxelWorld = load_snow_planet();
+        world.settings.gravity.max_pull_per_walk_speed = 0.0;
         let forward: Input = Input {
             forward: true,
             ..Input::default()

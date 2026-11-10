@@ -9,8 +9,9 @@
 //! one to face, as `VoxelPlayer::AtView` takes them).
 //!
 //! Example: `PLAY_TRACE_MAP=dust PLAY_TRACE_FILE=/tmp/dust.txt cargo test --release record_play_trace -- --ignored`;
-//! with `PLAY_TRACE_AT=-26,40,-14,40` on `lunar-surface` it starts 12 m from wormhole mouth A,
-//! facing it, so the trace shows the mouth's pull (W-144): standing drifts in, walking in is faster.
+//! with `PLAY_TRACE_AT=-19,40,-14,40` on `lunar-surface` it starts about 12 m from wormhole
+//! mouth A (5 m apart in u, which curved space stretches), facing it, so the trace shows the
+//! mouth's pull (W-144): standing drifts in at about 3 m/s, walking in goes 13 to 16 m/s, not 10.
 
 use std::fmt::Write as _;
 
