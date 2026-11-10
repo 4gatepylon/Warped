@@ -222,7 +222,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Joining opens a lobby with each team's head count; `1` joins blue and `2` joins red (bots join the smaller team).
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
-  view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
+  view darkens and says "YOU DIED" with a countdown and a bar filling over the wait, and they come back at their spawn
+  point after the server's respawn wait: 20 s, 10 s more for every 5 minutes the level has gone on (`respawn` in
+  `server_settings.yaml`, W-142 (growing respawn time)).
 - On Lunar Surface each team has three pylons, each a beacon that is its own console, and a team wins by turning off all
   three of the other team's beacons (hold `E` on one for 10 s within 3 m). The server checks that too: it takes a hold
   only from a player whose view meets the beacon within 3 m, with half a meter of slack (`console_reach.rs`), so no

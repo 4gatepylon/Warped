@@ -14,6 +14,7 @@ use glam::{DMat3, DMat4, DQuat, DVec3};
 use serde::Deserialize;
 
 use warped_shared::gravity::{FlatWarp, get_flat_pull_m_per_s};
+use warped_shared::laser_drop::{DROP_PIECE_M, turn_flat};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState};
 
 use crate::play_settings::HeadBobSettings;
@@ -790,11 +791,38 @@ impl CityWorld {
         targets: &[Target],
         shooter_id: Option<u32>,
     ) -> Shot {
+        self.trace_falling_shot(
+            origin, direction, range_m, bounces, targets, shooter_id, 0.0,
+        )
+    }
+
+    /// `trace_falling_shot` is `trace_shot` for a shot that falls toward the street (outward)
+    /// by `drop_per_m` per meter (`laser_drop::get_drop_curvature_per_m`, W-157 (bullet drop, by
+    /// game setting)): it goes in straight pieces of at most `DROP_PIECE_M`, turning down between
+    /// them (`turn_flat`), each piece a point of the shot; 0 is `trace_shot`'s straight shot.
+    ///
+    /// Example: `let shot = world.trace_falling_shot(eye, forward, 80.0, Bounces::Perfect(2), &targets, Some(my_id), 0.00016);`
+    #[allow(clippy::too_many_arguments)]
+    pub fn trace_falling_shot(
+        &self,
+        origin: DVec3,
+        direction: DVec3,
+        range_m: f64,
+        bounces: Bounces,
+        targets: &[Target],
+        shooter_id: Option<u32>,
+        drop_per_m: f64,
+    ) -> Shot {
         let mut points: Vec<DVec3> = vec![origin];
         let (mut o, mut d, mut left_m, mut bounce_count) =
             (origin, direction.normalize(), range_m, 0);
         loop {
-            let mut best: (f64, ShotHit, Option<DVec3>) = (left_m, ShotHit::Range, None);
+            let piece_m: f64 = if drop_per_m > 0.0 {
+                left_m.min(DROP_PIECE_M)
+            } else {
+                left_m
+            };
+            let mut best: (f64, ShotHit, Option<DVec3>) = (piece_m, ShotHit::Range, None);
             let mut consider = |t: f64, hit: ShotHit, reflect: Option<DVec3>| {
                 if t > SHOT_START_M && t < best.0 {
                     best = (t, hit, reflect);
@@ -869,6 +897,11 @@ impl CityWorld {
             let end: DVec3 = o + d * t;
             points.push(end);
             left_m -= t;
+            if matches!(hit, ShotHit::Range) && reflect.is_none() && left_m > 0.0 {
+                d = turn_flat(d, end.normalize_or(DVec3::Y), drop_per_m, t);
+                o = end;
+                continue;
+            }
             match reflect {
                 Some(new_d) => {
                     bounce_count += 1;

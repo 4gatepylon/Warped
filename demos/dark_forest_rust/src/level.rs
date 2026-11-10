@@ -18,7 +18,7 @@
 //!   display's refresh rate, so they work the same in the one-window app's window.
 
 use warped_shared::app::{LevelEnd, LevelWindow};
-use warped_shared::hud::get_death_lines;
+use warped_shared::hud::{get_death_lines, make_respawn_bar_rects};
 use warped_shared::match_state::Team;
 use warped_shared::menu_and_map::{Cover, MenuAndMap, MouseChange, PlayOutcome};
 use warped_shared::metal_window::set_window_title;
@@ -1298,10 +1298,13 @@ impl Level {
                 hud_images.push(minimap.get_minimap_image(window_width_px, window_height_px));
             }
             if !screen.menu_and_map.is_menu_open()
-                && let Some(respawn_in_s) = session
-                    .player
-                    .get_respawn_in_s(session.settings.respawn.delay_s as f32)
+                && let Some(respawn_wait_s) = session.respawn_wait_s
+                && let Some(respawn_in_s) = session.player.get_respawn_in_s(respawn_wait_s)
             {
+                frame.overlay_rects.extend(make_respawn_bar_rects(
+                    f64::from(respawn_in_s),
+                    f64::from(respawn_wait_s),
+                ));
                 death_picture.draw(
                     &{
                         let [title, countdown] = get_death_lines(f64::from(respawn_in_s));

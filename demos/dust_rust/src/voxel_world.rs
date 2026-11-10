@@ -39,6 +39,7 @@ use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
 use warped_shared::gravity::{HyperbolicWarp, add_pull, get_hyperbolic_pull_m_per_s};
+use warped_shared::laser_drop::{DROP_PIECE_M, get_drop_curvature_per_m, turn_hyperbolic};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -2023,7 +2024,8 @@ impl VoxelWorld {
     }
 
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between the
-    /// warps, bent inside them, through throats, to a block, the ground, a horizon or
+    /// warps (falling by the server settings' `shooting.drop_m_per_s_per_s` in pieces of
+    /// `DROP_PIECE_M`, `laser_drop.rs`), bent inside them, through throats, to a block, the ground, a horizon or
     /// `LASER_MAX_LENGTH_M` (through glass). The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where
     /// the window draws the tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
@@ -2031,6 +2033,15 @@ impl VoxelWorld {
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
     pub fn trace_laser(&self, camera: DMat4) -> Shot {
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
+        let drop_per_m: f64 = get_drop_curvature_per_m(
+            self.settings.shooting.drop_m_per_s_per_s,
+            self.settings.sniper.beam_speed_m_per_s,
+        );
+        let drop_piece_s: f64 = if drop_per_m > 0.0 {
+            DROP_PIECE_M / self.r
+        } else {
+            f64::INFINITY
+        };
         let laser_wind: Option<WindField> = self.wind.map(|wind| wind.get_laser_wind());
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
@@ -2044,12 +2055,18 @@ impl VoxelWorld {
             }
             let Some(w) = inside else {
                 let segment_s: f64 = laser_wind.map_or(f64::INFINITY, |wind| wind.segment_s);
-                let s_max: f64 = (max_s - travelled).min(segment_s);
+                let s_max: f64 = (max_s - travelled).min(segment_s).min(drop_piece_s);
                 if let Some(wind) = &laser_wind {
                     v = wind.kick(x, v, 0.5 * s_max);
                 }
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_max);
+                }
                 let (s_end, entering) = self.find_warp_entry(x, v, s_max);
-                if let Some(found) = self.trace_scene(x, v, s_end, None) {
+                if let Some(found) = self
+                    .trace_scene(x, v, s_end, None)
+                    .filter(|found| found.s.is_finite())
+                {
                     pieces
                         .last_mut()
                         .expect("a piece")
@@ -2065,9 +2082,12 @@ impl VoxelWorld {
                 pieces.last_mut().expect("a piece").push(x);
                 if let Some(wind) = &laser_wind {
                     v = wind.kick(x, v, 0.5 * s_end);
-                    if entering.is_none() {
-                        continue;
-                    }
+                }
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_end);
+                }
+                if entering.is_none() && (laser_wind.is_some() || drop_per_m > 0.0) {
+                    continue;
                 }
                 if entering.is_none() {
                     break;
@@ -2077,6 +2097,9 @@ impl VoxelWorld {
             };
             let ds: f64 = self.choose_bend_step(self.compute_bend(w, x, v).1);
             let (v0, x1, v1, rho) = self.step_bent(w, x, v, ds);
+            if !(ds.is_finite() && rho.is_finite()) {
+                break;
+            }
             if let Some(found) = self.trace_scene(x, v0, ds, Some(w)) {
                 pieces
                     .last_mut()

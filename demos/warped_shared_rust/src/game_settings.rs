@@ -11,8 +11,9 @@
 //! Example: `settings.apply(&parse_settings_message(b"set shared respawn.delay_s 5", 5)?)?;`
 //!
 //! Must know:
-//! - Gotchas: a key is a dotted path to a number in a settings file (`movement.jump_height_m`);
-//!   a key at least two levels' files have is shared, any other is its level's own.
+//! - Gotchas: a key is a dotted path to a number or a switch (`true` or `false`, set with 1 or
+//!   0) in a settings file (`movement.jump_height_m`, `shooting.is_friendly_fire_on`); a key at
+//!   least two levels' files have is shared, any other is its level's own.
 //! - Gotchas: a client asks with `settings?`, `set <scope> <key> <value>` or `reset <scope> <key>`
 //!   (scope `shared` or a level's index), and only those clients get `settings <json>` back, so a
 //!   client older than this module never sees one.
@@ -154,7 +155,7 @@ pub fn parse_settings_text(text: &str, source: &str) -> Result<Value> {
 /// Example: `push_number_keys(&defaults, "", &mut keys);`
 fn push_number_keys(value: &Value, prefix: &str, keys: &mut Vec<String>) {
     match value {
-        Value::Number(_) => keys.push(prefix.to_string()),
+        Value::Number(_) | Value::Bool(_) => keys.push(prefix.to_string()),
         Value::Object(fields) => {
             for (name, field) in fields {
                 let key: String = match prefix {
@@ -332,12 +333,18 @@ impl GameSettings {
                 if !value.is_finite() || *value < 0.0 {
                     return Err(format!("{key} must be a number of at least 0, not {value}").into());
                 }
-                let number: Value = match default.is_u64() {
-                    true if value.fract() != 0.0 => {
+                let number: Value = match (default.is_boolean(), default.is_u64()) {
+                    (true, _) if *value != 0.0 && *value != 1.0 => {
+                        return Err(
+                            format!("{key} is a switch: 0 (off) or 1 (on), not {value}").into()
+                        );
+                    }
+                    (true, _) => Value::Bool(*value == 1.0),
+                    (false, true) if value.fract() != 0.0 => {
                         return Err(format!("{key} must be a whole number, not {value}").into());
                     }
-                    true => Value::from(*value as u64),
-                    false => Value::from(*value),
+                    (false, true) => Value::from(*value as u64),
+                    (false, false) => Value::from(*value),
                 };
                 match scope {
                     SettingsScope::Shared => self.shared.insert(key.clone(), number),
@@ -393,7 +400,7 @@ mod tests {
     //! | Messages | request, set (shared, a level), reset (shared, a level), past the last level, not a number, garbage | `messages_round_trip` |
     //! | Sections | a key in every level (shared), in two of three (shared), in one (its level's), a level without a file (empty) | `keys_split_into_shared_and_each_levels_own` |
     //! | Shared default | levels agree, most levels agree, a tie (the first level's) | `shared_defaults_are_the_most_common_value` |
-    //! | Set | shared, a level's own key, a shared key for one level; unknown key, a level's own key as shared, negative, infinite, a fraction where the default is whole | `sets_are_checked` |
+    //! | Set | shared, a level's own key, a shared key for one level, a switch off; unknown key, a level's own key as shared, negative, infinite, a fraction where the default is whole, a switch at 0.5 | `sets_are_checked` |
     //! | Merge | no overrides (the defaults), shared over a level that has the key and not one that lacks it, a level's own over the shared, a reset, no file | `levels_play_by_their_merged_settings` |
     //! | Answer | written then read, a view isn't one | `answers_round_trip` |
     //! | Files | YAML read, not a map, the same flag twice | `settings_files_load` |
@@ -402,16 +409,17 @@ mod tests {
     use serde_json::json;
 
     /// `make_settings` gives three levels: all with `respawn.delay_s` (3, 3, 5), the first two
-    /// with `movement.walk` (2.0, 1.2) and whole `rifle.hits`, the third alone with `glass.bounces`.
+    /// with `movement.walk` (2.0, 1.2), whole `rifle.hits` and the switch `shooting.on`, the third
+    /// alone with `glass.bounces`.
     ///
     /// Example: `let settings = make_settings();`
     fn make_settings() -> GameSettings {
         GameSettings::New(vec![
             Some(
-                json!({"respawn": {"delay_s": 3.0}, "movement": {"walk": 2.0}, "rifle": {"hits": 2}}),
+                json!({"respawn": {"delay_s": 3.0}, "movement": {"walk": 2.0}, "rifle": {"hits": 2}, "shooting": {"on": true}}),
             ),
             Some(
-                json!({"respawn": {"delay_s": 3.0}, "movement": {"walk": 1.2}, "rifle": {"hits": 2}}),
+                json!({"respawn": {"delay_s": 3.0}, "movement": {"walk": 1.2}, "rifle": {"hits": 2}, "shooting": {"on": true}}),
             ),
             Some(json!({"respawn": {"delay_s": 5.0}, "glass": {"bounces": 2}})),
         ])
@@ -459,7 +467,12 @@ mod tests {
         settings.levels.push(BTreeMap::new());
         assert_eq!(
             settings.get_shared_keys(),
-            ["movement.walk", "respawn.delay_s", "rifle.hits"]
+            [
+                "movement.walk",
+                "respawn.delay_s",
+                "rifle.hits",
+                "shooting.on"
+            ]
         );
         assert!(settings.get_level_keys(0).is_empty());
         assert_eq!(settings.get_level_keys(2), ["glass.bounces"]);
@@ -493,6 +506,10 @@ mod tests {
             .unwrap();
         assert_eq!(settings.shared["respawn.delay_s"], json!(4.0));
         assert_eq!(settings.levels[2]["glass.bounces"], json!(3));
+        settings
+            .apply(&make_set(SettingsScope::Shared, "shooting.on", 0.0))
+            .unwrap();
+        assert_eq!(settings.shared["shooting.on"], json!(false));
         assert_eq!(
             settings.get_value(SettingsScope::Level(1), "movement.walk"),
             Some(&json!(1.5))
@@ -503,6 +520,7 @@ mod tests {
             make_set(SettingsScope::Shared, "respawn.delay_s", -1.0),
             make_set(SettingsScope::Shared, "respawn.delay_s", f64::INFINITY),
             make_set(SettingsScope::Shared, "rifle.hits", 2.5),
+            make_set(SettingsScope::Shared, "shooting.on", 0.5),
         ] {
             assert!(settings.apply(&refused).is_err(), "{refused:?}");
         }

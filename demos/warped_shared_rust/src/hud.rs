@@ -6,12 +6,13 @@
 //! console; the row of squares at the top centre, one per console (pylon), dark once turned off,
 //! with a box in this player's team colour around their team's (`make_pylon_square_rects`; W-146,
 //! pylon squares and own-team box); the hit effect's look (`make_hit_effect`); and the banner's
-//! lobby and "YOU DIED" lines.
+//! lobby and "YOU DIED" lines, with the respawn bar under them that fills over the wait.
 //!
 //! Interface: `get_crosshair_rects`, `HudBars`, `HudPulses`, `AmmoBar`, `make_bar_rects`,
 //! `make_ammo_bar_rects`, `PylonSquare`, `make_pylon_square_rects`, `make_team_box_rgba` (a menu's
 //! box around this player's team), `TEAM_RGB`, `make_hit_effect`, `get_lobby_lines`,
-//! `get_death_lines`, `describe_gun`, `ENERGY_SEGMENT_COUNT`.
+//! `get_death_lines`, `get_respawn_filled_frac`, `make_respawn_bar_rects`, `describe_gun`,
+//! `ENERGY_SEGMENT_COUNT`.
 //!
 //! Example: `let rects: Vec<OverlayRect> = get_crosshair_rects((2560, 1440));`
 
@@ -39,6 +40,9 @@ pub const ENERGY_PULSE_RGB: [f32; 3] = [0.8, 0.94, 1.0];
 pub const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
 pub const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
 pub const DISABLE_BAR_RGB: [f32; 3] = [1.0, 0.85, 0.3];
+pub const RESPAWN_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.63];
+pub const RESPAWN_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
+pub const RESPAWN_BAR_RGB: [f32; 3] = HEALTH_BAR_RGB;
 pub const HIT_SHAKE_TURN_RAD: f64 = 2.399_963_229_728_653;
 pub const TEAM_RGB: [[f32; 3]; 2] = [[0.35, 0.6, 1.0], [1.0, 0.35, 0.3]];
 pub const PYLON_SQUARE_FRAC: f32 = 0.028;
@@ -266,6 +270,32 @@ pub fn get_death_lines(respawn_in_s: f64) -> [String; 2] {
     ]
 }
 
+/// `get_respawn_filled_frac` gives how full the respawn bar is with `respawn_in_s` left of a wait
+/// of `respawn_wait_s` (the server's, `RespawnSettings::get_wait_s`): empty when the wait starts,
+/// full when it ends, and full for a wait of 0.
+///
+/// Example: `let frac: f64 = get_respawn_filled_frac(15.0, 20.0); // 0.25`
+pub fn get_respawn_filled_frac(respawn_in_s: f64, respawn_wait_s: f64) -> f64 {
+    if respawn_wait_s <= 0.0 {
+        return 1.0;
+    }
+    (1.0 - respawn_in_s / respawn_wait_s).clamp(0.0, 1.0)
+}
+
+/// `make_respawn_bar_rects` gives the respawn bar under "YOU DIED" (`get_death_lines`), in the
+/// HUD's look (`hud_bars::make_progress_bar`): it fills from empty to full over the wait, as
+/// `get_respawn_filled_frac` says.
+///
+/// Example: `rects.extend(make_respawn_bar_rects(15.0, 20.0));`
+pub fn make_respawn_bar_rects(respawn_in_s: f64, respawn_wait_s: f64) -> Vec<OverlayRect> {
+    hud_bars::make_progress_bar(
+        RESPAWN_BAR_MIN_FRAC,
+        RESPAWN_BAR_SIZE_FRAC,
+        get_respawn_filled_frac(respawn_in_s, respawn_wait_s) as f32,
+        RESPAWN_BAR_RGB,
+    )
+}
+
 /// `describe_gun` gives the HUD line's part about the gun in hand: gun 1, the laser, or gun 2, the
 /// rifle with its heat, or overheated.
 ///
@@ -442,7 +472,9 @@ mod tests {
     //! | Bars given | the gun's only (the house without a server), health, energy and a console hold too | `bars_show_what_is_given` |
     //! | Gun in hand | the sniper (one block), the rifle (one segment per shot until overheat) | `bars_show_what_is_given`, `the_gun_line_names_the_gun` |
     //! | Rifle | cold, hot, overheated | `the_gun_line_names_the_gun` |
-    //! | Respawn time left | a fraction of a second (1), between whole seconds (rounded up) | `the_death_banner_counts_whole_seconds` |
+    //! | Respawn time left | a fraction of a second (1), between whole seconds (rounded up), three digits | `the_death_banner_counts_whole_seconds` |
+    //! | Respawn bar's time left | the whole wait (empty), half (half full), none (full), below 0 or above the wait (clamped) | `the_respawn_bar_fills_over_the_wait` |
+    //! | Respawn wait | above 0, 0 (full at once) | `the_respawn_bar_fills_over_the_wait` |
     //! | Server answered | not yet (connecting), yes (counts and keys) | `the_lobby_says_whether_connected` |
     //! | Consoles per team | each level's: 3 (Lunar Surface, Dust), 2 (Snow Planet, Dark Forest), 1 (City Sphere) | `each_levels_squares_make_a_centred_row` |
     //! | Teams with consoles | both, one | `each_levels_squares_make_a_centred_row`, `a_lone_teams_squares_are_centred` |
@@ -530,6 +562,29 @@ mod tests {
     fn the_death_banner_counts_whole_seconds() {
         assert_eq!(get_death_lines(0.2), ["YOU DIED", "Respawning in 1"]);
         assert_eq!(get_death_lines(2.4), ["YOU DIED", "Respawning in 3"]);
+        assert_eq!(get_death_lines(119.5), ["YOU DIED", "Respawning in 120"]);
+    }
+
+    #[test]
+    fn the_respawn_bar_fills_over_the_wait() {
+        const WAIT_S: f64 = 20.0;
+        assert_eq!(get_respawn_filled_frac(WAIT_S, WAIT_S), 0.0);
+        assert_eq!(
+            get_respawn_filled_frac(WAIT_S * HALF_FRAC, WAIT_S),
+            HALF_FRAC
+        );
+        assert_eq!(get_respawn_filled_frac(0.0, WAIT_S), 1.0);
+        assert_eq!(get_respawn_filled_frac(-1.0, WAIT_S), 1.0);
+        assert_eq!(get_respawn_filled_frac(WAIT_S + 1.0, WAIT_S), 0.0);
+        assert_eq!(get_respawn_filled_frac(0.0, 0.0), 1.0);
+        let empty: Vec<OverlayRect> = make_respawn_bar_rects(WAIT_S, WAIT_S);
+        assert_eq!(empty.len(), 1);
+        let half: Vec<OverlayRect> = make_respawn_bar_rects(WAIT_S * HALF_FRAC, WAIT_S);
+        assert_eq!(half.len(), 2);
+        let slot_w_frac: f32 = empty[0].max_frac[0] - empty[0].min_frac[0];
+        let filled_w_frac: f32 = half[1].max_frac[0] - half[1].min_frac[0];
+        assert!((filled_w_frac - slot_w_frac * HALF_FRAC as f32).abs() < 1e-6);
+        assert_eq!(half[1].min_frac, RESPAWN_BAR_MIN_FRAC);
     }
 
     #[test]

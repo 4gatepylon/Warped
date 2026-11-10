@@ -6,7 +6,7 @@
 //! copy; the page shows the server's latest answer.
 //!
 //! Interface: `GameSettingsPage` (`New`, `update`, `handle`, `show_message`, `get_shapes`; in tests
-//! `is_waiting`),
+//! `is_waiting`, `get_row_keys`),
 //! `GameSettingsOutcome`.
 //!
 //! Example: `if let GameSettingsOutcome::Send(message) = page.handle(MenuInput::Right) { client.send_settings(&message)?; }`
@@ -14,6 +14,7 @@
 //! Must know:
 //! - Gotchas: the page's rows come from the keys the levels' settings files have, so settings that
 //!   other changes add show up without changing this file.
+//! - Gotchas: a switch (`true` or `false` in the file) shows as 1 or 0, stepping between them.
 //! - Gotchas: only finite numbers of at least 0 are allowed, whole where the default is; a level
 //!   that refuses a value (a speed of 0, say) stops its round's level server at start.
 
@@ -64,6 +65,17 @@ fn get_step(default: &Value) -> f64 {
         return DEFAULT_STEP;
     }
     DECIMAL_BASE.powf(x.log10().floor() - 1.0)
+}
+
+/// `get_switch_as_number` gives a switch (`true` or `false`) as the page edits it, 1 or 0, and any
+/// other value as it is.
+///
+/// Example: `assert_eq!(get_switch_as_number(json!(true)), json!(1));`
+fn get_switch_as_number(value: Value) -> Value {
+    match value {
+        Value::Bool(is_on) => Value::from(u64::from(is_on)),
+        other => other,
+    }
 }
 
 /// `put_at` puts `new` at a dotted `key` of `value`, making the sections on the way.
@@ -163,6 +175,15 @@ impl GameSettingsPage {
         }
     }
 
+    /// `get_row_keys` gives the keys of the page's number rows (`shared.<key>`,
+    /// `level_<index>.<key>`), in order.
+    ///
+    /// Example: `assert!(page.get_row_keys().contains(&"shared.respawn.start_s".to_string()));`
+    #[cfg(test)]
+    pub fn get_row_keys(&self) -> &[String] {
+        &self.row_keys
+    }
+
     /// `is_waiting` says whether no settings have come from the match server yet.
     ///
     /// Example: `if page.is_waiting() { ... }`
@@ -231,16 +252,21 @@ impl GameSettingsPage {
                         .filter_map(|level| get_at(level, &key))
                         .any(|other| other != &default);
                 let row_key: String = format!("{section}.{key}");
+                let is_switch: bool = default.is_boolean();
+                let note: &str = match (is_switch, do_levels_differ) {
+                    (true, true) => " (0 off, 1 on; levels differ)",
+                    (true, false) => " (0 off, 1 on)",
+                    (false, true) => " (levels differ)",
+                    (false, false) => "",
+                };
+                let (default, value) = (get_switch_as_number(default), get_switch_as_number(value));
                 rows.push(EditorRow {
-                    label: match do_levels_differ {
-                        true => format!("  {key} (levels differ)"),
-                        false => format!("  {key}"),
-                    },
+                    label: format!("  {key}{note}"),
                     kind: RowKind::Number {
                         key: row_key.clone(),
                         step: get_step(&default),
                         min: 0.0,
-                        max: MAX_GAME_SETTING,
+                        max: if is_switch { 1.0 } else { MAX_GAME_SETTING },
                     },
                 });
                 put_at(&mut values, &row_key, value);
@@ -356,8 +382,8 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Sections | shared keys, a level's own, a level with none (shown, empty), a level without a file, the levels' names | `sections_show_every_level` |
-    //! | Changes | a step up (set sent), a reset (reset sent), a typed fraction where the default is whole (refused, nothing sent), a heading (nothing) | `changes_go_to_the_match_server` |
+    //! | Sections | shared keys, a switch, a level's own, a level with none (shown, empty), a level without a file, the levels' names | `sections_show_every_level` |
+    //! | Changes | a step up (set sent), a reset (reset sent), a typed fraction where the default is whole (refused, nothing sent), a switch turned off (0 sent), a heading (nothing) | `changes_go_to_the_match_server` |
     //! | Server's answer | values follow it, same keys keep the selection, waiting before it, Escape closes | `the_page_follows_the_servers_answer` |
     //! | Steps | whole, 2.0, 0.33, 250, 0 | `steps_follow_the_default` |
 
@@ -365,15 +391,17 @@ mod tests {
     use serde_json::json;
     use warped_shared::settings_editor::set_at;
 
-    /// `make_settings` gives three levels: two sharing `respawn.delay_s` and `rifle.hits`, the
+    /// `make_settings` gives three levels: two sharing `respawn.delay_s`, `rifle.hits` and the switch `shooting.on`, the
     /// second with `glass.bounces` alone, and one without a settings file.
     ///
     /// Example: `let settings = make_settings();`
     fn make_settings() -> GameSettings {
         GameSettings::New(vec![
-            Some(json!({"respawn": {"delay_s": 3.0}, "rifle": {"hits": 2}})),
             Some(
-                json!({"respawn": {"delay_s": 5.0}, "rifle": {"hits": 2}, "glass": {"bounces": 2}}),
+                json!({"respawn": {"delay_s": 3.0}, "rifle": {"hits": 2}, "shooting": {"on": true}}),
+            ),
+            Some(
+                json!({"respawn": {"delay_s": 5.0}, "rifle": {"hits": 2}, "shooting": {"on": true}, "glass": {"bounces": 2}}),
             ),
             None,
         ])
@@ -428,6 +456,7 @@ mod tests {
             "EVERY LEVEL",
             "respawn.delay_s (levels differ)",
             "rifle.hits",
+            "shooting.on (0 off, 1 on)",
             "DARK FOREST ONLY",
             "(no settings of its own)",
             "CITY SPHERE ONLY",
@@ -442,6 +471,7 @@ mod tests {
             [
                 "shared.respawn.delay_s",
                 "shared.rifle.hits",
+                "shared.shooting.on",
                 "level_1.glass.bounces"
             ]
         );
@@ -476,6 +506,15 @@ mod tests {
         }
         assert_eq!(page.handle(MenuInput::Activate), GameSettingsOutcome::Stay);
         assert!(get_text(&page).contains("whole number"));
+        select(&mut page, "shared.shooting.on");
+        assert_eq!(
+            page.handle(MenuInput::Left),
+            GameSettingsOutcome::Send(SettingsMessage::Set {
+                scope: SettingsScope::Shared,
+                key: "shooting.on".to_string(),
+                value: 0.0,
+            })
+        );
         select(&mut page, "level_1.glass.bounces");
         assert_eq!(
             page.handle(MenuInput::Left),

@@ -236,6 +236,7 @@ pub fn run_bot(
                     victim_id,
                     shooter_id,
                     is_self,
+                    ..
                 } => {
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {
@@ -562,6 +563,7 @@ pub fn run_voxel_bot(
                     victim_id,
                     shooter_id,
                     is_self,
+                    ..
                 } => {
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {

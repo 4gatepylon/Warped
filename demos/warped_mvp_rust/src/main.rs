@@ -76,7 +76,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const WINDOW_TITLE: &str = "Warped";
 const REPOSITORY_FROM_CRATE: &str = "../..";
 const SETTINGS_FILE_NAME: &str = "server_settings.yaml";
-const SAMPLE_SHARED_KEY: &str = "respawn.delay_s";
+const SAMPLE_SHARED_KEY: &str = "respawn.start_s";
 const SAMPLE_SHARED_VALUE: f64 = 5.0;
 const DEFAULT_LEVEL_PORT: u16 = 47_852;
 const FRAME_MS: u64 = 16;
@@ -482,8 +482,44 @@ mod tests {
     //! | Arguments | the defaults, a size of 0, a bad label | `arguments_are_checked` |
     //! | Keys in menus | arrows, Return, Escape, digits (top row, keypad), a key that does nothing, rebinding (a key, Escape) | `keys_map_to_menu_inputs` |
     //! | Sample match | round 4 of the shipped levels on the attacker's wavefront | `the_sample_match_is_mid_way` |
+    //! | Shipped settings files | every level's file on the game master's page: shared respawn, shooting switches and gravity, each level's own setting, Dark Forest's none | `the_shipped_settings_all_show` |
 
     use super::*;
+
+    #[test]
+    fn the_shipped_settings_all_show() {
+        let levels: Vec<LevelEntry> = load_levels(&get_levels_manifest_path()).unwrap();
+        let page: GameSettingsPage = make_sample_settings_page(&levels).unwrap();
+        let keys: &[String] = page.get_row_keys();
+        for key in [
+            "shared.respawn.start_s",
+            "shared.respawn.step_s",
+            "shared.respawn.period_s",
+            "shared.shooting.can_shoot_while_jumping",
+            "shared.shooting.is_friendly_fire_on",
+            "shared.shooting.drop_m_per_s_per_s",
+            "shared.gravity.reach_m",
+            "shared.movement.walk_speed_per_map_speed",
+        ] {
+            assert!(keys.contains(&key.to_string()), "{key} in {keys:?}");
+        }
+        let own_keys = |name: &str| -> Vec<&String> {
+            let level: usize = levels.iter().position(|level| level.name == name).unwrap();
+            let prefix: String = format!("level_{level}.");
+            keys.iter().filter(|key| key.starts_with(&prefix)).collect()
+        };
+        assert_eq!(
+            own_keys("Lunar Surface"),
+            ["level_4.surface.gravity_per_jump_gravity"]
+        );
+        assert_eq!(own_keys("Dust"), ["level_0.sandstorm.wind_per_map_wind"]);
+        assert_eq!(
+            own_keys("Snow Planet"),
+            ["level_1.blizzard.radius_per_map_radius"]
+        );
+        assert_eq!(own_keys("City Sphere").len(), 3);
+        assert!(own_keys("Dark Forest").is_empty());
+    }
 
     /// `make_key` gives a key-down event for `scancode`.
     ///
