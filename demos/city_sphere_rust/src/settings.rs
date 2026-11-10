@@ -147,6 +147,51 @@ fn get_perfect_reflectivity_frac() -> f64 {
     1.0
 }
 
+/// `MAX_DOME_CIRCUMFERENCE_FRAC` is the widest a team dome may be: half the way round, where the
+/// two teams' domes together would cover the whole glass level.
+pub const MAX_DOME_CIRCUMFERENCE_FRAC: f64 = 0.5;
+const BUILTIN_DOME_CIRCUMFERENCE_FRAC: f64 = 0.2;
+
+/// `TeamDomesSettings` is how big City Sphere's team domes are (W-148, team boundary planes in
+/// every level): the share of the way round the glass level that each team's dome over its pylon
+/// spans (`circumference_frac`; the user: "start it at around 0.2 of circumference (i.e. together
+/// they take up 0.4 of circumference"). A file without the section takes the built-in 0.2.
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct TeamDomesSettings {
+    pub circumference_frac: f64,
+}
+
+impl Default for TeamDomesSettings {
+    /// `default` is the built-in size: each dome spans 0.2 of the circumference.
+    ///
+    /// Example: `let domes: TeamDomesSettings = TeamDomesSettings::default();`
+    fn default() -> TeamDomesSettings {
+        TeamDomesSettings {
+            circumference_frac: BUILTIN_DOME_CIRCUMFERENCE_FRAC,
+        }
+    }
+}
+
+impl TeamDomesSettings {
+    /// `check` fails, naming the key, unless `circumference_frac` is above 0 and at most
+    /// `MAX_DOME_CIRCUMFERENCE_FRAC`.
+    ///
+    /// Example: `settings.team_domes.check()?;`
+    pub fn check(&self) -> Result<()> {
+        if !(self.circumference_frac > 0.0
+            && self.circumference_frac <= MAX_DOME_CIRCUMFERENCE_FRAC)
+        {
+            return Err(format!(
+                "team_domes.circumference_frac must be above 0 and at most {MAX_DOME_CIRCUMFERENCE_FRAC}, not {}",
+                self.circumference_frac
+            )
+            .into());
+        }
+        Ok(())
+    }
+}
+
 /// `ServerSettings` is everything in `server_settings.yaml`.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -170,6 +215,8 @@ pub struct ServerSettings {
     #[serde(default)]
     pub gravity: GravitySettings,
     pub glass: GlassSettings,
+    #[serde(default)]
+    pub team_domes: TeamDomesSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -334,6 +381,10 @@ impl ServerSettings {
             .gravity
             .check()
             .map_err(|error| format!("settings {source}: {error}"))?;
+        settings
+            .team_domes
+            .check()
+            .map_err(|error| format!("settings {source}: {error}"))?;
         let min_time_rate_frac: f64 = settings.black_hole.min_time_rate_frac;
         if min_time_rate_frac > 1.0 {
             return Err(format!(
@@ -472,6 +523,7 @@ mod tests {
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
+    //! | Team dome size (W-148) | 0.2 (built in), a file without the section (0.2), small, a half, 0, above a half | `dome_size_takes_above_0_to_a_half` |
     //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`, the four `view.head_bob` sway and swing keys) | present (built in), missing in an old save (gets its built-in value), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
     //! | Menu and map keys (W-140, hold Tab for the map, Esc for the menu) | current (built in), saved before (`release_mouse`, `open_menu` on `Tab`: loads with `Escape` for the menu and `Tab` for the map), `release_mouse` beside `show_map` (fails) | `builtin_settings_read_and_survive_json`, `saves_from_before_the_held_map_open_the_menu_with_escape` |
     //! | Visuals (W-51, basic visuals) | the identity (built in), a save without the section (gets the identity), a value out of its range (fails, naming it) | `saves_without_visuals_load_with_the_identity` |
@@ -658,6 +710,38 @@ mod tests {
                     error
                         .to_string()
                         .contains("space.curvature_per_map_curvature"),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dome_size_takes_above_0_to_a_half() {
+        let builtin: TeamDomesSettings = ServerSettings::Builtin().team_domes;
+        assert_eq!(builtin.circumference_frac, BUILTIN_DOME_CIRCUMFERENCE_FRAC);
+        let section_at: usize = BUILTIN_SERVER_YAML
+            .find("team_domes:")
+            .expect("the section");
+        let without: ServerSettings =
+            ServerSettings::FromYaml(&BUILTIN_SERVER_YAML[..section_at], "test")
+                .expect("no section");
+        assert_eq!(without.team_domes, TeamDomesSettings::default());
+        for (frac, is_valid) in [
+            ("0.05", true),
+            ("0.5", true),
+            ("0.0", false),
+            ("0.6", false),
+        ] {
+            let yaml: String = BUILTIN_SERVER_YAML.replace(
+                "circumference_frac: 0.2",
+                &format!("circumference_frac: {frac}"),
+            );
+            let result: Result<ServerSettings> = ServerSettings::FromYaml(&yaml, "test");
+            assert_eq!(result.is_ok(), is_valid, "{frac}");
+            if let Err(error) = result {
+                assert!(
+                    error.to_string().contains("team_domes.circumference_frac"),
                     "{error}"
                 );
             }

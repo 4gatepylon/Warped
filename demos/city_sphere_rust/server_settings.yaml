@@ -135,3 +135,6 @@ glass:  # City Sphere: shots fired on the glass level (inside the glass shell) r
   max_bounce_count: 2  # The most reflections a shot makes (0 for none); the next time it meets the glass it stops there.
   range_m: 90.0  # How far a shot goes in all, every leg after a reflection counted (the sphere is 48 m across).
   reflectivity_frac: 1.0  # Share of the range left that each reflection keeps (1 for a perfect mirror, 0 stops a shot at its first; W-158).
+
+team_domes:  # City Sphere: each team's area is a shimmering dome over its pylon on the glass level (W-148).
+  circumference_frac: 0.2  # Share of the way round the glass level that each team's dome spans (0.2: 72 degrees, 21.4 m across; at most 0.5).

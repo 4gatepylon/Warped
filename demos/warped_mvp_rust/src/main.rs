@@ -595,7 +595,7 @@ mod tests {
     //! | Sample match | round 4 of the shipped levels on the attacker's wavefront | `the_sample_match_is_mid_way` |
     //! | Toured levels | none named (all), a name, a slug, a name no level has | `toured_levels_are_picked_by_name` |
     //! | Toured game | no bots (alone), allies only, enemies only, both; a count over the most | `a_tour_plays_alone_or_with_bots` |
-    //! | Shipped settings files | every level's file on the game master's page: shared respawn, shooting switches and gravity, each level's own setting, Dark Forest's none | `the_shipped_settings_all_show` |
+    //! | Shipped settings files | every level's file on the game master's page: shared respawn, shooting switches and gravity, each level's own setting (City Sphere's glass and its team domes' size), Dark Forest's none | `the_shipped_settings_all_show` |
 
     use super::*;
 
@@ -668,7 +668,14 @@ mod tests {
             own_keys("Snow Planet"),
             ["level_1.blizzard.radius_per_map_radius"]
         );
-        assert_eq!(own_keys("City Sphere").len(), 3);
+        let city_keys: Vec<&String> = own_keys("City Sphere");
+        assert_eq!(city_keys.len(), 4);
+        assert!(
+            city_keys
+                .iter()
+                .any(|key| key.ends_with(".team_domes.circumference_frac")),
+            "{city_keys:?}"
+        );
         assert!(own_keys("Dark Forest").is_empty());
     }
 

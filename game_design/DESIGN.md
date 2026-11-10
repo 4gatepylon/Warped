@@ -269,12 +269,14 @@ Every level follows these rules:
   players nor lasers. What is seen through one shimmers like air over hot ground (W-149, shimmer through boundary
   planes): the picture behind it wobbles a little, rising and changing all the time, in every level alike. The
   shimmer is only where a wall covers the view, so it stops once you have crossed the wall and look away from it.
-  City Sphere's teams each have a hemisphere, so its one wall is a disc through the centre, blue from blue's side
-  and red from red's.
+  The boundary takes the shape that fits the level's space: planes across the other levels' length, and in City
+  Sphere, inside a sphere, a dome over each team's pylon on the glass level. A team's area there is inside its dome
+  and everything else is the middle; each dome spans 0.2 of the way round the glass level (21.4 m across), which the
+  game master can change (`team_domes.circumference_frac`), and it is fainter seen from inside than from outside.
 
 | Zone layout | Shape |
 | --- | --- |
-| Bands | The spawns sit at antipodes. The middle zone is a wide band around the sphere, halfway between them, and the blue and red zones are thinner bands on either side of it. |
+| Bands | The spawns sit at antipodes. The middle zone is a wide band around the sphere, halfway between them, and the blue and red zones are thinner bands on either side of it. (City Sphere's team areas are now domes over the pylons, above; its spawns are in the middle.) |
 | Paired bands | The zones are bands across one looping axis. Going all the way around that axis passes every zone twice, so each zone is a pair of bands: the two halves of a team's zone meet at its spawn, and the two middle bands are two separate ways to the other side. |
 | Open | The zones are bands across the level's length, with the spawns far apart, and walls, obstacles and hills shape the routes. |
 

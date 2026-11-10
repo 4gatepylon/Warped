@@ -3,7 +3,7 @@
 //! straight, stop at the street, buildings and the core, and reflect off the glass shell's inner
 //! side.
 //!
-//! Interface: `CityWorld::Builtin`, `CityWorld::FromJson`, `BoundaryPlane`, `CityPlayer`,
+//! Interface: `CityWorld::Builtin`, `CityWorld::FromJson`, `TeamDome`, `CityWorld::get_team_domes`, `CityPlayer`,
 //! `CityInput`, `Shot`, `Bounces`, `ShotHit`, `CityWorld::trace_shot`, `CityWorld::move_player`,
 //! `Side`, `get_up`.
 
@@ -145,13 +145,16 @@ struct JsonRegions {
     zone_walls: Option<JsonZoneWalls>,
 }
 
-/// `JsonZone` is one team's band of v, `None` for no edge on that side.
+/// `JsonZone` is one team's band of v, `None` for no edge on that side. City Sphere reads only
+/// the team: its team areas are domes over the pylons (`TeamDome`), not bands.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct JsonZone {
     team: String,
-    v_min_m: Option<f64>,
-    v_max_m: Option<f64>,
+    #[serde(rename = "v_min_m")]
+    _v_min_m: Option<f64>,
+    #[serde(rename = "v_max_m")]
+    _v_max_m: Option<f64>,
 }
 
 /// `JsonZoneWalls` is how the zones' walls look.
@@ -163,31 +166,35 @@ struct JsonZoneWalls {
     opacity_frac: f64,
 }
 
-/// `BoundaryPlane` is one team boundary plane (W-148, team boundary planes in every level): the
-/// plane x = `x_m` on a finite edge of the team `team`'s zone, whose zone lies on its `side` (+1
-/// toward +x, −1 toward −x), `height_m` tall above each floor (the street and the glass),
-/// `opacity_frac` opaque at its foot. It stops neither players nor lasers. City Sphere's map makes
-/// each team's zone a hemisphere, so both teams' planes are the disc x = 0.
+/// `TeamDome` is one team's area in City Sphere and its boundary (W-148, team boundary planes in
+/// every level; the user: "for city sphere in particular they are domes, NOT planes"): the ball
+/// of `radius_m` around `centre`, the foot of the team `team`'s pylon on the glass level, where it
+/// is above the glass. Its surface is drawn `opacity_frac` opaque at its foot; it stops neither
+/// players nor lasers.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BoundaryPlane {
-    pub x_m: f64,
-    pub side: f64,
+pub struct TeamDome {
+    pub centre: DVec3,
+    pub radius_m: f64,
     pub team: u32,
-    pub height_m: f64,
     pub opacity_frac: f64,
 }
 
-/// `get_boundary_planes` gives a plane on each finite edge of the blue and red zones of
-/// `regions`, if it has `zone_walls`, and fails on another team or a wall that isn't positive.
+/// `get_dome_opacity_frac` gives how opaque the map draws its team boundaries at their foot
+/// (`regions.zone_walls.opacity_frac`), or `None` for a map without zone walls; it fails on a
+/// zone of a team that isn't blue, red or middle, or zone walls that aren't positive.
 ///
-/// Example: `let planes = get_boundary_planes(map.regions.as_ref())?;`
-fn get_boundary_planes(regions: Option<&JsonRegions>) -> Result<Vec<BoundaryPlane>> {
-    let Some(JsonRegions {
-        zones,
-        zone_walls: Some(walls),
-    }) = regions
-    else {
-        return Ok(Vec::new());
+/// Example: `let opacity_frac = get_dome_opacity_frac(map.regions.as_ref())?;`
+fn get_dome_opacity_frac(regions: Option<&JsonRegions>) -> Result<Option<f64>> {
+    let Some(regions) = regions else {
+        return Ok(None);
+    };
+    for zone in &regions.zones {
+        if zone.team != "middle" && !TEAM_NAMES.contains(&zone.team.as_str()) {
+            return Err(format!("map: zone team {:?} isn't blue, red or middle", zone.team).into());
+        }
+    }
+    let Some(walls) = &regions.zone_walls else {
+        return Ok(None);
     };
     if walls.height_m <= 0.0
         || walls.thickness_m <= 0.0
@@ -198,28 +205,7 @@ fn get_boundary_planes(regions: Option<&JsonRegions>) -> Result<Vec<BoundaryPlan
                 .into(),
         );
     }
-    let mut planes: Vec<BoundaryPlane> = Vec::new();
-    for zone in zones {
-        if zone.team == "middle" {
-            continue;
-        }
-        let team: u32 = TEAM_NAMES
-            .iter()
-            .position(|name| *name == zone.team)
-            .ok_or_else(|| format!("map: zone team {:?} isn't blue, red or middle", zone.team))?
-            as u32;
-        for (edge_m, side) in [(zone.v_min_m, 1.0), (zone.v_max_m, -1.0)] {
-            let Some(x_m) = edge_m else { continue };
-            planes.push(BoundaryPlane {
-                x_m,
-                side,
-                team,
-                height_m: walls.height_m,
-                opacity_frac: walls.opacity_frac,
-            });
-        }
-    }
-    Ok(planes)
+    Ok(Some(walls.opacity_frac))
 }
 
 /// `JsonLasers` is the map's laser colour: one for every team, or one per team.
@@ -385,8 +371,9 @@ pub struct CityWorld {
     /// (W-144, `move_player`); the window and the bots set them each frame, as Lunar Surface's
     /// `VoxelWorld::set_thrown_wormholes` adds them to its warps.
     pub mouths: Vec<FlatWarp>,
-    /// `boundary_planes` are the team boundary planes from the map's zones (W-148).
-    pub boundary_planes: Vec<BoundaryPlane>,
+    /// `dome_opacity_frac` is how opaque the team domes are at their foot (W-148), from the map's
+    /// zone walls; `None`: the map has none, so no domes are drawn.
+    pub dome_opacity_frac: Option<f64>,
 }
 
 /// `Bounces` is how a shot meets the glass's inner side (`CityWorld::trace_shot`): at most
@@ -635,7 +622,7 @@ impl CityWorld {
             lift_holes,
             variation_seed: map.variation.as_ref().map_or(0, |v| v.seed),
             mouths: Vec::new(),
-            boundary_planes: get_boundary_planes(map.regions.as_ref())?,
+            dome_opacity_frac: get_dome_opacity_frac(map.regions.as_ref())?,
             laser_colors: match &map.lasers {
                 Some(JsonLasers {
                     team_colors: Some(colors),
@@ -653,6 +640,33 @@ impl CityWorld {
     /// `get_glass` gives the walkable glass shell.
     pub fn get_glass(&self) -> Option<&Shell> {
         self.shells.iter().find(|s| s.is_walkable_inside)
+    }
+
+    /// `get_team_domes` gives each team's dome (W-148): around the foot of each of the team's
+    /// pylons that stand on the glass level, with the radius that makes the dome span
+    /// `circumference_frac` of the way round the glass level (0.2: 72 degrees, 21.4 m across on
+    /// a 17 m glass level). It gives none on a map without zone walls or without a glass level.
+    ///
+    /// Example: `let domes: Vec<TeamDome> = world.get_team_domes(settings.team_domes.circumference_frac);`
+    pub fn get_team_domes(&self, circumference_frac: f64) -> Vec<TeamDome> {
+        let (Some(opacity_frac), Some(glass)) = (self.dome_opacity_frac, self.get_glass()) else {
+            return Vec::new();
+        };
+        let glass_m: f64 = glass.radius_m;
+        let radius_m: f64 = 2.0 * glass_m * (std::f64::consts::PI * circumference_frac / 2.0).sin();
+        let mut domes: Vec<TeamDome> = Vec::new();
+        for (team, name) in TEAM_NAMES.iter().enumerate() {
+            let on_glass = self.boxes.iter().filter(|b| {
+                b.group == PYLON_GROUP && b.name.starts_with(name) && b.center.length() < glass_m
+            });
+            domes.extend(on_glass.map(|pylon| TeamDome {
+                centre: pylon.center.normalize() * glass_m,
+                radius_m,
+                team: team as u32,
+                opacity_frac,
+            }));
+        }
+        domes
     }
 
     /// `get_side` gives which level `feet` are on: the glass level if they are inside the glass.
@@ -1418,49 +1432,58 @@ mod tests {
     //! | A shot at the glass beside a stairs' hole: from the street (stops), from the glass level (reflects); straight down into it (ends on a step) | `shots_beside_the_stairs_hole_meet_the_glass` |
     //! | A player on the glass level beside a stairs' hole: walking its whole length just past the edge (stays on the glass); standing over the stairs (falls in) | `players_walk_on_the_glass_beside_the_stairs_hole` |
     //! | A player climbing each team's stairs at the edge of the steps, either side: reaches the glass level | `players_climb_the_stairs_at_their_edge` |
-    //! | The team boundary planes (W-148): the map's (the disc x = 0 for both, blue's toward +x, red's toward −x, each team's spawns on its side); zones without zone walls (none); a zone of another team (fails) | `the_map_gives_a_boundary_plane_per_team` |
+    //! | The team domes (W-148): the map's (one per team, centred on the glass under its pylon, spanning the share of the circumference asked for: 0.05, 0.2, 0.5; the two apart); a map without zone walls (none); zone walls read with and without zones; a zone of another team (fails); no regions | `each_team_has_a_dome_over_its_pylon` |
     //! | A linked mouth near a walker (W-144): walking toward it (farther in the same time), away (less far, still away), standing (drifts toward it); past the pull's reach (each the same as with no mouth, bit for bit) | `mouths_pull_walkers_toward_them` |
 
     use super::*;
 
     #[test]
-    fn the_map_gives_a_boundary_plane_per_team() {
-        let planes: Vec<BoundaryPlane> = CityWorld::Builtin().expect("the map").boundary_planes;
-        let places: Vec<(f64, f64, u32)> = planes
-            .iter()
-            .map(|plane| (plane.x_m, plane.side, plane.team))
-            .collect();
-        assert_eq!(places, [(0.0, 1.0, 0), (0.0, -1.0, 1)]);
+    fn each_team_has_a_dome_over_its_pylon() {
         let world: CityWorld = CityWorld::Builtin().expect("the map");
-        for (team, frame) in &world.spawns {
-            let side: f64 = planes
-                .iter()
-                .find(|plane| plane.team == *team)
-                .unwrap()
-                .side;
-            assert!(
-                frame.w_axis.x * side > 0.0,
-                "team {team}'s spawn is in its hemisphere"
-            );
-        }
-        assert!(
-            planes
-                .iter()
-                .all(|p| p.height_m > 0.0 && p.opacity_frac < 1.0)
+        let glass_m: f64 = world.get_glass().expect("a glass level").radius_m;
+        let domes: Vec<TeamDome> = world.get_team_domes(0.2);
+        assert_eq!(
+            domes.iter().map(|dome| dome.team).collect::<Vec<u32>>(),
+            [0, 1]
         );
-        let read = |text: &str| -> Result<Vec<BoundaryPlane>> {
+        for dome in &domes {
+            let pylon: &CityBox = world
+                .boxes
+                .iter()
+                .find(|b| {
+                    b.group == PYLON_GROUP && b.name.starts_with(TEAM_NAMES[dome.team as usize])
+                })
+                .expect("the team's pylon");
+            assert!((dome.centre.length() - glass_m).abs() < 1e-9);
+            assert!(dome.centre.normalize().dot(pylon.center.normalize()) > 1.0 - 1e-9);
+            assert!((dome.centre - pylon.center).length() < dome.radius_m);
+            let rim_angle_rad: f64 = 2.0 * (dome.radius_m / (2.0 * glass_m)).asin();
+            assert!((2.0 * rim_angle_rad / std::f64::consts::TAU - 0.2).abs() < 1e-9);
+            assert!((dome.radius_m - 10.506).abs() < 1e-3 && dome.opacity_frac < 1.0);
+        }
+        assert!((domes[0].centre - domes[1].centre).length() > 2.0 * domes[0].radius_m);
+        let small: f64 = world.get_team_domes(0.05)[0].radius_m;
+        let half: f64 = world.get_team_domes(0.5)[0].radius_m;
+        assert!(small < domes[0].radius_m && (half - glass_m * 2.0_f64.sqrt()).abs() < 1e-9);
+        let mut without_walls: CityWorld = CityWorld::Builtin().expect("the map");
+        without_walls.dome_opacity_frac = None;
+        assert_eq!(without_walls.get_team_domes(0.2), []);
+        let read = |text: &str| -> Result<Option<f64>> {
             let regions: JsonRegions = serde_json::from_str(text)?;
-            get_boundary_planes(Some(&regions))
+            get_dome_opacity_frac(Some(&regions))
         };
         let blue_zone: &str = r#"{"team": "blue", "v_min_m": 4.0, "v_max_m": null}"#;
         let walls: &str = r#"{"height_m": 6.0, "thickness_m": 0.6, "opacity_frac": 0.25}"#;
         let without_walls: String = format!(r#"{{"zones": [{blue_zone}], "zone_walls": null}}"#);
-        assert_eq!(read(&without_walls).expect("no walls"), []);
+        assert_eq!(read(&without_walls).expect("no walls"), None);
+        let with_walls: String = format!(r#"{{"zones": [], "zone_walls": {walls}}}"#);
+        assert_eq!(read(&with_walls).expect("walls"), Some(0.25));
         let green: String = format!(
             r#"{{"zones": [{}], "zone_walls": {walls}}}"#,
             blue_zone.replace("blue", "green")
         );
         assert!(read(&green).is_err());
+        assert_eq!(get_dome_opacity_frac(None).expect("no regions"), None);
     }
 
     const EDGE_M: f64 = 0.1;
