@@ -52,6 +52,7 @@ use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
 use warped_shared::level_net::{self, SNAPSHOT_PAGE_HEADER_BYTES, SnapshotPages};
 use warped_shared::movement::{decode_crouch_level, encode_crouch_level};
+use warped_shared::network_scope;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -1055,11 +1056,20 @@ pub fn read_game_password(path: Option<&Path>) -> Result<Vec<u8>> {
     Ok(password.as_bytes().to_vec())
 }
 
+/// `is_loopback_only` says whether this program's sockets stay on 127.0.0.1: in this crate's
+/// tests, and with `WARPED_LOOPBACK_ONLY=1` (`warped_shared::network_scope`).
+///
+/// Example: `let ip = network_scope::get_listen_ip(net::is_loopback_only());`
+pub fn is_loopback_only() -> bool {
+    cfg!(test) || network_scope::is_loopback_only()
+}
+
 /// `bind_server` opens the server's socket on `port`, so a port already in use fails at once.
 ///
 /// Example: `let socket = net::bind_server(net::DEFAULT_PORT)?;`
 pub fn bind_server(port: u16) -> Result<UdpSocket> {
-    let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).map_err(|error| {
+    let listen_ip: Ipv4Addr = network_scope::get_listen_ip(is_loopback_only());
+    let socket: UdpSocket = UdpSocket::bind((listen_ip, port)).map_err(|error| {
         format!("net: can't listen on UDP port {port} ({error}); pick another with --port")
     })?;
     socket.set_read_timeout(Some(Duration::from_millis(SERVER_POLL_MS)))?;
@@ -1095,7 +1105,8 @@ pub fn write_level_result(path: &std::path::Path, team: &str) -> Result<()> {
 /// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
 /// `new_game_after_win`, that long after a team won, admits only players who prove they know
 /// `game_password` (empty for anyone), and broadcasts
-/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it. With
+/// a beacon on the local network (on 127.0.0.1 when `is_loopback_only`)
+/// every `BEACON_PERIOD_S` so `find_server` can find it. With
 /// `console_check`, a player's hold on a console counts only while the check allows it (within
 /// reach and aiming). It stops with an error if it can't write the level result.
 ///
@@ -1120,8 +1131,9 @@ pub fn serve(
         console_teams.len()
     );
     let port: u16 = socket.local_addr()?.port();
-    let beacon_socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-    beacon_socket.set_broadcast(true)?;
+    let beacon_ip: Ipv4Addr = network_scope::get_beacon_ip(is_loopback_only());
+    let beacon_target: SocketAddr = SocketAddr::from((beacon_ip, DISCOVERY_PORT));
+    let beacon_socket: UdpSocket = network_scope::bind_socket_toward(beacon_target)?;
     let mut beacon: Vec<u8> = vec![Kind::Beacon as u8];
     beacon.extend_from_slice(BEACON_MAGIC);
     beacon.extend_from_slice(&port.to_le_bytes());
@@ -1182,8 +1194,7 @@ pub fn serve(
         if should_announce
             && last_beacon.is_none_or(|time| time.elapsed().as_secs_f64() >= BEACON_PERIOD_S)
         {
-            if let Err(error) =
-                beacon_socket.send_to(&beacon, (Ipv4Addr::BROADCAST, DISCOVERY_PORT))
+            if let Err(error) = beacon_socket.send_to(&beacon, beacon_target)
                 && !has_warned_about_beacon
             {
                 has_warned_about_beacon = true;
@@ -1202,7 +1213,8 @@ pub fn serve(
 ///
 /// Example: `let address = net::find_server(Duration::from_secs(5))?;`
 pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
-    let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)).map_err(|error| {
+    let listen_ip: Ipv4Addr = network_scope::get_listen_ip(is_loopback_only());
+    let socket: UdpSocket = UdpSocket::bind((listen_ip, DISCOVERY_PORT)).map_err(|error| {
         format!("net: can't listen for servers on UDP port {DISCOVERY_PORT} ({error}); join with --join <address>")
     })?;
     let mut deadline: Instant = Instant::now() + timeout;
@@ -1333,7 +1345,7 @@ impl Client {
     /// Example: `let mut client = Client::Connect("192.168.1.20:47800".parse()?, "lunar_surface", b"")?;`
     #[allow(non_snake_case)]
     pub fn Connect(server: SocketAddr, map_name: &str, game_password: &[u8]) -> Result<Client> {
-        let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+        let socket: UdpSocket = network_scope::bind_socket_toward(server)?;
         socket.set_nonblocking(true)?;
         socket.send_to(&make_lobby_query().0, server)?;
         Ok(Client {
@@ -1747,6 +1759,7 @@ mod tests {
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
+    //! | Server socket in tests | bound on 127.0.0.1 (`is_loopback_only`) | `tests_listen_on_loopback_only` |
 
     use super::*;
     use crate::health::DAMAGE_TOLERANCE_FRAC;
@@ -2703,5 +2716,11 @@ mod tests {
         assert_eq!(receive(&listener), None);
         server.handle(&make_lobby_query().0, from).expect("a query");
         assert_eq!(receive(&listener), Some(vec![Kind::Lobby as u8, 0, 0]));
+    }
+
+    #[test]
+    fn tests_listen_on_loopback_only() {
+        let socket: UdpSocket = bind_server(0).expect("a free local port");
+        assert_eq!(socket.local_addr().unwrap().ip(), Ipv4Addr::LOCALHOST);
     }
 }

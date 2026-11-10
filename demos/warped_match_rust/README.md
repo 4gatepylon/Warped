@@ -64,6 +64,12 @@ reads `.levels/<name>/demos/<name>_rust/.build/release/<binary>` and its `map_pi
 Makefile), for a level developed on its own branch. Switching modes needs `git worktree remove .levels/<name>`
 first.
 
+`play_all_levels.py`, `make e2e-match` and `tools/play_with_bots.sh` (`make play-alone`, `make play-bots`) run
+everything with `WARPED_LOOPBACK_ONLY=1`: the match server, the level servers and the bots listen on 127.0.0.1
+and send their announcements there instead of broadcasting them, so macOS never asks for network permission
+(`warped_shared::network_scope`; `cargo test` is loopback-only by itself). `make serve-match` and
+`make serve-game` leave it unset, so players on other computers find and join the game.
+
 ## The progression page
 
 ![The match window after a round](docs/progression.png)

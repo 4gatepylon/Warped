@@ -17,6 +17,8 @@
 #     --match-levels <path>: the levels file (default match_levels.yaml).
 #     --dry-run: print the commands and start nothing.
 #     Output: the server's and bots' logs in .artifacts/play_with_bots/<run_id>/, with command.txt.
+#     Network: everything it starts runs with WARPED_LOOPBACK_ONLY=1, on 127.0.0.1 only, so macOS never
+#         asks for network permission and nobody on the network sees the match.
 #
 # Example:
 #     tools/play_with_bots.sh --allies 2 --enemies 3 --bot-objective fight
@@ -29,6 +31,7 @@ readonly CRATE_FOLDER="$(cd "$(dirname "$0")/.." && pwd)"
 readonly PROGRAM="$CRATE_FOLDER/.build/release/hyperbolic-wormholes"
 readonly USAGE="Example: tools/play_with_bots.sh --team blue --allies 2 --enemies 3 --bot-objective fight"
 readonly COMMAND_LINE="$0 $*"
+export WARPED_LOOPBACK_ONLY=1
 
 team=blue
 ally_count=0
@@ -48,7 +51,7 @@ while [ $# -gt 0 ]; do
         --port) level_port="$2"; shift 2 ;;
         --match-levels) match_levels="$2"; shift 2 ;;
         --dry-run) is_dry_run=1; shift ;;
-        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
         *) echo "play_with_bots.sh: unknown argument $1. $USAGE" >&2; exit 2 ;;
     esac
 done
