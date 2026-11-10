@@ -54,7 +54,8 @@ is in [`AGENTS.md`](AGENTS.md).
     respawn delay; Lunar's flashlight and exit prompt; `claude/dark-forest-movement`, open, 2026-11-09) and #455
     (Lunar's beam looks and speckle, in gold; `claude/dark-forest-beams`, open, 2026-11-08); still missing there: the
     Tab pages, the minimap, third person, thrown wormholes. Dark Forest's thrown wormholes (`Q`): #479
-    (`claude/dark-forest-thrown-wormholes`, open, 2026-11-09).
+    (`claude/dark-forest-thrown-wormholes`, merged, 2026-11-09) and #530 (its markers round instead of square,
+    `claude/dark-forest-wormhole-balls`, open, 2026-11-09).
     Shared code: #447 (`demos/warped_shared_rust/`, the files identical in Lunar Surface, Dust, Snow Planet, City
     Sphere and the match, moved into one library they all use, no change in play or pictures;
     `claude/shared-level-code`, merged); its `PLAN.md` is the next step, one movement, guns, health, HUD and robots
