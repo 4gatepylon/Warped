@@ -53,6 +53,13 @@ document is agreed.
 | Abandon | To leave a ranked match for good: by choice, by not reconnecting in time, by going idle or by being kicked. |
 | Cooldown | A time during which a player can't join the queue, given for abandoning or for failing a ready check. |
 | Void | To cancel a match so that it changes no rating and gives no penalty. |
+| Check | One rule the game tests a player's actions against, during the match or afterwards. |
+| Audit | A replay of part of a match's recording, after the fact, that tests exactly whether a player's actions were possible. |
+| Report | A player's complaint about another player, with a reason. |
+| Suspension | A stop on an account's online play until a superadmin has reviewed it. |
+| Ban | A superadmin's or the game's decision that an account may not play online, or may not chat, for a time or for good. |
+| Block | One player's choice to hear nothing more from another player. |
+| Notice | A message from the game to a player, kept in the app's inbox. |
 
 ## Accounts
 
@@ -453,7 +460,92 @@ A player abandons a match when they choose to leave it, use up the reconnect win
 
 - When an account is banned for cheating, its ranked matches of the last ≈30 days are voided: every other
   player's rating is worked out again as if those matches hadn't been played.
-- The players of those matches are told (see Fair play, in a later section).
+- The players of those matches are told (see [Notices](#notices)).
+
+## Fair play
+
+No game stops every cheat. Warped makes cheating hard to do, likely to be caught, and costly when it is: a ban
+loses the account, its purchase and its rating.
+
+### What the game checks
+
+- **The server has the last word.** A player's app works out its own movement and shots, and the match's server
+  accepts only what its checks allow. Hits, eliminations, consoles, scores and results are the server's alone.
+- **Checks during the match** are cheap and never stop an honest player:
+
+  | Check | What it refuses |
+  | --- | --- |
+  | Movement bounds | Moving faster than the game allows, through walls, or staying in the air too long. |
+  | Shot rules | Shooting faster than the weapon fires, without ammo, or from where the player isn't. |
+  | Line of fire | A hit on a player the shooter's place can't reach, by a table worked out per level. |
+  | Shot path | A hit whose path crosses solid blocks, checked on a coarse copy of the level. |
+
+  A refused action doesn't happen: the server puts the player back, or ignores the shot.
+- **Hidden players stay hidden.** The server sends an app only what its player could see or hear, so a changed
+  app has nothing to show through walls.
+- **Only players get in.** A match's server talks only to the apps of the players admitted to that match, over a
+  connection that nobody else can read or forge.
+- **Checks are a list.** Each check says what it looks at, whether it runs during the match or afterwards, and
+  what failing it does. Adding a check changes no other rule here.
+
+### Audits
+
+An audit replays a stretch of a match's recording exactly, which is too slow to do during the match, and tests
+whether what one player did was possible.
+
+- **All audits run afterwards**, apart from the match. They never slow a match down.
+- **What gets audited:** a random ≈5% of ranked matches, every player with a new report for cheating, and every
+  player the game's statistics single out. Players who are in a match right now are audited first.
+- **Failing:** the first failed audit gives the player a warning. After ≈2 failed audits the account is banned
+  for cheating, and removed from its match if it is in one.
+- **Statistics:** the game records numbers such as accuracy, reaction time and how often a player aims at
+  opponents they can't see. At launch these only choose whom to audit. Later, a system may ban on them directly.
+
+### Reports
+
+- A player reports another from the match, the match's history, a profile or a chat, and picks a reason:
+  cheating, abuse in chat or voice, spoiling the match on purpose, an offensive name, or being under 13.
+- A player sends at most ≈10 reports a day. Reporting the same player twice for the same match counts once.
+- **Automatic suspension:** an account is suspended until a superadmin reviews it when, within ≈90 days:
+  - ≈90 different players have reported it for cheating, in different matches; or
+  - it was kicked for cheating from ≈10 different games, by different players.
+
+  Only different reporters in different matches count, so that a group can't suspend someone by reporting them
+  again and again.
+- **Review:** a superadmin reads the reports, watches the replays and the audits, and either lifts the suspension
+  or bans the account.
+
+### Bans
+
+| Kind | What it stops | Given by |
+| --- | --- | --- |
+| Cooldown | Joining the queue, for minutes to days | The game, for abandoning (see [Cooldowns](#cooldowns)) |
+| Game ban from one custom game | Joining that game | That game's admins |
+| Chat ban | Text and voice chat, for a time or for good | A superadmin |
+| Suspension | All online play, until reviewed | The game |
+| Ban | All online play, for a time or for good | A superadmin, or the game after ≈2 failed audits |
+
+- A ban belongs to the account. A banned account gets no refund.
+- **Appeals:** a banned or suspended player can appeal ≈1 time per ban, in writing. A superadmin answers.
+
+### Notices
+
+The app has an inbox of notices from the game. A notice tells a player:
+
+- that an audit of theirs failed, as a warning;
+- that they are suspended or banned, why, for how long, and how to appeal;
+- that a player from one of their ranked matches was banned for cheating, and how their rating was restored. This
+  notice is sent after the ban, never on suspicion;
+- that a report of theirs led to action;
+- what a superadmin announces to everyone.
+
+### Chat and voice
+
+- A filter hides offensive words in text chat, unless the reader turns it off.
+- A player mutes anyone, for one match or for good, in text and in voice.
+- **Blocking:** a blocked player can't message, invite or talk to the player who blocked them, and matchmaking
+  avoids putting the two on the same team when it can.
+- Text messages are kept ≈30 days so that a superadmin can review a report. Voice is not recorded.
 
 ## Superadmins
 
@@ -527,6 +619,14 @@ Every number marked ≈ in this document, in one place.
 | Votes | Kick votes one player may call in a match | ≈1 |
 | Votes | Pauses per team in a match, and their length | ≈1 of ≈60 s |
 | Rollback | How far back a cheater's matches are voided | ≈30 days |
+| Fair play | Failed audits before a ban | ≈2 |
+| Fair play | Share of ranked matches audited at random | ≈5% |
+| Fair play | Different reporters, in different matches, before a suspension | ≈90 |
+| Fair play | Kicks for cheating, in different games by different players, before a suspension | ≈10 |
+| Fair play | Time over which reports and kicks are counted | ≈90 days |
+| Fair play | Reports one player may send per day | ≈10 |
+| Fair play | Days chat messages are kept for review | ≈30 |
+| Fair play | Appeals per ban | ≈1 |
 
 ## Open questions
 
@@ -552,3 +652,8 @@ Every number marked ≈ in this document, in one place.
   spared the loss and the cooldown.
 - **Tier names:** the names here are placeholders.
 - **Reconnect window:** Counter-Strike's exact window isn't published; ≈3 minutes is a first guess.
+- **Counting window:** whether reports and kicks should be counted over ≈90 days, over a season, or for ever.
+- **Kicks that count:** whether kicks by a custom game's admins count toward a suspension, or only vote kicks in
+  ranked matches.
+- **Naming the cheater:** whether the notice after a ban names the banned player.
+- **Voice:** whether voice chat is ever recorded for review. This design records none.
