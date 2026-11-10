@@ -125,10 +125,12 @@ binary. The wire protocol is the hyperbolic demo's; its wormhole fields carry th
 
 ## Tools
 
-- `--bench-views <s>`: holds seven fixed views (`spawn`, `bridge`, `lookout`, `treehouse`, `firing`, and the
-  wormhole views `gate` and `lift`) for `<s>` seconds each and prints their frame times; `make bench-views` writes
-  them to `.artifacts/bench_views/<run_id>/`. `gate` looks into the centre gate and `lift` into red's lift from the
-  ground, and each holds robot 0 just beyond the partner mouth, facing back through it.
+- `--bench-views <s>`: holds nine fixed views (`spawn`, `bridge`, `lookout`, `treehouse`, `firing`, the
+  wormhole views `gate` and `lift`, and the map-edge views `edge` and `past-edge`) for `<s>` seconds each and prints
+  their frame times; `make bench-views` writes them to `.artifacts/bench_views/<run_id>/`. `gate` looks into the
+  centre gate and `lift` into red's lift from the ground, and each holds robot 0 just beyond the partner mouth,
+  facing back through it. `edge` stands at the red end of the playable rectangle looking out, and `past-edge` 10 m
+  into the slowing band past the east side, looking further out (W-145, no walls at map edges).
 - `--robot-pose x,y,z,yaw [--robot-walk-m-per-s <speed>]`: holds robot 0 there (it doesn't think or shoot); with a
   speed it walks straight ahead, through any mouth, and starts again every 10 s. `--hold-trigger` keeps firing. For
   pictures and videos of robots and lasers through the wormholes.
