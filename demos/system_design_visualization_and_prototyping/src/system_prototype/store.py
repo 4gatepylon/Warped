@@ -57,6 +57,107 @@ CREATE TABLE IF NOT EXISTS sim_player (
     region TEXT NOT NULL,
     match_request_id INTEGER REFERENCES match_request (match_request_id)
 );
+CREATE TABLE IF NOT EXISTS secret (
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS google_signing_key (
+    key_id TEXT PRIMARY KEY,
+    private_key_pem TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS google_identity (
+    subject TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    full_name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS google_code (
+    code_hash TEXT PRIMARY KEY,
+    subject TEXT NOT NULL REFERENCES google_identity (subject),
+    client_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    expires_at_s REAL NOT NULL,
+    used_at_s REAL
+);
+CREATE TABLE IF NOT EXISTS account (
+    account_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    display_name TEXT UNIQUE COLLATE NOCASE,
+    icon TEXT,
+    role TEXT NOT NULL CHECK (role IN ('player', 'superadmin')),
+    state TEXT NOT NULL CHECK (state IN ('active', 'deleted')),
+    created_at_s REAL NOT NULL,
+    age_confirmed_at_s REAL NOT NULL,
+    terms_accepted_at_s REAL NOT NULL,
+    name_changed_at_s REAL NOT NULL,
+    finished_match_count INTEGER NOT NULL DEFAULT 0,
+    played_s REAL NOT NULL DEFAULT 0,
+    deleted_at_s REAL
+);
+CREATE TABLE IF NOT EXISTS identity (
+    provider TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES account (account_id),
+    email TEXT NOT NULL,
+    PRIMARY KEY (provider, subject)
+);
+CREATE TABLE IF NOT EXISTS used_allowance (
+    identity_hash TEXT PRIMARY KEY,
+    finished_match_count INTEGER NOT NULL,
+    played_s REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_family (
+    family_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES account (account_id),
+    created_at_s REAL NOT NULL,
+    revoked_at_s REAL,
+    revoked_because TEXT
+);
+CREATE TABLE IF NOT EXISTS refresh_token (
+    token_hash TEXT PRIMARY KEY,
+    family_id INTEGER NOT NULL REFERENCES session_family (family_id),
+    issued_at_s REAL NOT NULL,
+    expires_at_s REAL NOT NULL,
+    used_at_s REAL
+);
+CREATE TABLE IF NOT EXISTS stripe_checkout (
+    checkout_id TEXT PRIMARY KEY,
+    client_reference_id TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    success_url TEXT NOT NULL,
+    cancel_url TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('open', 'complete')),
+    payment_id TEXT,
+    created_at_s REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS stripe_payment (
+    payment_id TEXT PRIMARY KEY,
+    checkout_id TEXT NOT NULL REFERENCES stripe_checkout (checkout_id),
+    amount_cents INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('succeeded', 'refunded', 'disputed')),
+    paid_at_s REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS stripe_event (
+    event_id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at_s REAL NOT NULL,
+    delivery_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS purchase (
+    payment_id TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES account (account_id),
+    amount_cents INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('paid', 'refunded', 'disputed')),
+    paid_at_s REAL NOT NULL,
+    locked_at_s REAL
+);
+CREATE TABLE IF NOT EXISTS webhook_event (
+    event_id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    payment_id TEXT NOT NULL,
+    received_at_s REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS message (
     message_id INTEGER PRIMARY KEY AUTOINCREMENT,
     at_s REAL NOT NULL,
@@ -76,6 +177,12 @@ DEFAULT_SETTINGS: tuple[tuple[str, str, str, float], ...] = (
     ("machine_empty_s", "Fleet", "Seconds a machine stays empty before it is turned off", 120),
     ("server_start_s", "Fleet", "Seconds a game server takes to start on a ready machine", 5),
     ("machine_usd_per_hour", "Fleet", "Price of one machine for one hour, in dollars", 0.145),
+    ("name_change_days", "Accounts", "Days between name changes", 30),
+    ("access_token_min", "Sign-in", "Minutes an access token lasts", 15),
+    ("refresh_token_days", "Sign-in", "Days a refresh token lasts unused", 60),
+    ("price_usd", "Paying", "Price of the purchase, in dollars", 13.37),
+    ("free_match_count", "Paying", "Free allowance, finished matches", 1),
+    ("free_match_min", "Paying", "Free allowance, minutes in matches", 30),
     ("online_player_target", "Simulation", "Simulated players online", 0),
     ("pretend_match_min", "Simulation", "Length of a pretend match, in minutes", 5),
     ("east_player_pct", "Simulation", "Share of simulated players nearest US East, in percent", 60),
@@ -100,7 +207,7 @@ def read_rows(connection: sqlite3.Connection, sql: str, args: tuple = ()) -> lis
 
 
 def open_store(database_file: Path) -> sqlite3.Connection:
-    """`open_store` opens `database_file`, creating its tables and default settings if it is new.
+    """`open_store` opens `database_file`, adding any missing table and default setting.
 
     Args:
         database_file: The SQLite file, or `Path(":memory:")` for a database that isn't kept.
@@ -116,7 +223,5 @@ def open_store(database_file: Path) -> sqlite3.Connection:
     )
     connection.row_factory = sqlite3.Row
     connection.executescript(SCHEMA_SQL)
-    is_new_world: bool = connection.execute("SELECT COUNT(*) FROM setting").fetchone()[0] == 0
-    if is_new_world:
-        connection.executemany("INSERT INTO setting VALUES (?, ?, ?, ?)", DEFAULT_SETTINGS)
+    connection.executemany("INSERT OR IGNORE INTO setting VALUES (?, ?, ?, ?)", DEFAULT_SETTINGS)
     return connection

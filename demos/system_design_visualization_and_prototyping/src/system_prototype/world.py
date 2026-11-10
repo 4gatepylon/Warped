@@ -7,8 +7,8 @@ result) and the database. Whenever one component would call another, `World` wri
 `message` table, which the system view draws.
 
 Interface:
-    World: The simulated system.
-    COMPONENTS: The names components have in messages.
+    World: The simulated system, with the accounts, purchases, fake Google and fake Stripe as
+        its attributes `accounts`, `purchases`, `google` and `stripe`.
 
 Example:
     >>> world = World(open_store(Path(":memory:")), SimClock())
@@ -18,13 +18,18 @@ Example:
 Must know:
     Limitations:
         - Matches are pretend ones that only last a while; the stand-in game comes in a later part.
-        - Players are anonymous simulated ones; accounts come in a later part.
+        - Simulated players are anonymous; only people using the app mock-up have accounts.
 """
 
 import random
 import sqlite3
 
+from .accounts import Accounts
+from .bus import Bus
 from .clock import SimClock
+from .identity_provider import FakeGoogle
+from .payment_provider import FakeStripe
+from .purchases import Purchases
 from .rules import (
     MachineLoad,
     NotFoundError,
@@ -34,18 +39,9 @@ from .rules import (
     pick_machine,
     split_steps,
 )
-from .store import REGIONS, read_rows
+from .secret_manager import SecretManager
+from .store import REGIONS
 
-COMPONENTS: tuple[str, ...] = (
-    "simulated_players",
-    "website",
-    "backend",
-    "database",
-    "fleet_manager",
-    "cloud",
-    "machine",
-    "game_server",
-)
 MAX_STEP_S: float = 2.0
 MAX_STEP_COUNT: int = 600
 PRETEND_MATCH_PLAYER_COUNT: int = 10
@@ -79,6 +75,14 @@ class World:
     def __init__(self, connection: sqlite3.Connection, clock: SimClock, random_seed: int = 1):
         self._connection: sqlite3.Connection = connection
         self._clock: SimClock = clock
+        self._bus: Bus = Bus(connection, clock)
+        self.secret_manager: SecretManager = SecretManager(self._bus)
+        self.secret_manager.createMissingSecrets()
+        self.google: FakeGoogle = FakeGoogle(self._bus)
+        self.accounts: Accounts = Accounts(self._bus, self.google, self.secret_manager)
+        self.purchases: Purchases = Purchases(self._bus, self.secret_manager)
+        self.stripe: FakeStripe = FakeStripe(self._bus, self.purchases.receiveStripeWebhook)
+        self.purchases.connectStripe(self.stripe)
         self._random: random.Random = random.Random(random_seed)
         self._last_tick_s: float = clock.readSeconds()
 
@@ -92,7 +96,7 @@ class World:
             >>> world.readSettings()["max_match_count"]
             100.0
         """
-        return {row["name"]: row["value"] for row in self._read("SELECT name, value FROM setting")}
+        return self._bus.readSettings()
 
     def listSettings(self) -> list[dict]:
         """`listSettings` returns every setting with its section, meaning and value.
@@ -326,30 +330,15 @@ class World:
         Example:
             >>> self._read("SELECT * FROM machine WHERE region = ?", ("us-east",))
         """
-        return read_rows(self._connection, sql, args)
+        return self._bus.read(sql, args)
 
     def _send(self, at_s: float, sender: str, receiver: str, what: str, detail: str = "") -> None:
-        """`_send` records that `sender` called `receiver`, for the system view.
-
-        Args:
-            at_s: When.
-            sender: The calling component, one of `COMPONENTS`.
-            receiver: The called component, one of `COMPONENTS`.
-            what: The call, such as "POST /matches".
-            detail: Which machine, game server or request it was about.
-
-        Raises:
-            ValueError: `sender` or `receiver` isn't a component.
+        """`_send` records that `sender` called `receiver` (see `Bus.send`).
 
         Example:
             >>> self._send(now_s, "fleet_manager", "cloud", "start machine", "m-us-east-3")
         """
-        if sender not in COMPONENTS or receiver not in COMPONENTS:
-            raise ValueError(f"unknown component in message {sender} -> {receiver}")
-        self._connection.execute(
-            "INSERT INTO message (at_s, sender, receiver, what, detail) VALUES (?, ?, ?, ?, ?)",
-            (at_s, sender, receiver, what, detail),
-        )
+        self._bus.send(at_s, sender, receiver, what, detail)
 
     def _countUnderCaps(self) -> tuple[int, int]:
         """`_countUnderCaps` returns how many matches and players count toward the caps.
