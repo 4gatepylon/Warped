@@ -79,10 +79,6 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-150 Arrow keys and clicks for menu pages.** The user, 2026-11-09: "enabling arrow keys for switching between menu panes and also enabling clicking on them". Claimed by Claude Code (session 6463b76f-4842-4353-8c38-5e49bbbd5dcd), branch `claude/menu-pages`, 2026-11-10.
-  - **Where the work is:** worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a045fce75ed67ec0c` on the user's Mac; branch `claude/menu-pages` (not pushed yet): the levels' `src/menu.rs` (one file, copied) and Dark Forest's `src/menu.rs`; pictures will be under `demos/snow_planet_rust/.artifacts/`. State on 2026-11-10: started, nothing built.
-- [~] **W-151 Menu layout and help tooltip.** The user, 2026-11-09: "menu page have menu name at the top and the options BELOW it (i.e. the panes "which pane you are in" with brackets and the pane names", "there should also be a question mark that fi you hver tells you the tooltip for how to navigate the menu instea edof showing by default the instruction Q/E". Claimed by Claude Code (session 6463b76f-4842-4353-8c38-5e49bbbd5dcd), branch `claude/menu-pages`, 2026-11-10.
-  - **Where the work is:** worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a045fce75ed67ec0c` on the user's Mac; branch `claude/menu-pages` (not pushed yet): the levels' `src/menu.rs` (one file, copied) and Dark Forest's `src/menu.rs`; pictures will be under `demos/snow_planet_rust/.artifacts/`. State on 2026-11-10: started, nothing built.
 
 ## Open
 
@@ -172,6 +168,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
+- [?] **W-150 Arrow keys and clicks for menu pages.** The user, 2026-11-09: "enabling arrow keys for switching between menu panes and also enabling clicking on them". #539: in every level's menu the left and right arrows turn the page (as `Q` and `E` still do), and a click on a page's name opens it. On the settings page the arrows turn the page while the pages' names are chosen (they are when the page opens); `Down` or `Up` goes into the rows, where left and right change the chosen number, and past the first or last row comes back to the names.
+- [?] **W-151 Menu layout and help tooltip.** The user, 2026-11-09: "menu page have menu name at the top and the options BELOW it (i.e. the panes "which pane you are in" with brackets and the pane names", "there should also be a question mark that fi you hver tells you the tooltip for how to navigate the menu instea edof showing by default the instruction Q/E". #539: in every level's menu the first line is the menu's name, the pages' names are on the line under it with the open one in brackets, and a `?` at the right of the first line shows the menu's keys while the mouse is over it; the `Q/E: page` hint and the settings page's line of keys are gone from the pages.
 - [?] **W-148 Team boundary planes in every level.** The user, 2026-11-09: "all levels should have the red/blue boundary planes that slightly shine (blue red)". Lunar Surface has them already (W-64 (zone planes)). Then: "for spherical it should be two hemispheres in case it was unclear before", "this shimmering wall should also be added to dune and dark forest", "all levels should have this".
   #532: in every level (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest), from each map's team
   zones: Dark Forest's map gained zones and walls; City Sphere's teams each have a hemisphere, so one disc through the

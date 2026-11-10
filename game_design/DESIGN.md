@@ -438,8 +438,12 @@ What a player sees while playing:
   10 s it takes, and they can't shoot (see [Winning a level](#winning-a-level)).
 - **Map while `Tab` is held:** the MAP page's picture and legend over the dimmed game, which goes on taking the
   player's input, until `Tab` is let go.
-- **Menu** (`Esc`, which frees the mouse; `Esc` again closes it and captures the mouse), with five pages under a tab
-  bar; it opens on SCORES, and `Q` and `E` turn the pages. Inside the one-window app a sixth page, MATCH, comes
+- **Menu** (`Esc`, which frees the mouse; `Esc` again closes it and captures the mouse): its name on the first line,
+  the names of its five pages on the line under it (the open one in brackets), then the page. It opens on SCORES.
+  The left and right arrows, `Q` and `E`, or a click on a page's name turn the pages. On SETTINGS, `Down` or `Up`
+  goes from the pages' names into the rows, where the left and right arrows change the chosen number instead, and
+  past the first or last row comes back to the names. A `?` at the right of the first line shows the menu's keys
+  while the mouse is over it; the keys aren't shown otherwise. Inside the one-window app a sixth page, MATCH, comes
   first, with the match's status (the current level, the round, which team attacks and the scores), and the menu
   opens on it. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
   bindings say, so a bad binding can always be fixed. The player stands still while it is open,

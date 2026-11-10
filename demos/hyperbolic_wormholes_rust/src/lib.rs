@@ -159,12 +159,22 @@ const MESSAGE_DURATION_S: f64 = 3.0;
 const MAX_BLUESHIFT_FRAC: f64 = 1.25;
 const SKY_TRACER_M: f64 = 80.0;
 const DEATH_MASK_PX: (u32, u32) = (240, 24);
-const MENU_MASK_PX: (u32, u32) = (512, 312);
+const MENU_MASK_PX: (u32, u32) = (512, 324);
 const BANNER_HEIGHT_FRAC: f32 = 0.2;
 const MENU_HEIGHT_FRAC: f32 = 0.85;
 const TEXT_TOP_PX: f32 = 2.0;
 const TEXT_LINE_PX: f32 = 12.0;
 const MENU_LEFT_PX: f32 = 4.0;
+/// `MENU_TEXT_LAYOUT` is how the menu's text lies in the window, to find the text under the mouse.
+const MENU_TEXT_LAYOUT: menu_and_map::TextLayout = menu_and_map::TextLayout {
+    mask_px: MENU_MASK_PX,
+    height_frac: MENU_HEIGHT_FRAC,
+    max_width_frac: render_metal::OVERLAY_MAX_WIDTH_FRAC,
+    left_px: MENU_LEFT_PX,
+    top_px: TEXT_TOP_PX,
+    line_px: TEXT_LINE_PX,
+    glyph_px: DEBUG_GLYPH_PX,
+};
 const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const GAME_PASSWORD_HOME_PATH: &str = "Library/Application Support/Warped/game_password";
 const LAST_SERVER_HOME_PATH: &str = "Library/Application Support/Warped/last_server_address";
@@ -180,8 +190,8 @@ const SERVER_SILENT_S: f64 = 2.0;
 const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route and --export-map.";
 const MENU_DIM_FRAC: f32 = 0.8;
 const HELD_MAP_DIM_FRAC: f32 = 0.6;
-const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
-const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
+const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 40];
+const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 318];
 const PICTURE_PX_PER_MASK_PX: i32 = 2;
 const TEAM_BOX_PAD_MASK_PX: i32 = 2;
 const DEATH_TITLE_MASK: u8 = 255;
@@ -2604,6 +2614,20 @@ impl Session {
                 mouse.set_relative_mouse_mode(window, true);
                 return PlayOutcome::Play;
             }
+            Event::MouseMotion { x, y, .. } if is_menu_open => {
+                let cell: Option<menu_and_map::TextCell> = get_menu_cell(window, (x, y));
+                self.get_open_menu().set_pointer(cell);
+            }
+            Event::MouseButtonDown {
+                mouse_btn: sdl3::mouse::MouseButton::Left,
+                x,
+                y,
+                ..
+            } if is_menu_open => {
+                if let Some(cell) = get_menu_cell(window, (x, y)) {
+                    self.get_open_menu().click(cell);
+                }
+            }
             Event::MouseMotion { xrel, yrel, .. } if self.is_captured && !is_menu_open => {
                 let speed: f64 = self.player_settings.view.look_rad_per_px
                     / voxel_world::LOOK_RAD_PER_PX
@@ -2632,6 +2656,13 @@ impl Session {
             }
             None => PlayOutcome::Play,
         }
+    }
+
+    /// `get_open_menu` lends the open menu; it panics if the menu is closed.
+    ///
+    /// Example: `self.get_open_menu().set_pointer(None);`
+    fn get_open_menu(&mut self) -> &mut menu::Menu {
+        self.menu_and_map.get_menu_mut().expect("the menu is open")
     }
 
     /// `handle_menu_control` passes a pressed control to the open menu, closes it (capturing the
@@ -4133,6 +4164,7 @@ impl Session {
                 is_centered: false,
                 dim_frac: MENU_DIM_FRAC,
                 picture: match menu.get_page() {
+                    _ if menu.is_help_shown() => None,
                     menu::Page::Map => Some(self.make_map_picture()),
                     menu::Page::Scores => {
                         menu::get_own_team_lines(scoreboard).map(make_team_box_picture)
@@ -4499,6 +4531,23 @@ fn get_map_picture_max_px() -> (u32, u32) {
         ((MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a]) * PICTURE_PX_PER_MASK_PX) as u32
     });
     (width, height)
+}
+
+/// `get_menu_cell` gives the cell of the menu's text under the mouse at `at_points` (in
+/// `window`'s points, as SDL's mouse events give it), or `None` off the text. The menu is drawn
+/// in whole pixels of the window's size in pixels, whatever the render scale.
+///
+/// Example: `let cell = get_menu_cell(window, (x, y));`
+fn get_menu_cell(
+    window: &sdl3::video::Window,
+    at_points: (f32, f32),
+) -> Option<menu_and_map::TextCell> {
+    let (size_points, size_px) = (window.size(), window.size_in_pixels());
+    let px_per_point: f32 = size_px.0 as f32 / size_points.0 as f32;
+    MENU_TEXT_LAYOUT.get_cell_at(
+        size_px,
+        (at_points.0 * px_per_point, at_points.1 * px_per_point),
+    )
 }
 
 /// `get_text_positions` places each of `text`'s lines in its mask: the line cut to the mask's

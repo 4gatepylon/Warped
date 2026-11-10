@@ -1,4 +1,5 @@
-//! `menu.rs` is the in-game menu, in pages under a tab bar: the settings page, where a player
+//! `menu.rs` is the in-game menu: its name with a `?` (help shows while the mouse is over it), the
+//! pages' names under it, and the page shown: the settings page, where a player
 //! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
 //! head bob, motion blur, how a hit looks, the wormhole tint, the Milky Way's brightness, the
 //! picture's brightness, contrast, saturation and gamma (W-51, basic visuals), and a row that saves
@@ -8,12 +9,14 @@
 //! (`credits.rs`), the quit page, which leaves the level, and, when the caller supplies its lines
 //! (the one-window app's match status, `set_match_lines`), a MATCH page first. It keeps no window
 //! state: the window
-//! feeds it pressed controls and the scores, and draws its lines. `Esc` opens it and closes it, and
+//! feeds it pressed controls, clicks, the mouse's place in its text and the scores, and draws its
+//! lines. The arrows or `Q`/`E` turn the page, and so does a click on a page's name (W-150, arrow
+//! keys and clicks for menu pages; W-151, menu layout and help tooltip). `Esc` opens it and closes it, and
 //! the map page's lines also head the map shown while `Tab` is held (W-140, hold Tab for the map,
 //! Esc for the menu; `warped_shared::menu_and_map`).
 //!
-//! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`, `show_message`,
-//! `set_match_lines`), `MenuOutcome`,
+//! Interface: `Menu` (`New`, `handle`, `click`, `set_pointer`, `is_help_shown`, `get_lines`,
+//! `get_page`, `show_message`, `set_match_lines`), `MenuOutcome`,
 //! `Page`, `Scoreboard`, `get_held_map_lines`, `get_own_team_lines` (the scores page's box around
 //! this player's team).
 //!
@@ -22,6 +25,9 @@
 //! Must know:
 //! - Inside the menu the arrows, `Return`, `Escape`, `Q` and `E` work whatever the key bindings
 //!   say, so a bad binding can always be fixed.
+//! - On the settings page the left and right arrows turn the page only while the pages' names
+//!   are chosen (they are when the page opens); `Down` or `Up` goes into the rows, where the
+//!   arrows change numbers, and past the first or last row comes back to the names.
 
 use std::cmp::Reverse;
 
@@ -29,7 +35,10 @@ use sdl3::keyboard::Scancode;
 
 use crate::credits::CREDITS_LINES;
 use crate::key_bindings::{Action, Control, KeyBindings};
-use crate::menu_and_map::{MATCH_PAGE_NAME, QUIT_LINES, format_tab_bar, is_leave_control};
+use crate::menu_and_map::{
+    MATCH_PAGE_NAME, PageTurn, QUIT_LINES, TAB_BAR_LINE, TextCell, find_tab_at, format_tab_bar,
+    format_title_line, is_help_mark_at, is_leave_control, make_help_lines,
+};
 use crate::net::{Score, TEAM_NAMES};
 use crate::settings::PerPlayerSettings;
 use warped_shared::visuals::{VISUALS_ROWS, VisualsKnob};
@@ -43,11 +52,18 @@ const PAGES: [(Page, &str); 5] = [
     (Page::Quit, "QUIT"),
 ];
 const MAP_LEGEND: &str = "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
+const SETTINGS_HELP_LINES: [&str; 5] = [
+    "",
+    "On the SETTINGS page:",
+    "Down/Up               choose a row (past the ends: the pages)",
+    "Return                change the chosen key, or save",
+    "Left/Right            adjust the chosen number",
+];
 const NO_SERVER_LINE: &str = "No game on a server: host or join one to keep scores.";
 const WAITING_LINE: &str = "No scores from the server yet: join a team first.";
 const MAX_SCORE_ROW_COUNT: usize = 16;
 /// `SCORE_ROWS_FIRST_LINE` is the line of the scores page's first player row in `Menu::get_lines`:
-/// under the tab bar, a blank line, the players' count, a blank line and the header.
+/// under the title, the tab bar, the players' count, a blank line and the header.
 const SCORE_ROWS_FIRST_LINE: usize = 5;
 const TEAM_WIDTH: usize = 6;
 const PLAYER_WIDTH: usize = 16;
@@ -298,11 +314,15 @@ fn get_score_lines(scoreboard: Scoreboard) -> Vec<(String, bool)> {
     lines
 }
 
-/// `Menu` is the menu's state: the page shown (an index into `get_pages`), the settings page's
+/// `Menu` is the menu's state: the page shown (an index into `get_pages`), whether the pages'
+/// names are chosen (else a row of the settings page is), the settings page's
 /// chosen row, whether it waits for the control to bind to that row's action, a line of news (a
-/// saved file, a refused binding), and the MATCH page's lines (`None`: no MATCH page).
+/// saved file, a refused binding), the MATCH page's lines (`None`: no MATCH page), and where in
+/// its text the mouse is (`None`: off it).
 pub struct Menu {
     page_index: usize,
+    is_on_pages: bool,
+    pointer: Option<TextCell>,
     row: usize,
     is_waiting_for_control: bool,
     message: String,
@@ -310,13 +330,15 @@ pub struct Menu {
 }
 
 impl Menu {
-    /// `New` opens the menu on its first page, SCORES, with the settings page's first row chosen.
+    /// `New` opens the menu on its first page, SCORES, with the pages' names chosen.
     ///
     /// Example: `let menu = Menu::New();`
     #[allow(non_snake_case)]
     pub fn New() -> Menu {
         Menu {
             page_index: 0,
+            is_on_pages: true,
+            pointer: None,
             row: 0,
             is_waiting_for_control: false,
             message: String::new(),
@@ -364,10 +386,43 @@ impl Menu {
         self.message = message;
     }
 
+    /// `click` reacts to a left click on `cell` of the menu's text: on a page's name it turns to
+    /// that page. It does nothing while the menu waits for a control to bind (the click is that
+    /// control, which `handle` gets).
+    ///
+    /// Example: `menu.click(TextCell { line: 1, column: 12 });`
+    pub fn click(&mut self, cell: TextCell) {
+        if self.is_waiting_for_control || cell.line != TAB_BAR_LINE {
+            return;
+        }
+        let page_names: Vec<&str> = self.get_pages().iter().map(|(_, name)| *name).collect();
+        if let Some(page_index) = find_tab_at(&page_names, cell.column) {
+            self.page_index = page_index;
+            self.is_on_pages = true;
+        }
+    }
+
+    /// `set_pointer` tells the menu where in its text the mouse is (`None`: off it).
+    ///
+    /// Example: `menu.set_pointer(Some(TextCell { line: 0, column: 62 }));`
+    pub fn set_pointer(&mut self, cell: Option<TextCell>) {
+        self.pointer = cell;
+    }
+
+    /// `is_help_shown` says whether the mouse is over the title's `?`, so the help covers the
+    /// page (and the window leaves out the page's picture).
+    ///
+    /// Example: `if menu.is_help_shown() { ... }`
+    pub fn is_help_shown(&self) -> bool {
+        self.pointer.is_some_and(is_help_mark_at)
+    }
+
     /// `handle` reacts to a pressed control: while waiting, it binds the control to the chosen
-    /// action (`Escape` cancels); otherwise `Q` and `E` turn to the previous and next page,
+    /// action (`Escape` cancels); otherwise `Q` and `E`, and the left and right arrows unless a
+    /// row of the settings page is chosen, turn to the page before and after,
     /// `Escape` or the open-menu control closes the menu, on the quit page `Return` or `Y` leaves
-    /// the level, and on the settings page the arrows move between rows and change numbers and
+    /// the level, and on the settings page `Down` and `Up` go from the pages' names through the
+    /// rows and back, the left and right arrows change a chosen number and
     /// `Return` starts a binding or saves.
     ///
     /// Example: `let outcome = menu.handle(Control::Key(Scancode::Down), &mut mine);`
@@ -388,26 +443,34 @@ impl Menu {
         }
         let is_closing: bool = control == Control::Key(Scancode::Escape)
             || settings.keys.matches(Action::OpenMenu, control);
-        match control {
-            _ if is_closing => return MenuOutcome::Close,
-            Control::Key(Scancode::Q) => {
-                let page_count: usize = self.get_pages().len();
-                self.page_index = (self.page_index + page_count - 1) % page_count;
-                return MenuOutcome::Stay;
-            }
-            Control::Key(Scancode::E) => {
-                self.page_index = (self.page_index + 1) % self.get_pages().len();
-                return MenuOutcome::Stay;
-            }
-            _ if self.get_page() == Page::Quit && is_leave_control(control) => {
-                return MenuOutcome::LeaveLevel;
-            }
-            _ if self.get_page() != Page::Settings => return MenuOutcome::Stay,
-            _ => {}
+        if is_closing {
+            return MenuOutcome::Close;
         }
+        let is_on_rows: bool = self.get_page() == Page::Settings && !self.is_on_pages;
+        if let Some(turn) = PageTurn::FromControl(control, !is_on_rows) {
+            self.page_index = turn.apply(self.page_index, self.get_pages().len());
+            self.is_on_pages = true;
+            return MenuOutcome::Stay;
+        }
+        if self.get_page() == Page::Quit && is_leave_control(control) {
+            return MenuOutcome::LeaveLevel;
+        }
+        if self.get_page() != Page::Settings {
+            return MenuOutcome::Stay;
+        }
+        let last_row: usize = rows.len() - 1;
         match (control, row) {
-            (Control::Key(Scancode::Up), _) => self.row = (self.row + rows.len() - 1) % rows.len(),
-            (Control::Key(Scancode::Down), _) => self.row = (self.row + 1) % rows.len(),
+            (Control::Key(Scancode::Down), _) if self.is_on_pages => {
+                (self.is_on_pages, self.row) = (false, 0);
+            }
+            (Control::Key(Scancode::Up), _) if self.is_on_pages => {
+                (self.is_on_pages, self.row) = (false, last_row);
+            }
+            _ if self.is_on_pages => {}
+            (Control::Key(Scancode::Up), _) if self.row == 0 => self.is_on_pages = true,
+            (Control::Key(Scancode::Down), _) if self.row == last_row => self.is_on_pages = true,
+            (Control::Key(Scancode::Up), _) => self.row -= 1,
+            (Control::Key(Scancode::Down), _) => self.row += 1,
             (Control::Key(Scancode::Return), Row::Key(_, name)) => {
                 self.is_waiting_for_control = true;
                 self.message =
@@ -427,8 +490,10 @@ impl Menu {
         MenuOutcome::Stay
     }
 
-    /// `get_lines` gives the menu's text, each line with whether it is highlighted: the tab bar,
-    /// then on the settings page a hint, the rows around the chosen one (`VISIBLE_ROW_COUNT` of
+    /// `get_lines` gives the menu's text, each line with whether it is highlighted: the title
+    /// with its `?`, the tab bar (highlighted unless a row of the settings page is chosen), then
+    /// the help while the mouse is over the `?`, else on the settings page the rows around the
+    /// chosen one (`VISIBLE_ROW_COUNT` of
     /// them) and the line of news, on the map page the map's legend, on the scores page
     /// `scoreboard`'s lines (`get_score_lines`), on the credits page `CREDITS_LINES`, or on the
     /// quit page `QUIT_LINES`.
@@ -447,16 +512,26 @@ impl Menu {
             .saturating_sub(VISIBLE_ROW_COUNT / 2)
             .min(rows.len().saturating_sub(VISIBLE_ROW_COUNT));
         let page_names: Vec<&str> = self.get_pages().iter().map(|(_, name)| *name).collect();
-        let tab_bar: String = format_tab_bar(&page_names, self.page_index);
+        let is_on_rows: bool = self.get_page() == Page::Settings && !self.is_on_pages;
+        let mut lines: Vec<(String, bool)> = vec![
+            (format_title_line(), true),
+            (format_tab_bar(&page_names, self.page_index), !is_on_rows),
+        ];
+        if self.is_help_shown() {
+            lines.push((String::new(), false));
+            lines.extend(make_help_lines(&SETTINGS_HELP_LINES));
+            return lines;
+        }
         match self.get_page() {
             Page::Match => {
-                let mut lines: Vec<(String, bool)> = vec![(tab_bar, true), (String::new(), false)];
                 lines.extend(self.match_lines.iter().flatten().cloned());
                 return lines;
             }
-            Page::Map => return vec![(tab_bar, true), (MAP_LEGEND.to_string(), false)],
+            Page::Map => {
+                lines.push((MAP_LEGEND.to_string(), false));
+                return lines;
+            }
             Page::Scores => {
-                let mut lines: Vec<(String, bool)> = vec![(tab_bar, true), (String::new(), false)];
                 lines.extend(get_score_lines(scoreboard));
                 return lines;
             }
@@ -465,20 +540,12 @@ impl Menu {
                     Page::Credits => &CREDITS_LINES,
                     _ => &QUIT_LINES,
                 };
-                let mut lines: Vec<(String, bool)> = vec![(tab_bar, true), (String::new(), false)];
                 lines.extend(page_lines.iter().map(|line| (line.to_string(), false)));
                 return lines;
             }
             Page::Settings => {}
         }
-        let mut lines: Vec<(String, bool)> = vec![
-            (tab_bar, true),
-            (
-                "Up/Down choose, Return change, Left/Right adjust, Esc closes".to_string(),
-                false,
-            ),
-            (String::new(), false),
-        ];
+        lines.push((String::new(), false));
         for (i, row) in rows.iter().enumerate().skip(first).take(VISIBLE_ROW_COUNT) {
             let text: String = match *row {
                 Row::Key(action, name) => {
@@ -492,7 +559,7 @@ impl Menu {
                 }
                 Row::Save => format!("Save to {save_path}"),
             };
-            lines.push((text, i == self.row));
+            lines.push((text, is_on_rows && i == self.row));
         }
         lines.push((String::new(), false));
         lines.push((self.message.clone(), false));
@@ -510,6 +577,10 @@ mod tests {
     //! | Visuals row (W-51, basic visuals) | stepped up to its highest, down to its lowest, back to 1 | `visuals_rows_step_within_their_ranges` |
     //! | Closing | Escape (the built-in open-menu control), another open-menu control; not the show-map control (`Tab`) | `escape_and_the_menu_key_close_it` |
     //! | Page | the first (SCORES, where the menu opens), turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
+    //! | Arrows (W-150, arrow keys and clicks for menu pages) | left and right on a page without rows, on the settings page with the pages' names chosen (turn), with a row chosen (change the number, no turn); Down and Up into the rows, past the first and past the last row back to the names | `arrows_turn_pages_unless_a_row_is_chosen` |
+    //! | Click | on a page's name (that page), between two names, on another line, while waiting for a control (none of them turns) | `a_click_on_a_name_opens_its_page` |
+    //! | Top lines (W-151, menu layout and help tooltip) | the title with its `?` first, the names under it (highlighted, or not with a row chosen), no page keys shown | `the_title_is_above_the_pages_names` |
+    //! | Mouse and the help | off the text, on the `?` (help replaces the page, on every page, at most 26 lines of 64 characters), moved away (the page again) | `help_shows_only_over_the_question_mark` |
     //! | Quit page | `Return` or `Y` (leave the level), another key (stay); its lines; `Return` elsewhere (no leaving) | `the_quit_page_leaves_the_level` |
     //! | Held map | its title names the show-map control, then the legend | `the_held_map_names_its_key` |
     //! | MATCH page | none (a level run alone), lines supplied (shown first, in the page turning, its lines), lines changed, removed | `the_match_page_shows_only_with_lines` |
@@ -523,7 +594,7 @@ mod tests {
     ///
     /// Example: `move_to(&mut menu, &mut mine, Row::Save);`
     fn move_to(menu: &mut Menu, settings: &mut PerPlayerSettings, target: Row) {
-        while get_rows()[menu.row] != target {
+        while menu.is_on_pages || get_rows()[menu.row] != target {
             menu.handle(Control::Key(Scancode::Down), settings);
         }
     }
@@ -578,7 +649,7 @@ mod tests {
         menu.handle(Control::Key(Scancode::Return), &mut mine);
         assert!(!menu.is_waiting_for_control && menu.row == 0);
         assert_eq!(
-            menu.get_lines(&mine, "", Scoreboard::NoServer)[1].0,
+            menu.get_lines(&mine, "", Scoreboard::NoServer)[2].0,
             MAP_LEGEND
         );
         assert_eq!(
@@ -597,7 +668,7 @@ mod tests {
         menu.handle(Control::Key(Scancode::Return), &mut mine);
         assert!(!menu.is_waiting_for_control && menu.row == 0);
         let lines: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
-        assert!(lines[0].0.contains("[CREDITS]"));
+        assert!(lines[1].0.contains("[CREDITS]"));
         let texts: Vec<&str> = lines[2..].iter().map(|(text, _)| text.as_str()).collect();
         assert_eq!(texts, CREDITS_LINES);
         assert!(lines[2..].iter().all(|(_, is_highlighted)| !is_highlighted));
@@ -633,7 +704,7 @@ mod tests {
         menu.handle(Control::Key(Scancode::Q), &mut mine);
         assert_eq!(menu.get_page(), Page::Quit);
         let lines: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
-        assert!(lines[0].0.contains("[QUIT]"));
+        assert!(lines[1].0.contains("[QUIT]"));
         let texts: Vec<&str> = lines[2..].iter().map(|(text, _)| text.as_str()).collect();
         assert_eq!(texts, QUIT_LINES);
         assert_eq!(
@@ -761,7 +832,7 @@ mod tests {
         menu.set_match_lines(Some(status(1)));
         assert_eq!(menu.get_page(), Page::Match);
         let lines: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
-        assert!(lines[0].0.starts_with("[MATCH]"), "{}", lines[0].0);
+        assert!(lines[1].0.starts_with("[MATCH]"), "{}", lines[1].0);
         assert_eq!(lines[2..], status(1));
         menu.set_match_lines(Some(status(2)));
         assert_eq!(
@@ -776,10 +847,123 @@ mod tests {
         menu.set_match_lines(None);
         assert_eq!(menu.get_page(), Page::Scores);
         assert!(
-            menu.get_lines(&mine, "", Scoreboard::NoServer)[0]
+            menu.get_lines(&mine, "", Scoreboard::NoServer)[1]
                 .0
-                .starts_with("MENU  [SCORES]")
+                .starts_with("[SCORES]")
         );
+    }
+
+    #[test]
+    fn arrows_turn_pages_unless_a_row_is_chosen() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        let press = |menu: &mut Menu, mine: &mut PerPlayerSettings, key: Scancode| {
+            menu.handle(Control::Key(key), mine);
+        };
+        press(&mut menu, &mut mine, Scancode::Left);
+        assert_eq!(menu.get_page(), Page::Quit);
+        press(&mut menu, &mut mine, Scancode::Right);
+        press(&mut menu, &mut mine, Scancode::Right);
+        assert_eq!(menu.get_page(), Page::Settings);
+        press(&mut menu, &mut mine, Scancode::Right);
+        assert_eq!(menu.get_page(), Page::Map);
+        press(&mut menu, &mut mine, Scancode::Left);
+        assert_eq!(menu.get_page(), Page::Settings);
+        let last_row: usize = get_rows().len() - 1;
+        press(&mut menu, &mut mine, Scancode::Up);
+        assert_eq!((menu.is_on_pages, menu.row), (false, last_row));
+        press(&mut menu, &mut mine, Scancode::Down);
+        assert!(menu.is_on_pages);
+        press(&mut menu, &mut mine, Scancode::Down);
+        assert_eq!((menu.is_on_pages, menu.row), (false, 0));
+        press(&mut menu, &mut mine, Scancode::Up);
+        assert!(menu.is_on_pages);
+        let red: Row = get_rows()
+            .into_iter()
+            .find(|row| matches!(row, Row::Number(Number::HitRed, ..)))
+            .expect("a red row");
+        move_to(&mut menu, &mut mine, red);
+        let red_before: f64 = mine.hit_effects.red_frac;
+        press(&mut menu, &mut mine, Scancode::Left);
+        assert_eq!(menu.get_page(), Page::Settings);
+        assert!(mine.hit_effects.red_frac < red_before);
+        press(&mut menu, &mut mine, Scancode::E);
+        assert_eq!((menu.get_page(), menu.is_on_pages), (Page::Map, true));
+    }
+
+    #[test]
+    fn a_click_on_a_name_opens_its_page() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        let bar: String = menu.get_lines(&mine, "", Scoreboard::NoServer)[TAB_BAR_LINE]
+            .0
+            .clone();
+        let column_of = |name: &str| bar.find(name).expect("a page's name");
+        let click = |menu: &mut Menu, line: usize, column: usize| {
+            menu.click(TextCell { line, column });
+        };
+        click(&mut menu, TAB_BAR_LINE, column_of("CREDITS") + 2);
+        assert_eq!(menu.get_page(), Page::Credits);
+        click(&mut menu, TAB_BAR_LINE, column_of("MAP") - 2);
+        assert_eq!(menu.get_page(), Page::Credits);
+        click(&mut menu, TAB_BAR_LINE + 1, column_of("MAP"));
+        assert_eq!(menu.get_page(), Page::Credits);
+        click(&mut menu, TAB_BAR_LINE, column_of("SETTINGS"));
+        assert_eq!(menu.get_page(), Page::Settings);
+        move_to(&mut menu, &mut mine, Row::Key(Action::Jump, "jump"));
+        menu.handle(Control::Key(Scancode::Return), &mut mine);
+        click(&mut menu, TAB_BAR_LINE, column_of("QUIT"));
+        assert_eq!(menu.get_page(), Page::Settings);
+        menu.handle(Control::Key(Scancode::Escape), &mut mine);
+        click(&mut menu, TAB_BAR_LINE, column_of("QUIT"));
+        assert_eq!((menu.get_page(), menu.is_on_pages), (Page::Quit, true));
+    }
+
+    #[test]
+    fn the_title_is_above_the_pages_names() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::E), &mut mine);
+        let lines: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
+        assert!(lines[0].0.starts_with("MENU ") && lines[0].0.ends_with('?'));
+        assert_eq!(lines[1].0, " SCORES  [SETTINGS]  MAP   CREDITS   QUIT ");
+        assert!(lines[0].1 && lines[1].1);
+        assert!(lines.iter().all(|(line, _)| !line.contains("Q/E")));
+        menu.handle(Control::Key(Scancode::Down), &mut mine);
+        let lines: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
+        assert!(lines[0].1 && !lines[1].1);
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|(_, is_highlighted)| *is_highlighted)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn help_shows_only_over_the_question_mark() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        let title: String = menu.get_lines(&mine, "", Scoreboard::NoServer)[0].0.clone();
+        let mark: TextCell = TextCell {
+            line: 0,
+            column: title.find('?').expect("a help mark"),
+        };
+        assert!(!menu.is_help_shown());
+        for _ in 0..PAGES.len() {
+            let page: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
+            menu.set_pointer(Some(mark));
+            assert!(menu.is_help_shown());
+            let help: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
+            assert_eq!(help[..2], page[..2]);
+            assert_eq!(help[3].0, "HOW TO USE THE MENU");
+            assert!(help.iter().any(|(line, _)| line.contains("Q/E")));
+            assert!(help.iter().any(|(line, _)| line.contains("SETTINGS page")));
+            assert!(help.len() <= 26);
+            assert!(help.iter().all(|(line, _)| line.chars().count() <= 64));
+            menu.set_pointer(Some(TextCell { line: 3, column: 5 }));
+            assert_eq!(menu.get_lines(&mine, "", Scoreboard::NoServer), page);
+            menu.set_pointer(None);
+            assert!(!menu.is_help_shown());
+            menu.handle(Control::Key(Scancode::E), &mut mine);
+        }
     }
 
     #[test]

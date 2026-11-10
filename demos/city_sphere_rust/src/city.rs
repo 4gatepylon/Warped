@@ -56,7 +56,7 @@ use crate::city_wormholes::{
 use crate::dust::{DustBurst, MAX_DUST_BURST_COUNT};
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
-use crate::menu_and_map::{Cover, MenuAndMap, PlayOutcome};
+use crate::menu_and_map::{Cover, MenuAndMap, PlayOutcome, TAB_BAR_LINE, TextCell};
 use crate::net;
 use crate::render_city::{
     BEACON_SLOT_COUNT, BEAM_WIDTH_M, CityFrame, CityScene, build_scene, push_beam, push_core_halo,
@@ -2595,6 +2595,20 @@ fn handle_event(
             mouse.set_relative_mouse_mode(window, true);
             return Ok(PlayOutcome::Play);
         }
+        Event::MouseMotion { x, y, .. } if is_menu_open => {
+            let cell: Option<TextCell> = super::get_menu_cell(window, (x, y));
+            get_open_menu(session).set_pointer(cell);
+        }
+        Event::MouseButtonDown {
+            mouse_btn: sdl3::mouse::MouseButton::Left,
+            x,
+            y,
+            ..
+        } if is_menu_open => {
+            if let Some(cell) = super::get_menu_cell(window, (x, y)) {
+                get_open_menu(session).click(cell);
+            }
+        }
         Event::MouseMotion { xrel, yrel, .. }
             if session.is_captured
                 && !is_menu_open
@@ -2653,6 +2667,16 @@ fn handle_event(
         session.fire_sniper();
     }
     Ok(PlayOutcome::Play)
+}
+
+/// `get_open_menu` lends `session`'s open menu; it panics if the menu is closed.
+///
+/// Example: `get_open_menu(session).set_pointer(None);`
+fn get_open_menu(session: &mut CitySession) -> &mut menu::Menu {
+    session
+        .menu_and_map
+        .get_menu_mut()
+        .expect("the menu is open")
 }
 
 /// `handle_menu_control` passes a pressed key to the open menu: it changes a setting, moves,
@@ -2745,8 +2769,9 @@ fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
     let mut lines: Vec<(String, bool)> =
         menu.get_lines(&session.player_settings, &save_path, scoreboard);
     let picture: Option<Picture> = match menu.get_page() {
+        _ if menu.is_help_shown() => None,
         menu::Page::Map => {
-            lines.truncate(1);
+            lines.truncate(TAB_BAR_LINE + 1);
             lines.push((CITY_MAP_LEGEND.to_string(), false));
             Some(make_map_picture(session))
         }
