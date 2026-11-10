@@ -1452,7 +1452,6 @@ impl CitySession {
                         self.respawn_in_s = Some(respawn_wait_s);
                         self.respawn_wait_s = respawn_wait_s;
                         self.disabling = None;
-                        self.thrown.clear();
                     }
                     self.show_message(format!("player {shooter_id} hit player {victim_id}"));
                 }

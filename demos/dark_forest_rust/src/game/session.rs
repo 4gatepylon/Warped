@@ -310,7 +310,7 @@ const FREE_SPAWN_M: f32 = 2.0;
 const MESSAGE_S: f32 = 3.0;
 /// `LONE_MOUTH_HITS_TO_DESTROY` is how many hits destroy a mouth down whose partner isn't (Lunar
 /// Surface's).
-const LONE_MOUTH_HITS_TO_DESTROY: u8 = 1;
+const LONE_MOUTH_HITS_TO_DESTROY: u8 = 0;
 /// `MARKER_GLOW_PER_RADIUS` sizes a thrown mouth's glowing ball's sprite (half its width) by the ball's radius, and
 /// `MARKER_LIGHT_M` and `MARKER_LIGHT_FRAC` its light.
 const MARKER_GLOW_PER_RADIUS: f32 = 2.0;
@@ -907,9 +907,6 @@ impl Session {
     /// Example: `self.update_wormholes(scene);`
     fn update_wormholes(&mut self, scene: &Scene) {
         let now_s: f64 = f64::from(self.time_s);
-        if !self.player.is_alive() {
-            self.thrown.clear();
-        }
         let mut others_m: Vec<Vec3> = self
             .thrown
             .get_kept_places()

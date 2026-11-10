@@ -232,7 +232,7 @@ The level as the Rust game builds it, from the map
 - One wormhole joins a ridge to the red landing pad. Its mouths are 15 m in reach.
 - Each player throws their own pair of wormhole mouths ([Thrown wormholes](#thrown-wormholes)): `Q` throws the
   purple one, then the green one, and nothing more once both are down. A lone mouth glows as a ball until its
-  partner lands: shooting your own or a teammate's ball does nothing, and one shot at an enemy's ball destroys it.
+  partner lands; shooting any mouth does nothing to it.
 - Blue's side has a concrete bunker (a kazemat) at its spawn, rows of Hesco barriers, a relay mast, supply crates and
   a solar array. The middle has derelict field bunkers, a comms dome, a crater walkway, a relay mast, a solar array
   and crates. Red's side has Hesco barriers, a habitat module, a dome, a bunker garage as its spawn hangar, a
@@ -533,11 +533,14 @@ anywhere in the level.
   - the view through a thrown mouth is tinted its colour;
   - a mouth in flight, or down while its partner isn't, glows as a small ball;
   - every player sees every player's mouths, and anyone can walk or shoot through them.
-- **Death:** a player's mouths disappear when they die.
-- **Shooting an enemy's mouths:** a shot that goes through an enemy's linked mouth makes both of
-  that enemy's mouths flash red; enough hits destroy the pair. A shot that hits an enemy's lone
-  mouth's ball (down, its partner not yet thrown) destroys it at once. A shot at a player's own or
-  a teammate's mouths, or at a ball still in flight, does nothing.
+- **Once per level:** a player throws one pair in a level and no more (W-199, one wormhole per player per level).
+  The mouths stay where they are when their thrower dies, so respawning gives no new pair. A throw that fizzles
+  doesn't use the mouth up.
+- **Shots don't destroy mouths** (W-166, clear rules for destroying thrown wormholes): a shot through a linked
+  mouth is carried through it and does nothing to the pair, whoever threw it; a shot at a lone mouth's ball does
+  nothing either. The game master can turn destroying back on by setting the hits below above 0.
+- **Not built yet:** switching an enemy's pair off by holding `E` on a mouth, and a pair staying when its thrower
+  leaves the level (it still goes with them).
 
 | Parameter | Value |
 | --- | --- |
@@ -547,8 +550,8 @@ anywhere in the level.
 | Longest flight before it fizzles | 4 s (`wormholes.max_flight_s`) |
 | A mouth's size on Lunar Surface | 1.6 m Schwarzschild radius (`wormholes.schwarzschild_radius_m`); on the house, the house's mouths' size |
 | How far its bending reaches on Lunar Surface | 6 m (`wormholes.reach_m`) |
-| Hits that destroy an enemy's pair | 2 sniper shots or 5 rifle shots (`wormholes.sniper_hits_to_destroy`, `wormholes.rifle_hits_to_destroy`) |
-| Hits that destroy an enemy's lone mouth | 1 shot of either gun |
+| Hits that destroy an enemy's pair | 0 for both guns: never (`wormholes.sniper_hits_to_destroy`, `wormholes.rifle_hits_to_destroy`) |
+| Hits that destroy an enemy's lone mouth | never |
 | Red flash after each hit | 0.25 s (`wormholes.hit_flash_s`) |
 
 ## Weapons

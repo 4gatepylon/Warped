@@ -112,8 +112,8 @@ wormholes:  # Q throws your purple wormhole mouth, then your green one, and so o
   max_flight_s: 4.0  # Seconds it may fly before it fizzles without landing.
   schwarzschild_radius_m: 1.6  # Lunar Surface: the mouth's size (the house's mouths are all the house's size).
   reach_m: 6.0  # Lunar Surface: how far its bending reaches; reaches of warps may not overlap.
-  sniper_hits_to_destroy: 2  # Sniper shots through an enemy's mouths (either one) that destroy both.
-  rifle_hits_to_destroy: 5  # Rifle shots through an enemy's mouths (either one) that destroy both.
+  sniper_hits_to_destroy: 0  # Sniper shots through an enemy's mouths (either one) that destroy both; 0: shots never destroy thrown wormholes (W-166).
+  rifle_hits_to_destroy: 0  # Rifle shots through an enemy's mouths (either one) that destroy both; 0: never (W-166).
   hit_flash_s: 0.25  # Seconds both mouths of a pair flash red after a hit.
 
 space:  # How curved Lunar Surface is (the house demo keeps its own); a window that joins builds the map by the server's.
