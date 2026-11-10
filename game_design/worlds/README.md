@@ -13,6 +13,8 @@ pictures beside each file mark the objects with red circles and rectangles and t
 
 One file per level, in the map's order from blue to red:
 
+- [Dust](dust.md)
+
 ## Naming rules
 
 Every object has a name, like a callout in Counter-Strike, so that anyone can say exactly which wall or rock they
