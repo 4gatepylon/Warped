@@ -164,6 +164,13 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-188 Map editor.** The user, 2026-11-09: "ability to build maps from a map editor with a reasonably large universe of pre-existing skins etc... and on only hyperbolic and euclidean and possibly toroidal space soon". Builds on W-143 (declarative levels); related: W-161 (real toroidal flat space).
 - [ ] **W-189 Black holes can kill, by setting.** The user, 2026-11-09: "ability to toggle whether black holes kill you".
 - [ ] **W-190 World-building.** The user, 2026-11-09: "to do world-building so the world for this game is precisely described and everything fits the same aesthetic and a nice storyline basically".
+- [ ] **W-191 Voice map edits for developers.** The user, 2026-11-09: "voice to map and/or map edits both offline and online (Realtime); this is for developers and testers". Related: W-154 (voice agent for map variants), W-143 (declarative levels), W-188 (map editor).
+- [ ] **W-192 Play recordings for the editing agent.** The user, 2026-11-09: "ability to have a recording of play such that when voice to map edits is done the agent can have access to the frames and/or video that need to change and/or highlight the issue (and possibly better vision models to help with this if needed... unclear)". Related: W-191 (voice map edits for developers).
+- [ ] **W-193 Voice to map for players.** The user, 2026-11-09: "voice to map for actual users". Related: W-154 (voice agent for map variants), W-191 (voice map edits for developers).
+- [ ] **W-194 Security review and anti-cheat.** The user, 2026-11-09: "some security review and mechanism to reduce the chance of cheating and other possible issues". Related: W-178 (keep strangers out of matches), W-179 (keep strangers out of the game).
+- [ ] **W-195 Moving black holes.** The user, 2026-11-09: "moving blackholes".
+- [ ] **W-196 Match timers and ties.** The user, 2026-11-09: "match timers for the game to be possible to tie".
+- [ ] **W-197 Menus that fit the game's look.** The user, 2026-11-09: "better graphics for the menus that fit the general story and aesthetic of teh game I alldued to before". Related: W-190 (world-building), W-151 (menu layout and help tooltip).
 
 ## Pending user review
 
