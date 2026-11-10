@@ -41,15 +41,19 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const SOCKET_TIMEOUT_MS: u64 = 50;
 
-/// `resolve_program` gives the program a level runs: this binary for `self`, else the path from
-/// this demo's folder.
+/// `resolve_program` gives the program a level runs: this binary for `self`; inside `Warped.app`
+/// the level's program in `Contents/MacOS/levels/` (`app_bundle::get_app_level_program`); else
+/// the path from this demo's folder.
 ///
 /// Example: `let program = resolve_program(&level)?;`
 fn resolve_program(level: &LevelEntry) -> Result<PathBuf> {
     if level.program == SELF_PROGRAM {
         return Ok(std::env::current_exe()?);
     }
-    let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join(&level.program);
+    let path: PathBuf = match warped_shared::app_bundle::get_app_level_program(&level.name) {
+        Some(path) => path,
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join(&level.program),
+    };
     if !path.exists() {
         return Err(format!(
             "{}'s program {} doesn't exist; build it in its folder ({}) first",
