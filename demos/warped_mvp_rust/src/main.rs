@@ -15,6 +15,9 @@
 //! - `--save-screen-pictures`: draw every screen without a window into
 //!   `.artifacts/screen_pictures/<run_id>/` at `--width-px` x `--height-px` pixels, and exit.
 //! - `--label <label>`: a suffix for the run folder's name.
+//! - `--exit-after-s <s>`: close the window after that many seconds (to check it starts).
+//! - `--print-level-programs`: print the levels `make package-mac-app` puts in the app, and exit.
+//! - `--loopback-only`: listen for games on 127.0.0.1 only (checks; nothing open to the network).
 //!
 //! Example: `warped --width-px 2560 --height-px 1440`
 //!
@@ -35,19 +38,20 @@ mod screens;
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
+use warped_shared::app_bundle::get_level_slug;
 use warped_shared::game_settings::{
     GameSettings, SettingsMessage, SettingsScope, read_settings_file,
 };
 use warped_shared::key_bindings::get_pressed_control;
 use warped_shared::match_protocol::{
-    LevelEntry, MATCH_DISCOVERY_PORT, MATCH_PORT, MatchView, Phase,
+    LevelEntry, MATCH_DISCOVERY_PORT, MATCH_PORT, MatchView, Phase, SELF_PROGRAM,
 };
 use warped_shared::match_state::{MatchState, Team};
 use warped_shared::metal_window::{MetalWindow, WindowOptions};
@@ -107,6 +111,44 @@ struct Arguments {
     /// Suffix for the run folder's name (letters, digits, - and _).
     #[arg(long)]
     label: Option<String>,
+    /// Close the window after this many seconds (to check that it starts).
+    #[arg(long)]
+    exit_after_s: Option<f64>,
+    /// Print, for `make package-mac-app`, each level of the manifest that has its own program: its
+    /// file name in the app, its crate folder (from the repository's root), its program's name and
+    /// its map picture (`-` for none), tab-separated, one a line; and exit.
+    #[arg(long)]
+    print_level_programs: bool,
+    /// Listen for games on 127.0.0.1 only, with nothing open to the network (checks and tests;
+    /// hosted games still announce themselves).
+    #[arg(long)]
+    loopback_only: bool,
+}
+
+/// `print_level_programs` prints the levels `make package-mac-app` builds and puts in the app (see
+/// `--print-level-programs`).
+///
+/// Example: `print_level_programs(&levels)?;`
+fn print_level_programs(levels: &[LevelEntry]) -> Result<()> {
+    for level in levels.iter().filter(|level| level.program != SELF_PROGRAM) {
+        let program: &str = Path::new(&level.program)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "{}'s program {:?} has no file name",
+                    level.name, level.program
+                )
+            })?;
+        println!(
+            "{}\t{}\t{program}\t{}\t{}",
+            get_level_slug(&level.name),
+            level.folder,
+            level.map_picture.as_deref().unwrap_or("-"),
+            level.server_settings.as_deref().unwrap_or("-")
+        );
+    }
+    Ok(())
 }
 
 /// `validate_arguments` fails, naming the argument, on a size of 0 or a label with other
@@ -200,7 +242,15 @@ fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
     )?;
     let mut painter: Painter = Painter::New(window.get_device())?;
     let mut shown: Option<(Vec<Shape>, (u32, u32))> = None;
+    let started_at: Instant = Instant::now();
     while !app.should_quit() {
+        if arguments
+            .exit_after_s
+            .is_some_and(|seconds| started_at.elapsed().as_secs_f64() >= seconds)
+        {
+            println!("warped: closing after {} s", started_at.elapsed().as_secs());
+            return Ok(());
+        }
         let events: Vec<Event> = window.get_event_pump_mut().poll_iter().collect();
         for event in events {
             match event {
@@ -390,6 +440,9 @@ fn main() -> Result<()> {
     validate_arguments(&arguments)?;
     let manifest: PathBuf = get_levels_manifest_path();
     let levels: Vec<LevelEntry> = load_levels(&manifest)?;
+    if arguments.print_level_programs {
+        return print_level_programs(&levels);
+    }
     let pictures: Vec<Option<Picture>> = load_map_pictures(&manifest, &levels)?;
     let player_settings_path: PathBuf = match &arguments.player_settings {
         Some(path) => path.clone(),
@@ -404,6 +457,7 @@ fn main() -> Result<()> {
         match_port: arguments.match_port,
         level_port: arguments.level_port,
         discovery_port: arguments.discovery_port,
+        is_loopback_only: arguments.loopback_only,
     };
     let app: App = App::New(
         levels,

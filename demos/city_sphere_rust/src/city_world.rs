@@ -13,6 +13,7 @@ use std::error::Error;
 use glam::{DMat3, DMat4, DQuat, DVec3};
 use serde::Deserialize;
 
+use warped_shared::gravity::{FlatWarp, get_flat_pull_m_per_s};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState};
 
 use crate::play_settings::HeadBobSettings;
@@ -29,6 +30,9 @@ const HEAD_RADIUS_M: f64 = 0.25;
 const TORSO_RADIUS_M: f64 = 0.42;
 pub const TORSO_HEIGHT_M: f64 = 1.0;
 pub const HEAD_HEIGHT_M: f64 = 1.55;
+/// `WARP_PULL_HEIGHT_M` is where warps pull a body (W-144): its middle above the feet, where a
+/// mouth's disc carries it through (`city::BODY_MIDDLE_M`).
+const WARP_PULL_HEIGHT_M: f64 = 0.9;
 const LIFT_M_PER_S: f64 = 6.0;
 const LIFT_TOP_UNDER_GLASS_M: f64 = 1.0;
 const AIR_CONTROL_FRAC: f64 = 0.35;
@@ -288,6 +292,10 @@ pub struct CityWorld {
     pub laser_colors: [[f32; 3]; 2],
     /// `variation_seed` seeds the map's small look variation (panel tint), 0 without one.
     pub variation_seed: u32,
+    /// `mouths` are the linked thrown mouths in the game now, which pull walkers along the ground
+    /// (W-144, `move_player`); the window and the bots set them each frame, as Lunar Surface's
+    /// `VoxelWorld::set_thrown_wormholes` adds them to its warps.
+    pub mouths: Vec<FlatWarp>,
 }
 
 /// `Bounces` is how a shot meets the glass's inner side (`CityWorld::trace_shot`): at most
@@ -535,6 +543,7 @@ impl CityWorld {
             spawns,
             lift_holes,
             variation_seed: map.variation.as_ref().map_or(0, |v| v.seed),
+            mouths: Vec::new(),
             laser_colors: match &map.lasers {
                 Some(JsonLasers {
                     team_colors: Some(colors),
@@ -906,7 +915,9 @@ impl CityWorld {
     /// `move_player` moves `player` by `input` for `dt_s` under `settings` and the head bob
     /// `head_bob`: first the movement rules every level shares (`MoveState::step`: crouching,
     /// sprint energy, the head bob's steps, a hit's and crouching's slow), then walking along the
-    /// ground at the speed they allow, gravity outward, jumping, riding a lift up through the
+    /// ground at the speed they allow, pulled along the ground toward each of `mouths` (W-144,
+    /// `warped_shared::gravity`: faster toward one, slower away, drifting toward one standing
+    /// still), gravity outward, jumping, riding a lift up through the
     /// glass while jump is held (hovering `LIFT_TOP_UNDER_GLASS_M` over the glass level until they
     /// walk off), and collisions with the street, the glass (from either side, except in its
     /// holes) and the boxes.
@@ -940,10 +951,19 @@ impl CityWorld {
         let speed_m_per_s: f64 =
             self.get_speed_m_per_s(settings, player.move_state.is_sprinting) * slow_frac;
         let (jump_m_per_s, gravity_m_per_s2) = self.get_jump(settings);
+        let up: DVec3 = get_up(player.feet);
+        let pull_m_per_s: DVec3 = get_flat_pull_m_per_s(
+            &settings.gravity,
+            self.get_speed_m_per_s(settings, false),
+            player.feet + up * WARP_PULL_HEIGHT_M,
+            up,
+            &self.mouths,
+        );
         let motion: StepMotion = StepMotion {
             speed_m_per_s,
             jump_m_per_s,
             gravity_m_per_s2,
+            pull_m_per_s,
         };
         let step_count: usize =
             ((player.velocity.length() * dt_s / MAX_STEP_M).ceil() as usize).clamp(1, 16);
@@ -977,7 +997,11 @@ impl CityWorld {
         } else {
             AIR_CONTROL_FRAC
         };
-        let target: DVec3 = wish * speed_m_per_s;
+        let target: DVec3 = if motion.pull_m_per_s == DVec3::ZERO {
+            wish * speed_m_per_s
+        } else {
+            wish * speed_m_per_s + motion.pull_m_per_s
+        };
         let new_tangent: DVec3 = tangent + (target - tangent) * (control * 12.0 * dt_s).min(1.0);
         let mut new_up: f64 = v_up - motion.gravity_m_per_s2 * dt_s;
         if is_first && input.is_jumping && player.is_on_ground {
@@ -1171,11 +1195,12 @@ impl CityWorld {
 }
 
 /// `StepMotion` is how a player moves under the server settings: their speed this frame, the jump
-/// speed and the gravity (`CityWorld::get_jump`).
+/// speed and the gravity (`CityWorld::get_jump`), and the mouths' pull along the ground.
 struct StepMotion {
     speed_m_per_s: f64,
     jump_m_per_s: f64,
     gravity_m_per_s2: f64,
+    pull_m_per_s: DVec3,
 }
 
 /// `CityInput` is what a player asks of their body this frame: walking (forward and right, -1
@@ -1269,6 +1294,7 @@ mod tests {
     //! | A shot at the glass beside a stairs' hole: from the street (stops), from the glass level (reflects); straight down into it (ends on a step) | `shots_beside_the_stairs_hole_meet_the_glass` |
     //! | A player on the glass level beside a stairs' hole: walking its whole length just past the edge (stays on the glass); standing over the stairs (falls in) | `players_walk_on_the_glass_beside_the_stairs_hole` |
     //! | A player climbing each team's stairs at the edge of the steps, either side: reaches the glass level | `players_climb_the_stairs_at_their_edge` |
+    //! | A linked mouth near a walker (W-144): walking toward it (farther in the same time), away (less far, still away), standing (drifts toward it); past the pull's reach (each the same as with no mouth, bit for bit) | `mouths_pull_walkers_toward_them` |
 
     use super::*;
 
@@ -1281,6 +1307,9 @@ mod tests {
     const LEAD_IN_M: f64 = 1.0;
     const GLASS_LEVEL_TOLERANCE_M: f64 = 0.05;
     const STEP_S: f64 = 1.0 / 60.0;
+    const PULL_WALK_S: f64 = 0.5;
+    const NEAR_MOUTH_M: f64 = 8.0;
+    const FAR_MOUTH_M: f64 = 40.0;
 
     fn world() -> CityWorld {
         CityWorld::Builtin().expect("the shipped map loads")
@@ -1326,6 +1355,58 @@ mod tests {
     /// `settings` is the built-in `server_settings.yaml`.
     fn settings() -> ServerSettings {
         ServerSettings::Builtin()
+    }
+
+    /// `walk_by_a_mouth` walks blue's first spawn with `input` for `PULL_WALK_S`, with one linked
+    /// mouth `mouth_m` ahead at the body's middle (none for `None`), and gives where the feet end
+    /// up and how far they went toward it.
+    fn walk_by_a_mouth(input: &CityInput, mouth_m: Option<f64>) -> (DVec3, f64) {
+        let mut world: CityWorld = world();
+        let mut player: CityPlayer = world.make_player(0, 0);
+        let (start, ahead) = (player.feet, -player.body.z_axis);
+        let middle: DVec3 = start + get_up(start) * WARP_PULL_HEIGHT_M;
+        world.mouths = mouth_m
+            .map(|ahead_m| FlatWarp {
+                centre_m: middle + ahead * ahead_m,
+                radius_m: 1.0,
+                is_mouth: true,
+            })
+            .into_iter()
+            .collect();
+        for _ in 0..(PULL_WALK_S / STEP_S).round() as usize {
+            world.move_player(&mut player, input, &settings(), &head_bob(), STEP_S);
+        }
+        (player.feet, (player.feet - start).dot(ahead))
+    }
+
+    #[test]
+    fn mouths_pull_walkers_toward_them() {
+        let forward: CityInput = CityInput {
+            forward_frac: 1.0,
+            ..CityInput::default()
+        };
+        let back: CityInput = CityInput {
+            forward_frac: -1.0,
+            ..CityInput::default()
+        };
+        let still: CityInput = CityInput::default();
+        let (_, free_m) = walk_by_a_mouth(&forward, None);
+        let (_, toward_m) = walk_by_a_mouth(&forward, Some(NEAR_MOUTH_M));
+        assert!(toward_m > free_m, "{toward_m} against {free_m}");
+        let (_, free_back_m) = walk_by_a_mouth(&back, None);
+        let (_, away_m) = walk_by_a_mouth(&back, Some(NEAR_MOUTH_M));
+        assert!(
+            free_back_m < away_m && away_m < 0.0,
+            "{away_m} against {free_back_m}"
+        );
+        let (_, drift_m) = walk_by_a_mouth(&still, Some(NEAR_MOUTH_M));
+        assert!(drift_m > 0.0, "{drift_m}");
+        for input in [&forward, &back, &still] {
+            assert_eq!(
+                walk_by_a_mouth(input, Some(FAR_MOUTH_M)).0,
+                walk_by_a_mouth(input, None).0
+            );
+        }
     }
 
     #[test]

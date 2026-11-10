@@ -31,8 +31,8 @@ use serde_json::Value;
 use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
-    MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
-    SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
+    GravitySettings, MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings,
+    SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
 };
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
@@ -45,7 +45,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 22] = [
     "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
     "sniper.reload_s",
@@ -67,6 +67,7 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
+    "gravity.max_pull_per_walk_speed",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
 #[cfg(target_os = "macos")]
@@ -158,6 +159,8 @@ pub struct ServerSettings {
     pub black_hole: BlackHoleSettings,
     #[serde(default)]
     pub surface: SurfaceSettings,
+    #[serde(default)]
+    pub gravity: GravitySettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -318,6 +321,10 @@ impl ServerSettings {
             )
             .into());
         }
+        settings
+            .gravity
+            .check()
+            .map_err(|error| format!("settings {source}: {error}"))?;
         let min_time_rate_frac: f64 = settings.black_hole.min_time_rate_frac;
         if min_time_rate_frac > 1.0 {
             return Err(format!(
@@ -456,6 +463,7 @@ mod tests {
     //! | Menu and map keys (W-140, hold Tab for the map, Esc for the menu) | current (built in), saved before (`release_mouse`, `open_menu` on `Tab`: loads with `Escape` for the menu and `Tab` for the map), `release_mouse` beside `show_map` (fails) | `builtin_settings_read_and_survive_json`, `saves_from_before_the_held_map_open_the_menu_with_escape` |
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | `gravity` section (W-144) | left out (every file before it, built in: the shared values), one key (the others shared), 0 pull (allowed: none), pull of walking speed or more, full pull past its reach, a misspelt key (each fails) | `gravity_defaults_and_overrides` |
     //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
@@ -640,6 +648,46 @@ mod tests {
                     "{error}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn gravity_defaults_and_overrides() {
+        let builtin: ServerSettings = ServerSettings::Builtin();
+        assert!(
+            !BUILTIN_SERVER_YAML
+                .lines()
+                .any(|line| line.starts_with("gravity:"))
+        );
+        assert_eq!(builtin.gravity, GravitySettings::default());
+        let json_back: ServerSettings =
+            ServerSettings::FromJson(&builtin.to_json()).expect("the built-in settings as JSON");
+        assert_eq!(json_back, builtin);
+        let with_gravity = |section: &str| -> Result<ServerSettings> {
+            ServerSettings::FromYaml(
+                &format!("{BUILTIN_SERVER_YAML}\ngravity: {section}\n"),
+                "test",
+            )
+        };
+        let one_key: ServerSettings = with_gravity("{reach_m: 12.0}").expect("one key");
+        assert_eq!(
+            one_key.gravity,
+            GravitySettings {
+                reach_m: 12.0,
+                ..GravitySettings::default()
+            }
+        );
+        assert!(with_gravity("{max_pull_per_walk_speed: 0.0}").is_ok());
+        for bad in [
+            "{max_pull_per_walk_speed: 1.0}",
+            "{full_pull_m: 30.0}",
+            "{reach_mm: 12.0}",
+        ] {
+            let error: String = with_gravity(bad).expect_err(bad).to_string();
+            assert!(
+                error.contains("gravity") || error.contains("reach_mm"),
+                "{error}"
+            );
         }
     }
 

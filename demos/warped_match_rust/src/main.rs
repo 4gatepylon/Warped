@@ -1669,8 +1669,9 @@ fn save_frame(renderer: &mut dyn Renderer, frame: FrameData, path: &Path) -> Res
     save_png(path, &pixels, size.0, size.1)
 }
 
-/// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder, with
-/// `command.txt` holding the command line and the git commit, and returns its path.
+/// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder (inside
+/// `Warped.app`, `~/Library/Logs/Warped/<script>/<run_id>/`), with `command.txt` holding the
+/// command line and the git commit (`app` inside the app), and returns its path.
 ///
 /// Example: `let folder = make_run_folder("bench_views", None)?;`
 fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
@@ -1679,7 +1680,11 @@ fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
     if let Some(label) = label {
         run_id = format!("{run_id}-{label}");
     }
-    let folder: PathBuf = crate_folder.join(".artifacts").join(script).join(&run_id);
+    let app_logs: Option<PathBuf> = app_bundle::get_app_logs_folder();
+    let folder: PathBuf = match &app_logs {
+        Some(logs) => logs.join(script).join(&run_id),
+        None => crate_folder.join(".artifacts").join(script).join(&run_id),
+    };
     if folder.exists() {
         return Err(format!(
             "run folder {} already exists; wait a second or pass another --label",
@@ -1688,11 +1693,14 @@ fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
         .into());
     }
     fs::create_dir_all(&folder)?;
-    let commit: String = std::process::Command::new("git")
-        .args(["describe", "--always", "--dirty"])
-        .current_dir(crate_folder)
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?;
+    let commit: String = match app_logs {
+        Some(_) => "app".to_string(),
+        None => std::process::Command::new("git")
+            .args(["describe", "--always", "--dirty"])
+            .current_dir(crate_folder)
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?,
+    };
     let command: String = std::env::args().collect::<Vec<String>>().join(" ");
     fs::write(
         folder.join("command.txt"),

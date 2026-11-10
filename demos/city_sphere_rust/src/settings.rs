@@ -30,8 +30,8 @@ use serde_json::Value;
 use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
-    MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
-    SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
+    GravitySettings, MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings,
+    SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
 };
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
@@ -44,7 +44,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 23] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 24] = [
     "glass.max_bounce_count",
     "glass.reflectivity_frac",
     "movement.shoot_after_moving_s",
@@ -68,6 +68,7 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 23] = [
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
+    "gravity.max_pull_per_walk_speed",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
 #[cfg(target_os = "macos")]
@@ -156,6 +157,8 @@ pub struct ServerSettings {
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
     pub black_hole: BlackHoleSettings,
+    #[serde(default)]
+    pub gravity: GravitySettings,
     pub glass: GlassSettings,
 }
 
@@ -317,6 +320,10 @@ impl ServerSettings {
             )
             .into());
         }
+        settings
+            .gravity
+            .check()
+            .map_err(|error| format!("settings {source}: {error}"))?;
         let min_time_rate_frac: f64 = settings.black_hole.min_time_rate_frac;
         if min_time_rate_frac > 1.0 {
             return Err(format!(

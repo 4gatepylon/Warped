@@ -6,6 +6,7 @@
 #     make run-warped WIDTH_PX=<n> HEIGHT_PX=<n> PLAYER_SETTINGS=<file>: build the children, then open the app.
 #     make build-children: build the match server (../warped_match_rust) and the five levels it starts.
 #     make save-screen-pictures WIDTH_PX=<n> HEIGHT_PX=<n>: draw every screen without a window into .artifacts/screen_pictures/.
+#     make package-mac-app: build Warped.app with its match server and levels, and zip it (.build/Warped.zip; tools/package_mac_app.sh).
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
 #     make clean: remove .build/.
@@ -23,7 +24,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (the logs of the games this 
   Recreating them means hosting those games and running make save-screen-pictures again. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help run-warped build-children save-screen-pictures test fmt clean reset-artifacts
+.PHONY: help run-warped build-children save-screen-pictures package-mac-app test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -32,7 +33,8 @@ help:
 	@echo "  make build-children                              Build the match server and the five levels it starts"
 	@echo "  make save-screen-pictures WIDTH_PX=2560 HEIGHT_PX=1440"
 	@echo "                                                   Draw every screen without a window (.artifacts/screen_pictures/)"
-	@echo "  make test                                        Run the tests"
+	@echo "  make package-mac-app                             Build Warped.app with its servers and levels, and zip it (.build/Warped.zip)"
+	@echo "  make test                                       Run the tests"
 	@echo "  make fmt                                         Format with rustfmt and lint with clippy"
 	@echo "  make clean                                       Remove .build/"
 	@echo "  make reset-artifacts YES_TO_RESET_ARTIFACTS=1    Delete .artifacts/ (or INTERACTIVE=1 to be asked)"
@@ -42,6 +44,9 @@ help:
 build-children:
 	$(MAKE) -C $(MATCH_FOLDER) levels
 	cd $(MATCH_FOLDER) && cargo build --release
+
+package-mac-app:
+	./tools/package_mac_app.sh
 
 run-warped: build-children
 	cargo run --release -- --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) $(PLAYER_SETTINGS_FLAG)

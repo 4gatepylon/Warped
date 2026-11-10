@@ -14,7 +14,7 @@
 //!   (`game_menu::get_level_shapes`); it follows the match exactly as a level will, through the
 //!   same `Navigator` moves.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -57,12 +57,14 @@ const CREDITS_LINES: [&str; 9] = [
 ];
 
 /// `Ports` is the UDP ports a game this app hosts uses (its match server's, and each round's
-/// level server's) and the port it listens on for games on the network.
+/// level server's), the port it listens on for games on the network, and whether it listens on
+/// the loopback interface alone (tests: nothing open to the network).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ports {
     pub match_port: u16,
     pub level_port: u16,
     pub discovery_port: u16,
+    pub is_loopback_only: bool,
 }
 
 /// `parse_address` reads a typed match server address, an IP address with an optional `:port`
@@ -175,7 +177,14 @@ impl App {
             levels,
             manifest_path: manifest_path.to_path_buf(),
             pictures,
-            listener: MatchListener::Bind(ports.discovery_port).map_err(|error| error.to_string()),
+            listener: MatchListener::Bind(
+                match ports.is_loopback_only {
+                    true => Ipv4Addr::LOCALHOST,
+                    false => Ipv4Addr::UNSPECIFIED,
+                },
+                ports.discovery_port,
+            )
+            .map_err(|error| error.to_string()),
             client: None,
             hosted: None,
             hosted_team: None,
@@ -792,6 +801,7 @@ mod tests {
             match_port: 48_308,
             level_port: 48_309,
             discovery_port,
+            is_loopback_only: true,
         };
         let path: PathBuf =
             std::env::temp_dir().join("warped_app_test_settings_never_written.yaml");

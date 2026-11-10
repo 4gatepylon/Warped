@@ -45,7 +45,7 @@ use crate::city_world::{
 };
 use crate::city_wormholes::{
     MOUTH_RADIUS_M, can_place_mouth, carry_through, find_crossing, fly_city_throw, get_mouth_frame,
-    land_city_mouth,
+    land_city_mouth, make_mouth_warps,
 };
 use crate::dust::{DustBurst, MAX_DUST_BURST_COUNT};
 use crate::key_bindings::{self, Action, KeyBindings};
@@ -1493,6 +1493,20 @@ impl CitySession {
         self.update_wormholes(now_s);
         if self.is_spawned {
             let before: DVec3 = self.player.feet;
+            let pairs: Vec<[MouthPlace; 2]> = self
+                .thrown
+                .placed
+                .get_pair()
+                .into_iter()
+                .chain(
+                    self.client
+                        .players
+                        .iter()
+                        .filter(|p| Some(p.id) != self.client.id)
+                        .filter_map(|p| p.wormholes.get_pair()),
+                )
+                .collect();
+            self.world.mouths = make_mouth_warps(&pairs);
             self.world.move_player(
                 &mut self.player,
                 &input,
@@ -3498,7 +3512,7 @@ fn find_bot_aim(
 /// (`make_console_route`); if it can't aim at the console for `CONSOLE_REPLAN_S` (it fell off the
 /// glass level, say), it starts the walk again from its stairs.
 fn run_bot(arguments: &Arguments) -> Result<()> {
-    let world: CityWorld = CityWorld::Builtin()?;
+    let mut world: CityWorld = CityWorld::Builtin()?;
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         MAP_NAME,
@@ -3563,6 +3577,12 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
             continue;
         }
         weapons.tick(dt_s);
+        let pairs: Vec<[MouthPlace; 2]> = client
+            .players
+            .iter()
+            .filter_map(|p| p.wormholes.get_pair())
+            .collect();
+        world.mouths = make_mouth_warps(&pairs);
         let mut disabling: Option<u8> = None;
         if arguments.bot_objective == Some(BotObjective::Consoles) {
             if brain.is_done() {

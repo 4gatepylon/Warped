@@ -1,7 +1,8 @@
 //! `settings` is the game server's settings that `net.rs` sends to players in its welcome: how
 //! long a console takes to switch off, how far it reaches, how long a player waits to respawn,
 //! both guns (with the rifle hits that eliminate a player), aiming, movement, sprint energy, how a
-//! hit slows, the flashlight and thrown wormholes; and the head bob, a player setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
+//! hit slows, the flashlight, thrown wormholes and the warps' pull on walkers (`gravity`, W-144,
+//! the shared built-in values when the server leaves it out); and the head bob, a player setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
 //! settings, under the same names and with the same values (W-126), in its own
 //! `server_settings.yaml` (built in, or `--server-settings`).
 //!
@@ -9,7 +10,8 @@
 //!
 //! Interface: `ServerSettings`, `ConsoleSettings`, `RespawnSettings`, `WormholeSettings`,
 //! `SniperSettings`, `RifleSettings`, `BeamSpeckleSettings`, `AimSettings`, `MovementSettings`,
-//! `SprintEnergySettings`, `WhenHitSettings`, `FlashlightSettings`, `HeadBobSettings`, `HEAD_BOB`,
+//! `SprintEnergySettings`, `WhenHitSettings`, `FlashlightSettings`, `GravitySettings`,
+//! `HeadBobSettings`, `HEAD_BOB`,
 //! `HitEffectSettings`, `HIT_EFFECTS`; in tests, `read_lunar_setting`. Every section but
 //! `WormholeSettings` is the shared `warped_shared::play_settings` one (W-126, same play in every
 //! level).
@@ -21,9 +23,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use warped_shared::game_settings::{parse_settings_text, read_settings_file};
 pub use warped_shared::play_settings::{
-    AimSettings, BeamSpeckleSettings, ConsoleSettings, FlashlightSettings, HeadBobSettings,
-    HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
-    SprintEnergySettings, WhenHitSettings,
+    AimSettings, BeamSpeckleSettings, ConsoleSettings, FlashlightSettings, GravitySettings,
+    HeadBobSettings, HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings,
+    SniperSettings, SprintEnergySettings, WhenHitSettings,
 };
 
 /// `WormholeSettings` is how players throw their wormhole mouths (`Q`, `thrown_wormholes.rs`) and
@@ -86,6 +88,8 @@ pub struct ServerSettings {
     pub sprint_energy: SprintEnergySettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
+    #[serde(default)]
+    pub gravity: GravitySettings,
 }
 
 impl ServerSettings {
@@ -105,7 +109,7 @@ impl ServerSettings {
     #[allow(non_snake_case)]
     pub fn Load(path: &Path) -> Result<ServerSettings, Box<dyn Error>> {
         let value: Value = read_settings_file(path)?;
-        serde_json::from_value(value).map_err(|error| format!("{}: {error}", path.display()).into())
+        ServerSettings::FromValue(value, &path.display().to_string())
     }
 
     /// `FromText` reads settings from the text of a settings file, naming `source` in its errors.
@@ -113,16 +117,33 @@ impl ServerSettings {
     /// Example: `let settings = ServerSettings::FromText(BUILTIN_SERVER_YAML, "built in")?;`
     #[allow(non_snake_case)]
     fn FromText(text: &str, source: &str) -> Result<ServerSettings, Box<dyn Error>> {
-        let value: Value = parse_settings_text(text, source)?;
-        serde_json::from_value(value).map_err(|error| format!("{source}: {error}").into())
+        ServerSettings::FromValue(parse_settings_text(text, source)?, source)
     }
 
-    /// `FromJson` reads settings sent by a game server (`to_json`).
+    /// `FromValue` reads settings from a settings file's value, checking `gravity`'s ranges
+    /// (`GravitySettings::check`) and naming `source` in its errors.
+    ///
+    /// Example: `let settings = ServerSettings::FromValue(value, "fast.yaml")?;`
+    #[allow(non_snake_case)]
+    fn FromValue(value: Value, source: &str) -> Result<ServerSettings, Box<dyn Error>> {
+        let settings: ServerSettings =
+            serde_json::from_value(value).map_err(|error| format!("{source}: {error}"))?;
+        settings
+            .gravity
+            .check()
+            .map_err(|error| format!("{source}: {error}"))?;
+        Ok(settings)
+    }
+
+    /// `FromJson` reads settings sent by a game server (`to_json`), and checks `gravity`'s
+    /// ranges (`GravitySettings::check`).
     ///
     /// Example: `let settings = ServerSettings::FromJson(&bytes)?;`
     #[allow(non_snake_case)]
     pub fn FromJson(bytes: &[u8]) -> Result<ServerSettings, Box<dyn Error>> {
-        Ok(serde_json::from_slice(bytes)?)
+        let settings: ServerSettings = serde_json::from_slice(bytes)?;
+        settings.gravity.check()?;
+        Ok(settings)
     }
 
     /// `to_json` gives the settings as compact JSON, to send to players.

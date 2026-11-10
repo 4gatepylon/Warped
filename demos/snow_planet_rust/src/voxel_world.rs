@@ -37,6 +37,7 @@ use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
+use warped_shared::gravity::{HyperbolicWarp, add_pull, get_hyperbolic_pull_m_per_s};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -1654,6 +1655,32 @@ impl VoxelWorld {
             .position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
     }
 
+    /// `get_warp_pull_m_per_s` gives the pull of every warp, the map's and the linked thrown mouths
+    /// (W-144, gravity toward black holes and wormholes; `gravity::get_hyperbolic_pull_m_per_s`),
+    /// on a player whose body's frame is `body` and whose eye is `eye`, as speeds along the body's
+    /// right and back axes.
+    ///
+    /// Example: `let [right_m_per_s, back_m_per_s] = world.get_warp_pull_m_per_s(player.body, eye);`
+    pub fn get_warp_pull_m_per_s(&self, body: DMat4, eye: DVec4) -> [f64; 2] {
+        let warps: Vec<HyperbolicWarp> = self
+            .warps
+            .iter()
+            .map(|warp| HyperbolicWarp {
+                centre: warp.centre,
+                radius_m: warp.m * self.r,
+                is_mouth: warp.is_mouth,
+            })
+            .collect();
+        get_hyperbolic_pull_m_per_s(
+            &self.settings.gravity,
+            self.player.walk_m_per_s,
+            body,
+            eye,
+            self.r,
+            &warps,
+        )
+    }
+
     /// `get_time_rate_frac` gives how fast time runs at x (W-107), as a share of time far from every
     /// black hole. Near each black hole it is general relativity's rate for someone standing still,
     /// (1 − q) / (1 + q) in isotropic coordinates, with q = k m / ρ: ρ the distance to its centre,
@@ -2370,6 +2397,8 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying;
     /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
+    /// pulled along the ground toward black holes and wormhole mouths (`get_warp_pull_m_per_s`,
+    /// W-144: faster toward one, slower away, drifting toward one standing still),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to the spawn
     /// of index `spawn_index`, the player's team),
     /// slowing down without end on the way out up the crater's wall (`get_edge_frac`: each step
@@ -2448,15 +2477,25 @@ impl VoxelPlayer {
             };
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
-        let has_moved: bool = len > 0.0;
-        let walked_m_per_s: f64 = if has_moved {
+        let pull_m_per_s: [f64; 2] = if self.is_flying {
+            [0.0, 0.0]
+        } else {
+            world.get_warp_pull_m_per_s(self.body, eye)
+        };
+        let walk_dir: [f64; 2] = if len > 0.0 {
+            [side / len, -forward / len]
+        } else {
+            [0.0, 0.0]
+        };
+        let step_move: Option<([f64; 2], f64)> = add_pull(walk_dir, speed_m_per_s, pull_m_per_s);
+        let has_moved: bool = step_move.is_some();
+        let walked_m_per_s: f64 = if len > 0.0 {
             speed_m_per_s * forward / len
         } else {
             0.0
-        };
-        if has_moved {
-            let dir: [f64; 2] = [side / len, -forward / len];
-            let distance_m: f64 = speed_m_per_s * dt_s;
+        } - pull_m_per_s[1];
+        if let Some((dir, move_m_per_s)) = step_move {
+            let distance_m: f64 = move_m_per_s * dt_s;
             if let Some(w) = warp.filter(|&w| world.warps[w].is_mouth) {
                 (body_new, h_new, crossed) = self.move_optically(world, dir, distance_m, w);
             } else {
@@ -3774,7 +3813,7 @@ mod blizzard_tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Point | in the white-out, outside it, above it | `points_find_their_blizzard` |
-    //! | Walking | in the white-out (its `speed_frac` of the speed), outside (full speed) | `blizzards_slow_walking` |
+    //! | Walking, with the warps' pull off (W-144) | in the white-out (its `speed_frac` of the speed), outside (full speed) | `blizzards_slow_walking` |
     //! | Laser | into the white-out (stops `shot_reach_m` in, hits nothing), away from every blizzard (hits what it's aimed at) | `lasers_stop_in_a_blizzard` |
 
     use super::*;
@@ -3814,7 +3853,8 @@ mod blizzard_tests {
 
     #[test]
     fn blizzards_slow_walking() {
-        let world: VoxelWorld = load_snow_planet();
+        let mut world: VoxelWorld = load_snow_planet();
+        world.settings.gravity.max_pull_per_walk_speed = 0.0;
         let forward: Input = Input {
             forward: true,
             ..Input::default()
