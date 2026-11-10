@@ -20,7 +20,8 @@
 //!   (the game master's choice; no authentication yet).
 //! - A beacon is `MATCH_BEACON_MAGIC`, a version byte, the match server's port and a summary of
 //!   its match, broadcast every `MATCH_BEACON_PERIOD_S` to UDP `MATCH_DISCOVERY_PORT`; a reader
-//!   ignores bytes after the fields it knows, so a later version can append fields.
+//!   ignores bytes after the fields it knows, so a later version can append fields. Loopback-only
+//!   programs (`network_scope`) send it to 127.0.0.1 instead of broadcasting it.
 
 use std::error::Error;
 use std::fs;
@@ -33,6 +34,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::match_state::{MatchState, Outcome, Team};
+use crate::network_scope;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -273,7 +275,7 @@ impl MatchClient {
     /// Example: `let client = MatchClient::Connect(server, Some(Team::Blue))?;`
     #[allow(non_snake_case)]
     pub fn Connect(server: SocketAddr, team: Option<Team>) -> Result<MatchClient> {
-        let socket: UdpSocket = UdpSocket::bind(("0.0.0.0", 0))?;
+        let socket: UdpSocket = network_scope::bind_socket_toward(server.ip())?;
         socket.set_nonblocking(true)?;
         Ok(MatchClient {
             socket,
@@ -481,8 +483,7 @@ impl MatchAnnouncer {
     /// Example: `let mut announcer = MatchAnnouncer::New("127.0.0.1:48301".parse()?)?;`
     #[allow(non_snake_case)]
     pub fn New(target: SocketAddr) -> Result<MatchAnnouncer> {
-        let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-        socket.set_broadcast(true)?;
+        let socket: UdpSocket = network_scope::bind_socket_toward(target.ip())?;
         Ok(MatchAnnouncer {
             socket,
             target,
@@ -492,13 +493,13 @@ impl MatchAnnouncer {
     }
 
     /// `OnNetwork` makes an announcer broadcasting to `MATCH_DISCOVERY_PORT` on the local
-    /// network.
+    /// network, or sending to it on 127.0.0.1 when `is_loopback_only`.
     ///
-    /// Example: `let mut announcer = MatchAnnouncer::OnNetwork()?;`
+    /// Example: `let mut announcer = MatchAnnouncer::OnNetwork(false)?;`
     #[allow(non_snake_case)]
-    pub fn OnNetwork() -> Result<MatchAnnouncer> {
+    pub fn OnNetwork(is_loopback_only: bool) -> Result<MatchAnnouncer> {
         MatchAnnouncer::New(SocketAddr::from((
-            Ipv4Addr::BROADCAST,
+            network_scope::get_beacon_ip(is_loopback_only),
             MATCH_DISCOVERY_PORT,
         )))
     }
@@ -571,13 +572,14 @@ pub struct MatchListener {
 }
 
 impl MatchListener {
-    /// `Bind` listens on UDP `port` (`MATCH_DISCOVERY_PORT` for the local network). It fails if
-    /// another program holds the port.
+    /// `Bind` listens on UDP `port` (`MATCH_DISCOVERY_PORT` for the local network), on 127.0.0.1
+    /// only when `is_loopback_only`. It fails if another program holds the port.
     ///
-    /// Example: `let mut listener = MatchListener::Bind(MATCH_DISCOVERY_PORT)?;`
+    /// Example: `let mut listener = MatchListener::Bind(MATCH_DISCOVERY_PORT, false)?;`
     #[allow(non_snake_case)]
-    pub fn Bind(port: u16) -> Result<MatchListener> {
-        let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).map_err(|error| {
+    pub fn Bind(port: u16, is_loopback_only: bool) -> Result<MatchListener> {
+        let listen_ip: Ipv4Addr = network_scope::get_listen_ip(is_loopback_only);
+        let socket: UdpSocket = UdpSocket::bind((listen_ip, port)).map_err(|error| {
             format!(
                 "can't listen for games on UDP port {port} ({error}); join a game by its address"
             )
@@ -763,7 +765,7 @@ mod tests {
 
     #[test]
     fn a_listener_hears_an_announcer() {
-        let mut listener: MatchListener = MatchListener::Bind(TEST_DISCOVERY_PORT).unwrap();
+        let mut listener: MatchListener = MatchListener::Bind(TEST_DISCOVERY_PORT, true).unwrap();
         let target: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, TEST_DISCOVERY_PORT));
         let mut announcer: MatchAnnouncer = MatchAnnouncer::New(target).unwrap();
         let beacon: MatchBeacon =

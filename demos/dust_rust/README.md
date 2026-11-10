@@ -20,6 +20,11 @@ Two players on one Mac: `cargo run --release -- --serve` in one terminal, then
 A team wins by holding `E` on each of the other team's 3 consoles (one per pylon). Default UDP port 47830,
 LAN discovery 47831.
 
+`WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it listens
+on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for network
+permission and `--join auto` finds only servers on this computer. Every test run uses it (`cargo test` without
+it); leave it unset to play across computers.
+
 ## Match flags
 
 | Flag | Meaning |

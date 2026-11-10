@@ -23,6 +23,7 @@ use warped_shared::match_protocol::{
     LevelEntry, MATCH_PORT, MatchClient, MatchListener, MatchView,
 };
 use warped_shared::match_state::Team;
+use warped_shared::network_scope;
 use warped_shared::page::{Shape, get_page_point};
 use warped_shared::player_settings::PerPlayerSettings;
 
@@ -168,7 +169,11 @@ impl App {
             levels,
             manifest_path: manifest_path.to_path_buf(),
             pictures,
-            listener: MatchListener::Bind(ports.discovery_port).map_err(|error| error.to_string()),
+            listener: MatchListener::Bind(
+                ports.discovery_port,
+                cfg!(test) || network_scope::is_loopback_only(),
+            )
+            .map_err(|error| error.to_string()),
             client: None,
             hosted: None,
             hosted_team: None,

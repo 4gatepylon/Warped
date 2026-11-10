@@ -20,7 +20,7 @@
 use std::error::Error;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -28,6 +28,8 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use crate::match_state::{MatchState, Team};
+use crate::net;
+use warped_shared::network_scope;
 use warped_shared::match_protocol::{
     CLIENT_TIMEOUT_S, MAX_DATAGRAM_BYTES, MatchAnnouncer, MatchBeacon, parse_hello, parse_play,
 };
@@ -145,7 +147,8 @@ pub fn serve_match(
     match_port: u16,
     level_port: u16,
 ) -> Result<MatchState> {
-    let socket: UdpSocket = UdpSocket::bind(("0.0.0.0", match_port))
+    let listen_ip: Ipv4Addr = network_scope::get_listen_ip(net::is_loopback_only());
+    let socket: UdpSocket = UdpSocket::bind((listen_ip, match_port))
         .map_err(|error| format!("can't use UDP port {match_port} for the match: {error}"))?;
     socket.set_read_timeout(Some(Duration::from_millis(SOCKET_TIMEOUT_MS)))?;
     let mut state: MatchState = MatchState::New(levels.len());
@@ -158,7 +161,7 @@ pub fn serve_match(
     let mut round_result_path: Option<PathBuf> = None;
     let mut free_round_total: usize = 0;
     let mut buffer: Vec<u8> = vec![0; MAX_DATAGRAM_BYTES];
-    let mut announcer: MatchAnnouncer = MatchAnnouncer::OnNetwork()?;
+    let mut announcer: MatchAnnouncer = MatchAnnouncer::OnNetwork(net::is_loopback_only())?;
     println!("Match server on UDP port {match_port}; levels on port {level_port}.");
     loop {
         let received: Option<(usize, SocketAddr)> = match socket.recv_from(&mut buffer) {

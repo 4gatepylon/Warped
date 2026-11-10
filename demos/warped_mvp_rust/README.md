@@ -85,6 +85,10 @@ expiry, a listener hearing an announcer on UDP 48301), the play messages and fre
 crate tests that a match server switches levels on the game master's word and everyone follows (a
 fake level program, UDP 48302 and 48303).
 
+Tests listen for beacons on 127.0.0.1 only. `WARPED_LOOPBACK_ONLY=1 make run-warped` keeps the app, the match
+server it hosts and every level and bot on this computer, so testing it never makes macOS ask for network
+permission; without it the app finds and hosts games on the local network.
+
 ## Folders
 
 `cargo` writes to `.build/` (`make clean`). `.artifacts/warped/<run_id>/` holds the logs of the
