@@ -17,6 +17,7 @@
 //! - `--label <label>`: a suffix for the run folder's name.
 //! - `--exit-after-s <s>`: close the window after that many seconds (to check it starts).
 //! - `--print-level-programs`: print the levels `make package-mac-app` puts in the app, and exit.
+//! - `--loopback-only`: listen for games on 127.0.0.1 only (checks; nothing open to the network).
 //!
 //! Example: `warped --width-px 2560 --height-px 1440`
 //!
@@ -109,6 +110,10 @@ struct Arguments {
     /// its map picture (`-` for none), tab-separated, one a line; and exit.
     #[arg(long)]
     print_level_programs: bool,
+    /// Listen for games on 127.0.0.1 only, with nothing open to the network (checks and tests;
+    /// hosted games still announce themselves).
+    #[arg(long)]
+    loopback_only: bool,
 }
 
 /// `print_level_programs` prints the levels `make package-mac-app` builds and puts in the app (see
@@ -406,6 +411,7 @@ fn main() -> Result<()> {
         match_port: arguments.match_port,
         level_port: arguments.level_port,
         discovery_port: arguments.discovery_port,
+        is_loopback_only: arguments.loopback_only,
     };
     let app: App = App::New(
         levels,
