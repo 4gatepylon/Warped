@@ -15,8 +15,7 @@ use std::time::{Duration, Instant};
 
 use clap::ValueEnum;
 use glam::{DMat3, DMat4, DQuat, DVec3, Mat4};
-use objc2_core_foundation::CGSize;
-use objc2_metal::MTLPixelFormat;
+use objc2::Message;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use serde_json::json;
@@ -25,14 +24,18 @@ use super::{
     Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, GUN_POSE_PER_S,
     Gun, HELD_MAP_DIM_FRAC, MAP_AREA_MAX_EXCL_MASK_PX, MAP_AREA_MIN_MASK_PX, MENU_DIM_FRAC,
     MENU_HEIGHT_FRAC, MENU_MASK_PX, MS_PER_S, OverlayText, PICTURE_PX_PER_MASK_PX,
-    PLAYER_SETTINGS_HOME_PATH, Picture, Renderer, RendererKind, Result, RouteKind, WINDOW_TITLE,
-    find_lan_address, get_crosshair_rects, get_server_address, get_sway, load_settings,
-    make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
+    PLAYER_SETTINGS_HOME_PATH, Picture, Renderer, RendererKind, Result, RouteKind, Sampling,
+    WINDOW_TITLE, find_lan_address, get_crosshair_rects, get_server_address, get_sway,
+    load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
 };
+use warped_shared::app::{LevelEnd, LevelWindow};
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
 };
+use warped_shared::level_loop::{LevelFrames, play_frames};
+use warped_shared::match_state::Team;
+use warped_shared::metal_window::{MetalWindow, NoMatchLink, WindowOptions};
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
 use warped_shared::shot_noise::ShotNoise;
 use warped_shared::third_person::{ThirdPersonCamera, place_camera_flat};
@@ -2189,58 +2192,129 @@ fn get_percentile_ms(values: &[f64], frac: f64) -> f64 {
 }
 
 /// `play` opens the window and runs the game until it closes (or the route ends).
+///
+/// Example: `play(&arguments, metal)?;`
 fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Result<()> {
-    let sdl: sdl3::Sdl = sdl3::init()?;
-    let video: sdl3::VideoSubsystem = sdl.video()?;
     let mut session: CitySession = CitySession::New(arguments)?;
-    let mut builder: sdl3::video::WindowBuilder =
-        video.window(WINDOW_TITLE, arguments.width_px, arguments.height_px);
-    builder.high_pixel_density().resizable().position_centered();
-    let flags: u32 = builder.window_flags() | sdl3::sys::video::SDL_WINDOW_METAL.0 as u32;
-    let mut window: sdl3::video::Window = builder.set_window_flags(flags).build()?;
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
-    let view: sdl3::sys::metal::SDL_MetalView =
-        unsafe { sdl3::sys::metal::SDL_Metal_CreateView(window.raw()) };
-    if view.is_null() {
-        return Err(format!("SDL: couldn't make a Metal view: {}", sdl3::get_error()).into());
-    }
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DANGLING LAYER WILL HAPPEN
-    let layer: &CAMetalLayer =
-        unsafe { &*sdl3::sys::metal::SDL_Metal_GetLayer(view).cast::<CAMetalLayer>() };
-    layer.setDevice(Some(metal.get_device()));
-    layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
-    layer.setFramebufferOnly(false);
-    layer.setDisplaySyncEnabled(!arguments.no_vsync);
+    let mut window: MetalWindow = MetalWindow::Open(
+        WINDOW_TITLE,
+        (arguments.width_px, arguments.height_px),
+        WindowOptions::default(),
+    )?;
+    window.get_layer().setDevice(Some(metal.get_device()));
+    let mut no_match: NoMatchLink = NoMatchLink;
+    let mut level_window: LevelWindow = window.get_level_window(&mut no_match);
+    play_in_window(&mut level_window, arguments, &mut session, metal, true).map(drop)
+}
+
+/// `play_level` plays City Sphere as `arguments` (made from the app's join) say in the app's
+/// window, with a renderer on the window's device, which it frees before it returns.
+///
+/// Example: `let end = city::play_level(&mut level_window, &arguments)?;`
+pub fn play_level(window: &mut LevelWindow, arguments: &Arguments) -> Result<LevelEnd> {
+    viewmodel::check_gun_models()?;
+    let mut session: CitySession = CitySession::New(arguments)?;
+    let mut metal: render_metal::MetalRenderer = render_metal::MetalRenderer::OnDevice(
+        window.device.retain(),
+        arguments.sampling == Sampling::Adaptive,
+    )?;
+    play_in_window(window, arguments, &mut session, &mut metal, false)
+}
+
+/// `play_in_window` loads the renderer's steps and plays `session` in `window` through the frame
+/// loop every level shares (`CityFrames`), until the match's round ends, the player leaves or
+/// closes the window, or the route or `--exit-after-s` ends it. With `is_hud_in_title` (the
+/// program alone), the HUD shows in the window's title.
+///
+/// Example: `let end = play_in_window(&mut level_window, arguments, &mut session, metal, true)?;`
+fn play_in_window(
+    window: &mut LevelWindow,
+    arguments: &Arguments,
+    session: &mut CitySession,
+    metal: &mut render_metal::MetalRenderer,
+    is_hud_in_title: bool,
+) -> Result<LevelEnd> {
+    window.layer.setDisplaySyncEnabled(!arguments.no_vsync);
     for step in render_metal::get_loading_steps(false) {
         metal.load(*step)?;
     }
-    let mouse: sdl3::mouse::MouseUtil = sdl.mouse();
-    let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
-    let result: Result<()> = (|| loop {
-        let mut phase_start: Instant = Instant::now();
-        let mut phases: [f64; PHASE_COUNT] = [0.0; PHASE_COUNT];
-        let mut lap = |k: usize| {
-            phases[k] = phase_start.elapsed().as_secs_f64() * MS_PER_S;
-            phase_start = Instant::now();
-        };
-        for event in event_pump.poll_iter() {
-            if handle_event(&mut session, event, &window, &mouse)? != PlayOutcome::Play {
-                return Ok(());
-            }
-        }
-        let held: Vec<Action> = {
-            let (keyboard, mouse_state) = (event_pump.keyboard_state(), event_pump.mouse_state());
-            KeyBindings::get_all()
-                .iter()
-                .map(|(action, _)| *action)
-                .filter(|action| {
-                    session
-                        .player_settings
-                        .keys
-                        .is_held(*action, &keyboard, &mouse_state)
-                })
-                .collect()
-        };
+    let mut frames: CityFrames = CityFrames {
+        arguments,
+        session,
+        metal,
+        phase_start: Instant::now(),
+        phases: [0.0; PHASE_COUNT],
+        is_route_over: false,
+        is_done: false,
+    };
+    play_frames(window, &mut frames, is_hud_in_title)
+}
+
+/// `CityFrames` is a City Sphere session and its Metal renderer as the shared frame loop drives
+/// them, with the time each phase of the frame took (`PHASE_NAMES`), whether the played route is
+/// over, and whether it or `--exit-after-s` has ended the game.
+struct CityFrames<'a> {
+    arguments: &'a Arguments,
+    session: &'a mut CitySession,
+    metal: &'a mut render_metal::MetalRenderer,
+    phase_start: Instant,
+    phases: [f64; PHASE_COUNT],
+    is_route_over: bool,
+    is_done: bool,
+}
+
+impl CityFrames<'_> {
+    /// `lap` records the time since the last lap as phase `k` of this frame.
+    ///
+    /// Example: `self.lap(0);`
+    fn lap(&mut self, k: usize) {
+        self.phases[k] = self.phase_start.elapsed().as_secs_f64() * MS_PER_S;
+        self.phase_start = Instant::now();
+    }
+}
+
+impl LevelFrames for CityFrames<'_> {
+    /// `handle_event` passes the event to the session (`handle_event`).
+    ///
+    /// Example: `let outcome = frames.handle_event(event, window, &mouse)?;`
+    fn handle_event(
+        &mut self,
+        event: Event,
+        window: &sdl3::video::Window,
+        mouse: &sdl3::mouse::MouseUtil,
+    ) -> Result<PlayOutcome> {
+        handle_event(self.session, event, window, mouse)
+    }
+
+    /// `is_finished` says whether the route or `--exit-after-s` ended the game in the last
+    /// frame's update.
+    ///
+    /// Example: `if frames.is_finished() { ... }`
+    fn is_finished(&self) -> bool {
+        self.is_done
+    }
+
+    /// `update` takes the held controls (the map, the flashlight, aiming), advances the session,
+    /// and notes when the route or `--exit-after-s` ends the game.
+    ///
+    /// Example: `frames.update(&keyboard, &mouse)?;`
+    fn update(
+        &mut self,
+        keyboard: &sdl3::keyboard::KeyboardState,
+        mouse_state: &sdl3::mouse::MouseState,
+    ) -> Result<()> {
+        let arguments: &Arguments = self.arguments;
+        let session: &mut CitySession = &mut *self.session;
+        let held: Vec<Action> = KeyBindings::get_all()
+            .iter()
+            .map(|(action, _)| *action)
+            .filter(|action| {
+                session
+                    .player_settings
+                    .keys
+                    .is_held(*action, keyboard, mouse_state)
+            })
+            .collect();
         session
             .menu_and_map
             .set_map_held(held.contains(&Action::ShowMap));
@@ -2259,31 +2333,67 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         session
             .weapons
             .update_aim(is_aiming, aim_dt_s, &session.settings.aim);
-        lap(0);
-        session.update(&held)?;
-        lap(1);
+        self.lap(0);
+        self.session.update(&held)?;
+        self.lap(1);
+        let session: &CitySession = &*self.session;
         let now_s: f64 = session.now_s();
-        if session.brain.as_ref().is_some_and(Brain::is_done)
-            || now_s > ROUTE_TIMEOUT_S && session.brain.is_some()
-        {
-            print_route_report(&session, arguments, window.size_in_pixels());
-            return Ok(());
+        self.is_route_over = session.brain.as_ref().is_some_and(Brain::is_done)
+            || now_s > ROUTE_TIMEOUT_S && session.brain.is_some();
+        self.is_done = self.is_route_over || arguments.exit_after_s.is_some_and(|s| now_s > s);
+        Ok(())
+    }
+
+    /// `get_loading_frame_count` gives 0: City Sphere loads its renderer before its loop
+    /// (`play_in_window`).
+    ///
+    /// Example: `assert_eq!(frames.get_loading_frame_count(), 0);`
+    fn get_loading_frame_count(&self) -> usize {
+        0
+    }
+
+    /// `load_step` fails: City Sphere shows no loading frames.
+    ///
+    /// Example: `assert!(frames.load_step(layer, 0).is_err());`
+    fn load_step(&mut self, _: &CAMetalLayer, frame_index: usize) -> Result<()> {
+        Err(
+            format!("City Sphere loads before its loop, so it has no loading frame {frame_index}")
+                .into(),
+        )
+    }
+
+    /// `draw_frame` draws the session's view with its overlay (text, the crosshair and bars, the
+    /// minimap, the gun, the hit effect) into `layer`, records the frame's times, and gives the
+    /// window's title with the HUD every `HUD_PERIOD_S`; once the route has ended it draws
+    /// nothing and prints the route's report instead.
+    ///
+    /// Example: `let title = frames.draw_frame(layer, (2560, 1440))?;`
+    fn draw_frame(
+        &mut self,
+        layer: &CAMetalLayer,
+        window_px: (u32, u32),
+    ) -> Result<Option<String>> {
+        if self.is_done {
+            if self.is_route_over {
+                print_route_report(self.session, self.arguments, window_px);
+            }
+            return Ok(None);
         }
-        if arguments.exit_after_s.is_some_and(|s| now_s > s) {
-            return Ok(());
-        }
-        let window_px: (u32, u32) = window.size_in_pixels();
-        layer.setDrawableSize(CGSize {
-            width: f64::from(window_px.0),
-            height: f64::from(window_px.1),
-        });
+        let now_s: f64 = self.session.now_s();
+        let (session, metal) = (&mut *self.session, &mut *self.metal);
+        let mut phase_start: Instant = self.phase_start;
+        let mut phases: [f64; PHASE_COUNT] = self.phases;
+        let mut lap = |k: usize| {
+            phases[k] = phase_start.elapsed().as_secs_f64() * MS_PER_S;
+            phase_start = Instant::now();
+        };
         let render_px: (usize, usize) = (
             ((f64::from(window_px.0) * session.render_scale) as usize).max(1),
             ((f64::from(window_px.1) * session.render_scale) as usize).max(1),
         );
         let frame: CityFrame = session.pack(render_px);
         lap(2);
-        let text: Option<OverlayText> = get_menu_text(&session).or_else(|| {
+        let text: Option<OverlayText> = get_menu_text(session).or_else(|| {
             session
                 .get_banner_lines()
                 .map(|[title, detail]| OverlayText {
@@ -2314,7 +2424,7 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
             .then(|| render_metal::OverlayMinimap {
                 map_pixels: &session.minimap_base,
                 map_size_px: MINIMAP_MAP_PX,
-                minimap: make_minimap(&session, window_px),
+                minimap: make_minimap(session, window_px),
             });
         let wand = (session.is_spawned && !session.is_own_body_shown()).then(|| {
             let weapons: &Weapons = &session.weapons;
@@ -2365,6 +2475,8 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         lap(4);
         session.frame_count += 1;
         session.phase_ms.push(phases);
+        self.phase_start = Instant::now();
+        let mut title: Option<String> = None;
         if is_shown {
             let gpu_ms: f64 = metal.last_gpu_ms;
             session.record_frame(gpu_ms);
@@ -2375,13 +2487,29 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 let fps: f64 = f64::from(*count) / (now_s - *time_s);
                 let mean_gpu_ms: f64 = *gpu_sum / f64::from(*count);
                 session.hud = (now_s, 0, 0.0);
-                window.set_title(&session.get_hud_title(render_px, fps, mean_gpu_ms))?;
+                title = Some(session.get_hud_title(render_px, fps, mean_gpu_ms));
             }
         }
-    })();
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A LEAKED OR DOUBLE-FREED METAL VIEW WILL HAPPEN
-    unsafe { sdl3::sys::metal::SDL_Metal_DestroyView(view) };
-    result
+        Ok(title)
+    }
+
+    /// `set_match_lines` gives the open menu's MATCH page its lines (`Menu::set_match_lines`).
+    ///
+    /// Example: `frames.set_match_lines(None);`
+    fn set_match_lines(&mut self, lines: Option<Vec<(String, bool)>>) {
+        if let Some(menu) = self.session.menu_and_map.get_menu_mut() {
+            menu.set_match_lines(lines);
+        }
+    }
+
+    /// `get_winner` gives the team City Sphere's server says won, if any (`net::TEAM_NAMES`'
+    /// order: blue, red).
+    ///
+    /// Example: `let winner = frames.get_winner();`
+    fn get_winner(&self) -> Option<Team> {
+        let winner: u32 = self.session.client.game.winner?;
+        Some([Team::Blue, Team::Red][winner as usize])
+    }
 }
 
 /// `handle_event` reacts to one window event and says whether to play on, leave the level (the
