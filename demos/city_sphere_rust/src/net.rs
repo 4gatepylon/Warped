@@ -1176,8 +1176,7 @@ pub fn serve(
         if should_announce
             && last_beacon.is_none_or(|time| time.elapsed().as_secs_f64() >= BEACON_PERIOD_S)
         {
-            if let Err(error) =
-                beacon_socket.send_to(&beacon, beacon_target)
+            if let Err(error) = beacon_socket.send_to(&beacon, beacon_target)
                 && !has_warned_about_beacon
             {
                 has_warned_about_beacon = true;
