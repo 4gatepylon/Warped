@@ -27,9 +27,9 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   `--bot-round-winners`, naming the player's team for 255 rounds), because a round starts only when
   each team has a player. The player is blue; switching team moves the bot. A game with allies but
   no enemies gets the same sitting-out bot.
-- **Bots: up to 4 allies and 5 enemies, at most 7 together** (W-155, play against bots: "5v5 or
-  smth like that"), because a level server takes 8 players (`net::MAX_PLAYER_COUNT`); a full 5v5
-  needs that raised in every level. **Weigh in.** In a game with bots the player is blue, and
+- **Bots: up to 5 allies and 6 enemies** (W-155, play against bots: "5v5 or smth like that"),
+  because a level server takes 12 players (`warped_shared::level_net::MAX_PLAYER_COUNT`: a 5v5 and
+  a spare player each team), 6 a team. **Weigh in.** In a game with bots the player is blue, and
   switching team doesn't move the bots.
 - **The match client passes `--bot-objective` to its rounds' bots** (`consoles` when not given, as
   before), so fighting bots fight.

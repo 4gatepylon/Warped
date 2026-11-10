@@ -233,10 +233,11 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
   just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
   go dark when off. After a win, `Enter` in the server's terminal starts a new game.
-- Up to 8 players. The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
+- Up to 12 players (`warped_shared::level_net::MAX_PLAYER_COUNT`, the same in every level). The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
 - `--join <address> --bot --exit-after-s <seconds>` plays by itself without a window (it walks until another player
-  is within 12 blocks, then turns toward them and fires), to test a game; it saves its view at each hit under
-  `.artifacts/bot/<run_id>/`.
+  is within 12 blocks, then turns toward them and fires), to test a game or to play against. With
+  `--bot-hit-pictures` it also saves its view at each hit under `.artifacts/bot/<run_id>/`; drawing those takes GPU
+  and CPU time from the players on the same computer, so it is off by default (D120).
 
 ## Measure
 

@@ -51,19 +51,22 @@ const BOT_RANGE_M: f64 = 12.0;
 const BOT_WANDER_PX_PER_S: f64 = 120.0;
 const BOT_REJOIN_S: f64 = 2.0;
 const BOT_VIEW_PX: (u32, u32) = (1280, 800);
-const SPAWN_SLOT_COUNT: u32 = 16;
+const SPAWN_SLOTS_PER_RING: u32 = 8;
+const SPAWN_RING_COUNT: u32 = 3;
+const SPAWN_RING_STEP_M: f64 = 2.0;
 const BLIZZARD_MARGIN_M: f64 = 3.0;
 
-/// `get_spawn_player` makes player `id`'s starting player on the house: on a ring around spawn,
-/// facing the middle, at the first bearing (starting from the id's own) at least
-/// `MIN_SPAWN_GAP_M` from every eye in `others`, or the last one tried.
+/// `get_spawn_player` makes player `id`'s starting player on the house: on rings around spawn
+/// `SPAWN_RING_STEP_M` apart from `SPAWN_RING_M`, facing the middle, at the first slot (starting
+/// from the id's own bearing, `SPAWN_SLOTS_PER_RING` a ring) at least `MIN_SPAWN_GAP_M` from every
+/// eye in `others`, or the last one tried.
 ///
 /// Example: `let player = multiplayer::get_spawn_player(&world, 3, &other_eyes);`
 pub fn get_spawn_player(world: &World, id: u32, others: &[DVec4]) -> Player {
     let mut player: Player = Player::AtSpawn(world);
-    for k in 0..SPAWN_SLOT_COUNT {
-        player.frame = world
-            .make_frame_from_spawn(f64::from(id + k) * SPAWN_TURN_RAD, SPAWN_RING_M)
+    for k in 0..SPAWN_SLOTS_PER_RING * SPAWN_RING_COUNT {
+        let ring_m: f64 = SPAWN_RING_M + SPAWN_RING_STEP_M * f64::from(k / SPAWN_SLOTS_PER_RING);
+        player.frame = world.make_frame_from_spawn(f64::from(id + k) * SPAWN_TURN_RAD, ring_m)
             * make_boost(AXIS_Y, EYE_HEIGHT_M / world.curvature_radius_m)
             * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
         let eye: DVec4 = player.frame.col(AXIS_W);

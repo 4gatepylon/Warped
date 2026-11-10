@@ -27,8 +27,12 @@ pub const BEND_CUTOFF_PER_R: f64 = 2.0;
 pub const FOIL_LAMBDA_SQUARED: f64 = 0.25;
 pub const JUMP_RADIUS_PER_THROAT: f64 = 4.5;
 pub const EYE_HEIGHT_M: f64 = 1.7;
-pub const MAX_MOUTH_COUNT: usize = 24;
-pub const MAX_BOX_COUNT: usize = 96;
+/// `MAX_MOUTH_COUNT` is the house shader's mouths: the house map's 6 and 2 for each player, a
+/// multiple of 4 so the shader's `Uniforms` needs no padding.
+pub const MAX_MOUTH_COUNT: usize = (6 + 2 * crate::net::MAX_PLAYER_COUNT).next_multiple_of(4);
+/// `MAX_BOX_COUNT` is the house shader's boxes: the house map's 71, a body for each other player
+/// and 2 markers for each player, with room to spare.
+pub const MAX_BOX_COUNT: usize = 112;
 pub const MAX_CLUSTER_COUNT: usize = 32;
 pub const MATERIAL_SOLID: u32 = 0;
 pub const MATERIAL_GLASS: u32 = 1;

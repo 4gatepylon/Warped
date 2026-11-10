@@ -31,6 +31,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use warped_shared::app_bundle::{get_app_logs_folder, get_app_resources_folder};
+use warped_shared::level_net;
 use warped_shared::match_protocol::stop_child;
 use warped_shared::match_state::Team;
 use warped_shared::network_scope;
@@ -65,10 +66,13 @@ pub enum GameKind {
 }
 
 /// `MAX_ALLY_COUNT`, `MAX_ENEMY_COUNT` and `MAX_BOT_COUNT` bound the bots of a game: a level
-/// takes 8 players, the player and at most 7 bots.
-pub const MAX_ALLY_COUNT: u32 = 4;
-pub const MAX_ENEMY_COUNT: u32 = 5;
-pub const MAX_BOT_COUNT: u32 = 7;
+/// takes `level_net::MAX_PLAYER_COUNT` players (12), half on each team, so the player and up to 5
+/// allies face up to 6 enemies (W-155, play against bots: 5v5 and a spare player each).
+pub const MAX_ALLY_COUNT: u32 = MAX_TEAM_PLAYER_COUNT - 1;
+pub const MAX_ENEMY_COUNT: u32 = MAX_TEAM_PLAYER_COUNT;
+pub const MAX_BOT_COUNT: u32 = MAX_ALLY_COUNT + MAX_ENEMY_COUNT;
+/// `MAX_TEAM_PLAYER_COUNT` is how many players one team has at most, half a level's.
+const MAX_TEAM_PLAYER_COUNT: u32 = level_net::MAX_PLAYER_COUNT as u32 / 2;
 
 /// `BotObjective` is what a bot does in each round: turn off the other team's consoles, or fight.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -581,7 +585,7 @@ mod tests {
                 .is_some_and(|plan| plan.is_sitting_out && plan.team == Team::Red)
         );
         assert_eq!(
-            plan_bots(make(2, MAX_ENEMY_COUNT), Team::Blue).len() as u32,
+            plan_bots(make(MAX_ALLY_COUNT, MAX_ENEMY_COUNT), Team::Blue).len() as u32,
             MAX_BOT_COUNT
         );
     }

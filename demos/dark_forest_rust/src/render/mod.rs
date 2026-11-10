@@ -312,7 +312,7 @@ pub struct ThrownLensMouth {
 
 /// `MAX_THROWN_LENS_MOUTH_COUNT` is how many thrown mouths the lens shows at once (every player's
 /// pair), and `THROWN_LENS_FACE_PX` the side of each face of a thrown mouth's view of the world.
-pub const MAX_THROWN_LENS_MOUTH_COUNT: usize = 16;
+pub const MAX_THROWN_LENS_MOUTH_COUNT: usize = 2 * warped_shared::level_net::MAX_PLAYER_COUNT;
 pub const THROWN_LENS_FACE_PX: usize = 128;
 
 /// `WormholeLens` is what the lens pass needs: every mouth, and `atlas`, the world seen from each
@@ -333,9 +333,9 @@ pub const LENS_FACES: [(Vec3, Vec3); 6] = [
     (Vec3::NEG_Z, Vec3::Y),
 ];
 
-/// `MAX_LENS_MOUTH_COUNT` is how many mouths the lens pass takes, the map's and the thrown ones;
-/// `post.metal`'s `LensUniforms` agrees.
-pub const MAX_LENS_MOUTH_COUNT: usize = 32;
+/// `MAX_LENS_MOUTH_COUNT` is how many mouths the lens pass takes, the map's (Dark Forest has 10)
+/// and every player's thrown ones; `post.metal`'s `LensUniforms` agrees.
+pub const MAX_LENS_MOUTH_COUNT: usize = 40;
 /// `LENS_DEPTH_NEAR_M` and `LENS_DEPTH_FAR_M` bound the lens atlas's alpha: the static world's
 /// distance along each face's axis, log-encoded from 0 at the near bound to 1 at the far bound (and
 /// the sky); `post.metal` decodes it with the same bounds.

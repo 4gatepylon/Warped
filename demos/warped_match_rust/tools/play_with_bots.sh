@@ -8,9 +8,9 @@
 #
 # Interface:
 #     --team <blue|red>: this player's team (default blue).
-#     --allies <count>: bots on this player's team, 0 to 4 (default 0).
-#     --enemies <count>: bots on the other team, 0 to 5 (default 0: play alone); allies and
-#         enemies together at most 7, since a level takes 8 players.
+#     --allies <count>: bots on this player's team, 0 to 5 (default 0).
+#     --enemies <count>: bots on the other team, 0 to 6 (default 0: play alone), since a level
+#         takes 12 players, 6 a team.
 #     --bot-objective <consoles|fight>: what the bots do (default consoles).
 #     --match-port <port>, --port <port>: the match server's and each round's level server's UDP
 #         ports (default 47850, 47852).
@@ -24,9 +24,8 @@
 #     tools/play_with_bots.sh --allies 2 --enemies 3 --bot-objective fight
 set -euo pipefail
 
-readonly MAX_ALLY_COUNT=4
-readonly MAX_ENEMY_COUNT=5
-readonly MAX_BOT_COUNT=7
+readonly MAX_ALLY_COUNT=5
+readonly MAX_ENEMY_COUNT=6
 readonly SIT_OUT_ROUND_COUNT=255
 readonly CRATE_FOLDER="$(cd "$(dirname "$0")/.." && pwd)"
 readonly PROGRAM="$CRATE_FOLDER/.build/release/hyperbolic-wormholes"
@@ -66,9 +65,6 @@ if ! [[ "$ally_count" =~ ^[0-9]+$ ]] || [ "$ally_count" -gt "$MAX_ALLY_COUNT" ];
 fi
 if ! [[ "$enemy_count" =~ ^[0-9]+$ ]] || [ "$enemy_count" -gt "$MAX_ENEMY_COUNT" ]; then
     echo "play_with_bots.sh: --enemies must be 0 to $MAX_ENEMY_COUNT, got $enemy_count. $USAGE" >&2; exit 2
-fi
-if [ $((ally_count + enemy_count)) -gt "$MAX_BOT_COUNT" ]; then
-    echo "play_with_bots.sh: --allies and --enemies add up to at most $MAX_BOT_COUNT (a level takes 8 players), got $((ally_count + enemy_count)). $USAGE" >&2; exit 2
 fi
 case "$bot_objective" in
     consoles|fight) ;;

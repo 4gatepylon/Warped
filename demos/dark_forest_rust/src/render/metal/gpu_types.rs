@@ -49,7 +49,7 @@ pub struct GpuFrameUniforms {
 /// segments, each a start and an end (w: the glow's radius on both); then, for each thrown mouth
 /// after the atlas's rows, its view's slot and the tint (linear RGB) of what shows through it.
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct GpuLensUniforms {
     pub centres: [Vec4; crate::render::MAX_LENS_MOUTH_COUNT],
     pub shapes: [Vec4; crate::render::MAX_LENS_MOUTH_COUNT],
@@ -60,6 +60,25 @@ pub struct GpuLensUniforms {
     pub glow_starts: [Vec4; crate::render::MAX_LENS_GLOW_SEGMENT_COUNT],
     pub glow_ends: [Vec4; crate::render::MAX_LENS_GLOW_SEGMENT_COUNT],
     pub thrown_looks: [Vec4; crate::render::MAX_THROWN_LENS_MOUTH_COUNT],
+}
+
+impl Default for GpuLensUniforms {
+    /// `default` is every field zero; written out because `Default` stops at arrays of 32.
+    ///
+    /// Example: `let uniforms: GpuLensUniforms = GpuLensUniforms::default();`
+    fn default() -> GpuLensUniforms {
+        GpuLensUniforms {
+            centres: [Vec4::ZERO; crate::render::MAX_LENS_MOUTH_COUNT],
+            shapes: [Vec4::ZERO; crate::render::MAX_LENS_MOUTH_COUNT],
+            params: Vec4::ZERO,
+            live_slots: [Vec4::ZERO; crate::render::MAX_LENS_MOUTH_COUNT / 4],
+            movers: [Vec4::ZERO; 16],
+            live_params: Vec4::ZERO,
+            glow_starts: [Vec4::ZERO; crate::render::MAX_LENS_GLOW_SEGMENT_COUNT],
+            glow_ends: [Vec4::ZERO; crate::render::MAX_LENS_GLOW_SEGMENT_COUNT],
+            thrown_looks: [Vec4::ZERO; crate::render::MAX_THROWN_LENS_MOUTH_COUNT],
+        }
+    }
 }
 
 /// `GpuPassUniforms` is the projection that one pass draws with.

@@ -93,6 +93,8 @@ constant int MAX_RECT_PULSE_COUNT = 4;
 constant float RECT_PULSE_REACH_PER_HALF_SIZE = 3.0;
 constant float RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH = 0.5;
 constant float RECT_PULSE_LIGHT_GAIN = 0.6;
+constant int RECT_TILE_PX = __RECT_TILE_PX__;
+constant int BITS_PER_RECT_WORD = 32;
 
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
@@ -210,7 +212,7 @@ constant float TILE_SIDE_COUNT = 4.0;
 constant float TILES_PER_VERTEX = 5.0;
 
 /**
- * @brief `Uniforms` matches the Rust `Uniforms` struct field by field (688 bytes). `row_tints[k]` is the colour of
+ * @brief `Uniforms` matches the Rust `Uniforms` struct field by field (848 bytes). `row_tints[k]` is the colour of
  * the thrown mouth a ray went through to come out in row k + 1, with w = 1 (w = 0 for a map's mouth).
  */
 struct Uniforms {
@@ -2176,6 +2178,7 @@ static float3 read_hit_scene(texture2d<float, access::read> frame, uint2 id, con
     if (p.hit_frac <= 0.0) return sharp;
     float corner = length((float2(id) + 0.5) / float2(size) - 0.5) * M_SQRT2_F;
     float edge = p.hit_frac * smoothstep(1.0 - HIT_EDGE_REACH_FRAC * p.hit_frac, 1.0, corner);
+    if (edge <= 0.0) return sharp;
     float3 sum = sharp;
     for (int k = 0; k < HIT_BLUR_TAP_COUNT; k++) {
         float angle = 2.0 * M_PI_F * float(k) / float(HIT_BLUR_TAP_COUNT);
@@ -2492,6 +2495,20 @@ static bool is_near_rect(constant OverlayRect &rect, float2 at_px, float2 size_p
 }
 
 /**
+ * @brief `get_rect_halo_reach_px` gives how far beyond `rect`'s box its drop shadow and glow reach on an output
+ * `size_px`, in pixels (0 for a rectangle with neither).
+ * @par Example
+ * @code
+ * float reach_px = get_rect_halo_reach_px(rects[i], size_px);
+ * @endcode
+ */
+static float get_rect_halo_reach_px(constant OverlayRect &rect, float2 size_px) {
+    float shadow_px = rect.style.shadow_frac * size_px.y;
+    float glow_px = rect.style.glow_frac * size_px.y;
+    return max(shadow_px * (1.0 + RECT_SHADOW_DROP_PER_BLUR), glow_px * RECT_GLOW_REACH_PER_RADIUS);
+}
+
+/**
  * @brief `get_rect_halo` gives what `rect` casts around itself at pixel centre `at_px`, outside its shape: its drop
  * shadow's opacity (`RECT_SHADOW_OPACITY` at most, `RECT_SHADOW_DROP_PER_BLUR` of the blur below it) in `.a` and its
  * glow's light (its colour fading over `glow_frac` of the height) in `.rgb`.
@@ -2503,7 +2520,7 @@ static bool is_near_rect(constant OverlayRect &rect, float2 at_px, float2 size_p
 static float4 get_rect_halo(constant OverlayRect &rect, float2 at_px, float2 size_px) {
     float shadow_px = rect.style.shadow_frac * size_px.y;
     float glow_px = rect.style.glow_frac * size_px.y;
-    float reach_px = max(shadow_px * (1.0 + RECT_SHADOW_DROP_PER_BLUR), glow_px * RECT_GLOW_REACH_PER_RADIUS);
+    float reach_px = get_rect_halo_reach_px(rect, size_px);
     if (reach_px <= 0.0 || !is_near_rect(rect, at_px, size_px, reach_px)) return float4(0.0);
     float d_px = get_rect_distance_px(rect, at_px, size_px, 0.0);
     float outside = smoothstep(-RECT_EDGE_SOFT_PX, RECT_EDGE_SOFT_PX, d_px);
@@ -2550,6 +2567,83 @@ static float get_pulse_glow(constant OverlayRect &rect, float2 at_px, float2 siz
 }
 
 /**
+ * @brief `is_near_pulse` tells whether `rect`'s pulses (`get_pulse_glow`) may show at some pixel centre within
+ * `margin_px` (in x and in y) of `at_px`: false only where they show at none.
+ * @par Example
+ * @code
+ * if (is_near_pulse(rects[i], tile_middle_px, size_px, RECT_TILE_PX * 0.5)) near_words[0] |= 1u << i;
+ * @endcode
+ */
+static bool is_near_pulse(constant OverlayRect &rect, float2 at_px, float2 size_px, float margin_px) {
+    if (all(rect.pulse.opacities <= 0.0)) return false;
+    float half_height_px = max(rect.pulse.half_height_frac * size_px.y, 1.0);
+    float across_px = at_px.y - (rect.min_frac.y + rect.max_frac.y) * 0.5 * size_px.y;
+    if (abs(across_px) > RECT_PULSE_REACH_PER_HALF_SIZE * half_height_px + margin_px) return false;
+    float along_px = at_px.x + rect.style.slant_x_per_y * across_px;
+    float along_margin_px = margin_px * (1.0 + abs(rect.style.slant_x_per_y));
+    return along_px >= rect.pulse.min_x_frac * size_px.x - along_margin_px &&
+           along_px <= rect.pulse.max_x_frac * size_px.x + along_margin_px;
+}
+
+/**
+ * @brief `get_rect_tile_index` gives where the tile of pixel `id` (a `RECT_TILE_PX` square of the output, `width_px`
+ * wide) stands in `mark_rect_tiles`' buffer: tiles row by row, the top row first.
+ * @par Example
+ * @code
+ * uint2 near_words = tile_rects[get_rect_tile_index(id, out.get_width())];
+ * @endcode
+ */
+static uint get_rect_tile_index(uint2 id, uint width_px) {
+    uint tiles_per_row = (width_px + uint(RECT_TILE_PX) - 1) / uint(RECT_TILE_PX);
+    return id.y / uint(RECT_TILE_PX) * tiles_per_row + id.x / uint(RECT_TILE_PX);
+}
+
+/**
+ * @brief `take_next_rect` takes the lowest rectangle left in `near_words` (a tile's entry of `mark_rect_tiles`' buffer:
+ * bit `i % BITS_PER_RECT_WORD` of word `i / BITS_PER_RECT_WORD` stands for `rects[i]`) out of it and gives its index,
+ * or -1 when none is left, so a loop visits a tile's rectangles in their order.
+ * @par Example
+ * @code
+ * for (int i = take_next_rect(left_words); i >= 0; i = take_next_rect(left_words)) draw(rects[i]);
+ * @endcode
+ */
+static int take_next_rect(thread uint2 &near_words) {
+    int word = near_words[0] != 0 ? 0 : 1;
+    uint bits = near_words[word];
+    if (bits == 0) return -1;
+    near_words[word] = bits & (bits - 1);
+    return word * BITS_PER_RECT_WORD + int(ctz(bits));
+}
+
+/**
+ * @brief `mark_rect_tiles` writes, for each `RECT_TILE_PX` square of the output (`out`, read only for its size), which
+ * of `rects` may touch a pixel of it, into `tile_rects` (`get_rect_tile_index`, `take_next_rect`): a rectangle is marked
+ * where its box, widened by its halo's reach (`get_rect_halo_reach_px`, at least the 1 pixel `get_rect_layer` looks
+ * at), or its pulses (`is_near_pulse`) come within the tile. `apply_overlay` then visits only a pixel's tile's
+ * rectangles, not all of them.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs before `apply_overlay`, one thread per tile.
+ * @endcode
+ */
+kernel void mark_rect_tiles(texture2d<float, access::write> out [[texture(2)]], constant OverlayParams &p [[buffer(0)]],
+                            constant OverlayRect *rects [[buffer(1)]], device uint2 *tile_rects [[buffer(4)]],
+                            uint2 id [[thread_position_in_grid]]) {
+    uint2 middle = id * uint(RECT_TILE_PX) + uint(RECT_TILE_PX) / 2;
+    if (id.x * uint(RECT_TILE_PX) >= out.get_width() || id.y * uint(RECT_TILE_PX) >= out.get_height()) return;
+    float2 size = float2(out.get_width(), out.get_height());
+    float margin_px = float(RECT_TILE_PX) * 0.5;
+    uint2 near_words = uint2(0);
+    for (int i = 0; i < p.rect_count; i++) {
+        float reach_px = max(get_rect_halo_reach_px(rects[i], size), 1.0) + margin_px;
+        if (is_near_rect(rects[i], float2(middle), size, reach_px) || is_near_pulse(rects[i], float2(middle), size, margin_px)) {
+            near_words[i / BITS_PER_RECT_WORD] |= 1u << uint(i % BITS_PER_RECT_WORD);
+        }
+    }
+    tile_rects[get_rect_tile_index(id * uint(RECT_TILE_PX), out.get_width())] = near_words;
+}
+
+/**
  * @brief `get_rect_layer` gives `rect` at pixel centre `at_px` as premultiplied colour and opacity (zero outside it, soft
  * over half a pixel at its edge): its colour shaded from top to bottom by `shade_frac`, a gloss highlight over its top
  * half (inset from its edge by `RECT_GLOSS_INSET_PER_HEIGHT` of its height), then its inner outline.
@@ -2591,7 +2685,8 @@ static float4 get_rect_layer(constant OverlayRect &rect, float2 at_px, float2 si
  * the text's above `OVERLAY_TEXT_LEVEL`) over a picture (blended by its alpha) stretched from `picture_min_mask_px` to
  * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel)
  * when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), the minimap
- * (`draw_minimap`, from `minimap` and the map's picture `minimap_map`), and `rects` over that: first all their shadows
+ * (`draw_minimap`, from `minimap` and the map's picture `minimap_map`), and `rects` over that (only those
+ * `mark_rect_tiles` marked for the pixel's tile in `tile_rects`, which draws the same as all of them): first all their shadows
  * and glows (`get_rect_halo`, the strongest of each), then the rectangles themselves blended in order (`get_rect_layer`),
  * then the bars' pulses (`get_pulse_glow`: tinting toward their colour and adding `RECT_PULSE_LIGHT_GAIN` of it as
  * light) (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the
@@ -2607,7 +2702,8 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
                           texture2d<float, access::read> history_in [[texture(3)]],
                           texture2d<float, access::write> history_out [[texture(4)]],
                           texture2d<float, access::read> picture [[texture(6)]], constant Minimap &minimap [[buffer(3)]],
-                          texture2d<float, access::read> minimap_map [[texture(7)]], uint2 id [[thread_position_in_grid]]) {
+                          texture2d<float, access::read> minimap_map [[texture(7)]],
+                          constant uint2 *tile_rects [[buffer(4)]], uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
     float3 scene = mix(read_stretched_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
     history_out.write(float4(scene, 1.0), id);
@@ -2650,17 +2746,21 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
     float2 at_px = float2(id) + 0.5;
     float shadow_a = 0.0;
     float3 glow = float3(0.0);
-    for (int i = 0; i < p.rect_count; i++) {
+    uint2 near_words = tile_rects[get_rect_tile_index(id, out.get_width())];
+    uint2 left_words = near_words;
+    for (int i = take_next_rect(left_words); i >= 0; i = take_next_rect(left_words)) {
         float4 halo = get_rect_halo(rects[i], at_px, size);
         shadow_a = max(shadow_a, halo.a);
         glow = max(glow, halo.rgb);
     }
     color.rgb = color.rgb * (1.0 - shadow_a) + glow;
-    for (int i = 0; i < p.rect_count; i++) {
+    left_words = near_words;
+    for (int i = take_next_rect(left_words); i >= 0; i = take_next_rect(left_words)) {
         float4 layer = get_rect_layer(rects[i], at_px, size);
         color.rgb = color.rgb * (1.0 - layer.a) + layer.rgb;
     }
-    for (int i = 0; i < p.rect_count; i++) {
+    left_words = near_words;
+    for (int i = take_next_rect(left_words); i >= 0; i = take_next_rect(left_words)) {
         float pulse_glow = get_pulse_glow(rects[i], at_px, size);
         float3 pulse_rgb = rects[i].pulse.color.rgb;
         color.rgb = mix(color.rgb, pulse_rgb, pulse_glow) + pulse_rgb * pulse_glow * RECT_PULSE_LIGHT_GAIN;

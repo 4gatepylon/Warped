@@ -16,6 +16,7 @@
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
+use rayon::prelude::*;
 use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
@@ -44,7 +45,7 @@ use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_heig
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
 pub const MARKER_NAME: &str = "a thrown wormhole";
-const MAX_MARKER_COUNT: usize = 16;
+const MAX_MARKER_COUNT: usize = 2 * crate::net::MAX_PLAYER_COUNT;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
 const BAKED_TERRAIN_REACH_M: f64 = 250.0;
@@ -963,7 +964,9 @@ impl VoxelWorld {
     }
 
     /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
-    /// in `poses` (a clip and a time in it, one per body), squashed to its height share; lasers
+    /// in `poses` (a clip and a time in it, one per body; posed in parallel, a step of
+    /// `POSE_STEP_S` at a time and shared between bodies in the same step, since posing is most of a
+    /// frame with 10 players: W-200, robots posed on the CPU), squashed to its height share; lasers
     /// still hit the shapes. After the
     /// bodies come `corpses` (a feet frame, an avatar colour index and a pose each), only drawn:
     /// lasers pass through them.
@@ -984,18 +987,24 @@ impl VoxelWorld {
             poses.len()
         );
         let mut shared: VoxelWorld = self.clone();
-        for (&(feet, color_index, height_frac), &(clip, time_s)) in bodies.iter().zip(poses) {
-            let posed: MeshModel = self.body.make_squashed(clip, time_s, height_frac);
+        let posed_bodies: Vec<Arc<MeshModel>> = bodies
+            .par_iter()
+            .zip(poses)
+            .map(|(&(_, _, height_frac), &(clip, time_s))| {
+                self.body.get_stepped_pose(clip, time_s, height_frac)
+            })
+            .collect();
+        for (&(feet, color_index, height_frac), posed) in bodies.iter().zip(posed_bodies) {
             shared.add_avatar(feet, color_index, colors, Some(posed), height_frac);
         }
         for &(feet, color_index, (clip, time_s)) in corpses {
-            let posed: MeshModel = self.body.make_posed(clip, time_s);
+            let posed: Arc<MeshModel> = self.body.get_stepped_pose(clip, time_s, 1.0);
             let drawn: Option<(usize, &MeshModel)> = Some((shared.avatar_meshes.len(), &posed));
             let mut corpse: VoxelStructure =
                 make_structure("corpse", feet, shared.shapes.len(), &[], drawn, self.r);
             corpse.avatar_mesh = corpse.mesh.take();
             corpse.body_material = Some(shared.set_avatar_color(color_index, colors));
-            shared.avatar_meshes.push(Arc::new(posed));
+            shared.avatar_meshes.push(posed);
             shared.push_structure(corpse);
         }
         shared
@@ -1011,7 +1020,7 @@ impl VoxelWorld {
         feet: DMat4,
         color_index: usize,
         colors: &[[f32; 3]],
-        posed: Option<MeshModel>,
+        posed: Option<Arc<MeshModel>>,
         height_frac: f64,
     ) {
         let material: u8 = self.set_avatar_color(color_index, colors);
@@ -1026,7 +1035,7 @@ impl VoxelWorld {
         }));
         let body: &[Shape] = &self.shapes[first_shape..];
         let drawn: Option<(usize, &MeshModel)> = posed
-            .as_ref()
+            .as_deref()
             .map(|model| (self.avatar_meshes.len(), model));
         let mut avatar: VoxelStructure =
             make_structure("player", feet, first_shape, body, drawn, self.r);
@@ -1034,7 +1043,7 @@ impl VoxelWorld {
         avatar.body_material = Some(material);
         avatar.avatar_height_frac = height_frac;
         if let Some(model) = posed {
-            self.avatar_meshes.push(Arc::new(model));
+            self.avatar_meshes.push(model);
         }
         self.push_structure(avatar);
     }

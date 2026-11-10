@@ -26,6 +26,7 @@
 //!   crosshair, the hit effect and the banner's lobby and "YOU DIED" lines.
 //! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
 //! - `third_person`: the third-person view's switch, and its boom in flat space.
+//! - `level_net`: how many players a level server takes, and its snapshot's pages.
 //! - `boundary_planes`: how the team boundary planes look and how what is seen through them
 //!   shimmers (W-148, W-149), with their shaders' code.
 //! - `visuals`: a player's brightness, contrast, saturation and gamma, applied to the finished
@@ -71,6 +72,7 @@ pub mod key_bindings;
 pub mod laser_drop;
 #[cfg(target_os = "macos")]
 pub mod level_loop;
+pub mod level_net;
 #[cfg(target_os = "macos")]
 pub mod level_test;
 pub mod map_edge;
