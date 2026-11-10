@@ -9,9 +9,11 @@
 //!
 //! Example: `let warps: Warps = Warps::from_map(&map.warps);`
 
-use glam::{Mat3, Vec3};
+use glam::{DVec3, Mat3, Vec3};
+use warped_shared::gravity::{FlatWarp, get_flat_pull_m_per_s};
 
 use crate::map::{self, Warp};
+use crate::settings::GravitySettings;
 
 /// `HORIZON_PULL_M_PER_S2` is a black hole's pull at its horizon, before the taper to its reach.
 const HORIZON_PULL_M_PER_S2: f32 = 30.0;
@@ -213,6 +215,39 @@ impl Warps {
                     * taper_frac
             })
             .sum()
+    }
+
+    /// `get_walk_pull_m_per_s` gives the pull along the ground (W-144, gravity toward black holes
+    /// and wormholes; `warped_shared::gravity`) of every black hole and mouth, the map's and the
+    /// linked thrown ones, on a body whose middle is at `body_centre_m`, on a level whose walking
+    /// speed is `walk_m_per_s`: a horizon or a walk-in throat is each warp's radius.
+    ///
+    /// Example: `player.pull_m_per_s = warps.get_walk_pull_m_per_s(&settings.gravity, 8.0, centre_m);`
+    pub fn get_walk_pull_m_per_s(
+        &self,
+        gravity: &GravitySettings,
+        walk_m_per_s: f32,
+        body_centre_m: Vec3,
+    ) -> Vec3 {
+        let holes = self.black_holes.iter().map(|hole| FlatWarp {
+            centre_m: hole.centre_m.as_dvec3(),
+            radius_m: f64::from(hole.horizon_radius_m),
+            is_mouth: false,
+        });
+        let mouths = self.mouths.iter().map(|mouth| FlatWarp {
+            centre_m: mouth.centre_m.as_dvec3(),
+            radius_m: f64::from(mouth.throat_radius_m),
+            is_mouth: true,
+        });
+        let warps: Vec<FlatWarp> = holes.chain(mouths).collect();
+        let pull_m_per_s: DVec3 = get_flat_pull_m_per_s(
+            gravity,
+            f64::from(walk_m_per_s),
+            body_centre_m.as_dvec3(),
+            DVec3::Y,
+            &warps,
+        );
+        pull_m_per_s.as_vec3()
     }
 
     /// `is_inside_horizon` tells whether `x` has fallen into a black hole.

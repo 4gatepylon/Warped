@@ -11,7 +11,8 @@
 //!
 //! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`, `set_match_lines`), `MenuOutcome`,
 //! `MenuSettings`,
-//! `Page`, `Scoreboard`, `MENU_PICTURE_PX`, `get_held_map_lines`.
+//! `Page`, `Scoreboard`, `MENU_PICTURE_PX`, `get_held_map_lines`, `get_own_team_lines` (the
+//! scores page's box around this player's team).
 //!
 //! Example: `if menu.handle(Scancode::Escape, &mut menu_settings) == MenuOutcome::Close { ... }`
 //!
@@ -62,6 +63,9 @@ const LOOK_RANGE_RAD_PER_PT: (f32, f32) = (0.0004, 0.01);
 const RENDER_SCALE_STEP_FRAC: f32 = 0.05;
 const RENDER_SCALE_RANGE_FRAC: (f32, f32) = (0.5, 1.0);
 const MAX_SCORE_ROW_COUNT: usize = 14;
+/// `SCORE_ROWS_FIRST_LINE` is the line of the scores page's first player row in `Menu::get_lines`:
+/// under the tab bar, a blank line, the players' count, a blank line and the header.
+const SCORE_ROWS_FIRST_LINE: usize = 5;
 const TEAM_WIDTH: usize = 6;
 const PLAYER_WIDTH: usize = 16;
 const KILLS_WIDTH: usize = 6;
@@ -152,6 +156,41 @@ fn format_score_row(team: &str, player: &str, kills: &str, deaths: &str) -> Stri
     )
 }
 
+/// `sort_scores` gives `scores` in the scores page's order: by team, then by most kills.
+///
+/// Example: `let sorted = sort_scores(scores);`
+fn sort_scores(scores: &[Score]) -> Vec<Score> {
+    let mut sorted: Vec<Score> = scores.to_vec();
+    sorted.sort_by_key(|score| (score.team, Reverse(score.kills), score.id));
+    sorted
+}
+
+/// `get_own_team_lines` gives, for the scores page with the server's scores, this player's team
+/// and the lines its players' rows take in `Menu::get_lines` (first, end excluded), for a box in
+/// the team's colour around them (W-146, pylon squares and own-team box); `None` without scores
+/// or while this player isn't in them.
+///
+/// Example: `let box_lines: Option<(u32, [usize; 2])> = get_own_team_lines(scoreboard);`
+pub fn get_own_team_lines(scoreboard: Scoreboard) -> Option<(u32, [usize; 2])> {
+    let Scoreboard::Scores { scores, own_id } = scoreboard else {
+        return None;
+    };
+    let own_team: u32 = scores.iter().find(|score| Some(score.id) == own_id)?.team;
+    let shown: Vec<Score> = sort_scores(scores)
+        .into_iter()
+        .take(MAX_SCORE_ROW_COUNT)
+        .collect();
+    let first: usize = shown.iter().position(|score| score.team == own_team)?;
+    let count: usize = shown.iter().filter(|score| score.team == own_team).count();
+    Some((
+        own_team,
+        [
+            SCORE_ROWS_FIRST_LINE + first,
+            SCORE_ROWS_FIRST_LINE + first + count,
+        ],
+    ))
+}
+
 /// `get_score_lines` gives the scores page's lines below the tab bar: alone, this player's kills
 /// and deaths; before the server's scores, why there are none; with them, how many players are
 /// on each team, a row per player sorted by team and then by most kills (this player's
@@ -177,8 +216,7 @@ fn get_score_lines(scoreboard: Scoreboard) -> Vec<(String, bool)> {
         Scoreboard::Waiting => return vec![(WAITING_LINE.to_string(), false)],
         Scoreboard::Scores { scores, own_id } => (scores, own_id),
     };
-    let mut sorted: Vec<Score> = scores.to_vec();
-    sorted.sort_by_key(|score| (score.team, Reverse(score.kills), score.id));
+    let sorted: Vec<Score> = sort_scores(scores);
     let team_scores = |team: usize| sorted.iter().filter(move |s| s.team as usize == team);
     let team_counts: Vec<String> = TEAM_NAMES
         .iter()
@@ -401,6 +439,7 @@ mod tests {
     //! | Closing | Escape; not Tab (the held map's key) | `escape_closes_it_and_tab_does_not` |
     //! | Quit page | Return or Y (leave the level), another key (stay); Return elsewhere (no leaving) | `the_quit_page_leaves_the_level` |
     //! | Scoreboard | alone, waiting, scores (two teams, ties in kills, this player known or not) | `the_scores_page_sorts_and_totals` |
+    //! | Own team's rows | alone or waiting, this player not known, on blue (first rows), on red (after blue's) | `the_own_teams_rows_are_found` |
     //! | MATCH page | none (the forest run alone), lines supplied (shown first, in the page turning, its lines), lines changed, removed | `the_match_page_shows_only_with_lines` |
     //! | Fit | every page's lines within the picture's 64 characters and 25 lines | `every_page_fits_the_picture` |
 
@@ -489,6 +528,51 @@ mod tests {
             MenuOutcome::Close
         );
         assert_eq!(menu.handle(Scancode::Tab, &mut settings), MenuOutcome::Stay);
+    }
+
+    #[test]
+    fn the_own_teams_rows_are_found() {
+        let menu: Menu = Menu::New();
+        let alone: Scoreboard = Scoreboard::Alone {
+            kill_count: 1,
+            death_count: 0,
+        };
+        assert_eq!(get_own_team_lines(alone), None);
+        assert_eq!(get_own_team_lines(Scoreboard::Waiting), None);
+        let score = |id: u32, team: u32, kills: u32| Score {
+            id,
+            team,
+            kills,
+            deaths: 0,
+        };
+        let scores: Vec<Score> = vec![
+            score(1, 1, 0),
+            score(2, 0, 1),
+            score(3, 1, 4),
+            score(4, 0, 3),
+        ];
+        let unknown: Scoreboard = Scoreboard::Scores {
+            scores: &scores,
+            own_id: None,
+        };
+        assert_eq!(get_own_team_lines(unknown), None);
+        for (own_id, team, team_name) in [(2, 0, "blue"), (3, 1, "red")] {
+            let scoreboard: Scoreboard = Scoreboard::Scores {
+                scores: &scores,
+                own_id: Some(own_id),
+            };
+            let (own_team, [first, end_excl]) =
+                get_own_team_lines(scoreboard).expect("this player's team");
+            assert_eq!((own_team, end_excl - first), (team, 2));
+            let lines: Vec<(String, bool)> = menu.get_lines(&SETTINGS, scoreboard);
+            assert!(
+                lines[first..end_excl]
+                    .iter()
+                    .all(|(line, _)| line.starts_with(team_name))
+            );
+            assert!(!lines[first - 1].0.starts_with(team_name));
+            assert!(!lines[end_excl].0.starts_with(team_name));
+        }
     }
 
     #[test]

@@ -9,6 +9,7 @@
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
 //! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
+//! - `gravity`: the pull of black holes and wormhole mouths on a player on the ground.
 //! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
@@ -25,6 +26,8 @@
 //! - `app`: the interface between the one-window app (`../warped_mvp_rust/`) and a level.
 //! - `match_state`, `match_protocol`, `match_menu`: the match's rules, what its server and clients
 //!   share (levels file, view, client, network beacon) and its progression page.
+//! - `network_scope`: whether sockets reach the local network or stay on loopback
+//!   (`WARPED_LOOPBACK_ONLY=1`, for tests).
 //! - `page`: a menu page's shapes in the debug font, and drawing them with SDL.
 //! - `level_loop`: the frame loop's skeleton every level shares (`LevelFrames`, `play_frames`),
 //!   how it ends (`app::LevelEnd`), and a level's command line from an `app::LevelJoin`.
@@ -47,6 +50,7 @@ pub mod avatar_model;
 pub mod fps_demo_assets;
 pub mod gait;
 pub mod geometry;
+pub mod gravity;
 pub mod health;
 #[cfg(target_os = "macos")]
 pub mod hud;
@@ -67,6 +71,7 @@ pub mod mesh;
 #[cfg(target_os = "macos")]
 pub mod metal_window;
 pub mod movement;
+pub mod network_scope;
 #[cfg(target_os = "macos")]
 pub mod overlay;
 pub mod page;

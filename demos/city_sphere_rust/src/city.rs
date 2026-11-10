@@ -31,7 +31,8 @@ use super::{
 use warped_shared::app::{LevelEnd, LevelWindow};
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
-    HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
+    HudBars, HudPulses, PylonSquare, get_death_lines, get_lobby_lines, make_bar_rects,
+    make_hit_effect, make_pylon_square_rects,
 };
 use warped_shared::level_loop::{LevelFrames, play_frames};
 use warped_shared::match_state::Team;
@@ -43,12 +44,12 @@ use warped_shared::weapons::{Weapons, take_hit_weight};
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::city_world::{
-    CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,
-    get_up,
+    CityInput, CityPlayer, CityWorld, Console, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M,
+    Target, get_up,
 };
 use crate::city_wormholes::{
     MOUTH_RADIUS_M, can_place_mouth, carry_through, find_crossing, fly_city_throw, get_mouth_frame,
-    land_city_mouth,
+    land_city_mouth, make_mouth_warps,
 };
 use crate::dust::{DustBurst, MAX_DUST_BURST_COUNT};
 use crate::key_bindings::{self, Action, KeyBindings};
@@ -1496,6 +1497,20 @@ impl CitySession {
         self.update_wormholes(now_s);
         if self.is_spawned {
             let before: DVec3 = self.player.feet;
+            let pairs: Vec<[MouthPlace; 2]> = self
+                .thrown
+                .placed
+                .get_pair()
+                .into_iter()
+                .chain(
+                    self.client
+                        .players
+                        .iter()
+                        .filter(|p| Some(p.id) != self.client.id)
+                        .filter_map(|p| p.wormholes.get_pair()),
+                )
+                .collect();
+            self.world.mouths = make_mouth_warps(&pairs);
             self.world.move_player(
                 &mut self.player,
                 &input,
@@ -1683,6 +1698,22 @@ impl CitySession {
             &self.settings.rifle,
             &self.hud_pulses,
         )
+    }
+
+    /// `get_pylon_square_rects` gives the row of squares at the top centre of a window of
+    /// `window_px`, one per console, dark once off, with a box around this player's team's
+    /// (`make_pylon_square_rects`; W-146, pylon squares and own-team box).
+    fn get_pylon_square_rects(&self, window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> {
+        let mut consoles: Vec<&Console> = self.world.consoles.iter().collect();
+        consoles.sort_by_key(|console| console.index);
+        let pylons: Vec<PylonSquare> = consoles
+            .iter()
+            .map(|console| PylonSquare {
+                team: console.team,
+                is_off: self.client.game.off_mask >> console.index & 1 == 1,
+            })
+            .collect();
+        make_pylon_square_rects(&pylons, self.client.team, window_px)
     }
 
     /// `get_mouth_pairs` gives every linked pair of wormhole mouths in the game, this player's and
@@ -2417,6 +2448,7 @@ impl LevelFrames for CityFrames<'_> {
         };
         if session.is_spawned && !session.menu_and_map.is_menu_open() {
             rects.extend(session.get_bar_rects());
+            rects.extend(session.get_pylon_square_rects(window_px));
         }
         let minimap = (session.is_spawned
             && session.menu_and_map.get_cover() == Cover::Nothing
@@ -2681,12 +2713,16 @@ fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
     };
     let mut lines: Vec<(String, bool)> =
         menu.get_lines(&session.player_settings, &save_path, scoreboard);
-    let picture: Option<Picture> = if menu.get_page() == menu::Page::Map {
-        lines.truncate(1);
-        lines.push((CITY_MAP_LEGEND.to_string(), false));
-        Some(make_map_picture(session))
-    } else {
-        None
+    let picture: Option<Picture> = match menu.get_page() {
+        menu::Page::Map => {
+            lines.truncate(1);
+            lines.push((CITY_MAP_LEGEND.to_string(), false));
+            Some(make_map_picture(session))
+        }
+        menu::Page::Scores => {
+            menu::get_own_team_lines(scoreboard).map(super::make_team_box_picture)
+        }
+        _ => None,
     };
     Some(OverlayText {
         lines,
@@ -3617,7 +3653,7 @@ fn find_bot_aim(
 /// (`make_console_route`); if it can't aim at the console for `CONSOLE_REPLAN_S` (it fell off the
 /// glass level, say), it starts the walk again from its stairs.
 fn run_bot(arguments: &Arguments) -> Result<()> {
-    let world: CityWorld = CityWorld::Builtin()?;
+    let mut world: CityWorld = CityWorld::Builtin()?;
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         MAP_NAME,
@@ -3682,6 +3718,12 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
             continue;
         }
         weapons.tick(dt_s);
+        let pairs: Vec<[MouthPlace; 2]> = client
+            .players
+            .iter()
+            .filter_map(|p| p.wormholes.get_pair())
+            .collect();
+        world.mouths = make_mouth_warps(&pairs);
         let mut disabling: Option<u8> = None;
         if arguments.bot_objective == Some(BotObjective::Consoles) {
             if brain.is_done() {

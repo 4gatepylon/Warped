@@ -215,6 +215,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
   (the Terminal, say) when asked; without it, other computers can't reach the game and `auto` finds nothing.
+- `WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it
+  listens on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for
+  network permission. Every test run uses it (`cargo test` without it); leave it unset to play across computers.
 - Joining opens a lobby with each team's head count; `1` joins blue and `2` joins red (bots join the smaller team).
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
@@ -280,6 +283,11 @@ GPU).
 - [`../warped_shared_rust/`](../warped_shared_rust/README.md): the code every Rust level shares, used as a
   library: `geometry.rs`, the gun held in hand (`viewmodel.rs`), the HUD's bars and overlay types, the maps'
   models and the robot body, the smooth shapes, the key bindings, and finding assets.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): `VoxelPlayer::step` adds the pull
+  of every black hole and wormhole mouth, the map's and the linked thrown ones (`VoxelWorld::get_warp_pull_m_per_s`,
+  along the geodesic to each, across the body's up), to the walk: faster toward a warp, slower away, a slow drift
+  standing still. Bots step by the same rule.
 - `thrown_wormholes.rs`: each player's purple and green mouths: the lobbed throw, where a mouth hovers once down,
   and which colour is next. Each map adds the linked pairs as mouths of its own (after the map's), and
   `net.rs` sends every player's mouths in each snapshot.

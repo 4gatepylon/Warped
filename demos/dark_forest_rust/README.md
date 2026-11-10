@@ -68,12 +68,22 @@ with glows that run along a bar while it changes; Lunar's crosshair; the console
 held on an enemy console; red, blurred edges and a shake when you take any damage; and "YOU DIED" with the respawn
 countdown.
 
+`WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it listens
+on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for network
+permission and `--join auto` finds only servers on this computer. Every test run uses it (`cargo test` without
+it); leave it unset to play across computers.
+
 ## The level
 
 - **Map:** [`../../common/maps/dark_forest/map.json`](../../common/maps/dark_forest/map.json), written by
   `src/forest_layout.rs` (`make export-map`, compact JSON, 8.6 MB) and read by both the game and the server. It is
   60 m by 112 m, fenced by rock walls. Red's base is at +z and blue's is red's turned half a turn about the centre, so
   the two sides are the same.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): every wormhole mouth, the map's
+  gates and the linked thrown ones, pulls the player's middle along the ground (`Warps::get_walk_pull_m_per_s`, set as
+  `Player::pull_m_per_s` before each `update`, added to the walk off ladders): faster toward a mouth, slower away, a
+  slow drift standing still, stopping at the throat. The offline bots add the same pull to their walk.
 - **Bamboo labyrinth:** `add_labyrinth` carves red's half into a seeded maze of 4 m cells (a winding depth-first tree
   plus about 12% extra openings for loops, so there are dead ends and loops), grows a wall of bamboo clumps on every
   closed side where nothing else stands, and mirrors it onto blue's half. Corridors are about 1.5-3 m wide. The seed
@@ -109,6 +119,18 @@ countdown.
   bundles.
 - **Map page:** the map shown while `Tab` is held, and the menu's map page (`Esc`, then E), is `assets/map_picture.png`, a photo of the forest from straight
   above made by `make map-picture`, with live marks over it; without it the page shows the old drawing.
+
+## In the one-window app
+
+The crate is a library too (W-141, one window for the whole game; DECISIONS.md D45): `warped_dark_forest::play_level`
+is a `warped_shared::app::play_level_fn_t`, which the one-window app (`../warped_mvp_rust/`) calls with its own window,
+Metal layer and device, the level server's address and the team. It plays as `dark-forest --join <server> --team <team>
+--no-title` would (plus the levels manifest's `--map` and client flags), shows the app's lines on the menu's MATCH page,
+and returns when the round is over, the QUIT page is confirmed (`LeaveLevel`) or the window is closed (`CloseWindow`),
+having freed its GPU resources and given the layer back as it found it. `src/lib.rs` holds the entry point,
+`src/level.rs` the level (`Level::Load`, `run_title_screen`, `play`), `src/args.rs` the flags, and `src/main.rs` opens
+a window and plays the level alone. `cargo test --test play_twice -- --ignored` plays it twice in one process in a
+hidden window (it needs the GPU), leaving each time from the QUIT page, and checks that the GPU memory comes back.
 
 ## Match interface
 
@@ -232,7 +254,7 @@ started or the frame before it ended, whichever is later, to when it ended.
 - `src/console_reach.rs`: who may hold `E` on a console (in reach and aimed at), for the server and the windows.
 - `src/game/console_bot.rs`: the bots' walking, along `src/game/nav.rs`'s paths and up and down the ladders.
 - `src/match_play.rs`: consoles, the win, and the online client (state, hits, remote robots).
-- `src/shaders/post.metal` (`get_lens_color`) and `capture_wormhole_lens` in `src/main.rs`: the wormhole lens pass.
+- `src/shaders/post.metal` (`get_lens_color`) and `capture_wormhole_lens` in `src/level.rs`: the wormhole lens pass.
 - `src/net.rs`, `src/server.rs`, `src/bin/dark_forest_server.rs`: the UDP server and protocol, copied from the
   hyperbolic demo.
 - `../warped_shared_rust/` (a library this crate depends on): the HUD's bars, crosshair and hit effect, the overlay

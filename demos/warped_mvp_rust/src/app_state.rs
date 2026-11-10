@@ -23,6 +23,7 @@ use warped_shared::match_protocol::{
     LevelEntry, MATCH_PORT, MatchClient, MatchListener, MatchView,
 };
 use warped_shared::match_state::Team;
+use warped_shared::network_scope;
 use warped_shared::page::{Shape, get_page_point};
 use warped_shared::player_settings::PerPlayerSettings;
 
@@ -54,12 +55,14 @@ const CREDITS_LINES: [&str; 9] = [
 ];
 
 /// `Ports` is the UDP ports a game this app hosts uses (its match server's, and each round's
-/// level server's) and the port it listens on for games on the network.
+/// level server's), the port it listens on for games on the network, and whether it listens on
+/// the loopback interface alone (tests: nothing open to the network).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ports {
     pub match_port: u16,
     pub level_port: u16,
     pub discovery_port: u16,
+    pub is_loopback_only: bool,
 }
 
 /// `parse_address` reads a typed match server address, an IP address with an optional `:port`
@@ -168,7 +171,11 @@ impl App {
             levels,
             manifest_path: manifest_path.to_path_buf(),
             pictures,
-            listener: MatchListener::Bind(ports.discovery_port).map_err(|error| error.to_string()),
+            listener: MatchListener::Bind(
+                network_scope::get_listen_ip(ports.is_loopback_only),
+                ports.discovery_port,
+            )
+            .map_err(|error| error.to_string()),
             client: None,
             hosted: None,
             hosted_team: None,
@@ -265,6 +272,7 @@ impl App {
             kind,
             team.unwrap_or(Team::Blue),
             (self.ports.match_port, self.ports.level_port),
+            self.ports.is_loopback_only,
             &folder,
         )
         .map_err(|error| error.to_string())?;
@@ -716,6 +724,7 @@ mod tests {
             match_port: 48_308,
             level_port: 48_309,
             discovery_port,
+            is_loopback_only: true,
         };
         let path: PathBuf =
             std::env::temp_dir().join("warped_app_test_settings_never_written.yaml");
