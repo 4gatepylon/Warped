@@ -111,8 +111,6 @@ is in [`AGENTS.md`](AGENTS.md).
   pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
 - [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
   play but has a dashboard where they can change or reset those settings.
-- [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
-  dark.
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
 - [?] **W-139 Dark Forest thrown-wormhole sheet.** A bug found by agents on 2026-11-09: in Dark Forest's `spawn` view, a hard straight-edged sheet covers part of a thrown wormhole's lens (upper right), like a clipping glitch in the lens capture.
   #478: it was red's lift mouth on its deck, its lens reaching through the deck; no lens is drawn from below a
@@ -138,6 +136,13 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
+- [?] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
+  dark. The user, 2026-11-09: "it should be super basic (i.e. something can be implemnted on the raster render instead
+  of actually on the 3d world)".
+  #516: brightness, contrast, saturation and gamma of the finished picture in every level (Lunar Surface, the match,
+  Dust, Snow Planet, City Sphere, Dark Forest), in screen space after tone mapping; `visuals` in
+  `player_settings.yaml` (each 1 for none, leaving every pixel as before), four rows on the SETTINGS page (Dark
+  Forest: for the run, and `--brightness` and the like).
 - [?] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
   #486: in every level (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest): holding `Tab`
   shows the map over the game while play goes on; `Esc` opens the menu (freeing the mouse), `Esc` again closes it;
