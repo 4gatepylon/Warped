@@ -86,25 +86,26 @@ progression page" for the MATCH page.
 
 ## The HUD
 
-**HUD** (heads-up display): the flat elements drawn on top of the level view while a player plays. *Proposed.* It
-is these and nothing else:
+**HUD** (heads-up display): the information a player sees while walking normally, drawn on top of the level view:
+the health, energy and ammo bars in the bottom left, and the minimap. The map itself is not the HUD. *Confirmed by
+the player, 2026-11-10.*
 
 | Part | What it is |
 | --- | --- |
-| **crosshair** | The mark in the middle of the screen. Shots leave the eye toward it. |
-| **bars** | In the bottom left: the **health bar**, the **ammo bar** (the sniper rifle's reload, the rifle's heat) and the **energy bar** (sprint). |
-| **console bar** | Below the crosshair; it fills while the player holds `E` on a console. |
+| **health bar**, **ammo bar**, **energy bar** | The bars in the bottom left: health, the sniper rifle's reload or the rifle's heat, and sprint energy. |
 | **minimap** | A disk in a corner (top right by default) showing the ground within 60 m, with players as dots and shots as lines. |
-| **readouts** | Text lines of numbers, such as speed, height, or how fast the player's time runs near a black hole. |
+| **crosshair**, **console bar**, **readouts** | The mark in the middle of the screen, where shots leave the eye toward; the bar below it that fills while the player holds `E` on a console; and text lines of numbers, such as speed, height, or how fast the player's time runs near a black hole. *Proposed* as HUD, because a player sees them while walking normally; the player hasn't named them. |
 
-The HUD shows while a player is in a level, in first or third person. It does not show on the main menu, the game
+The HUD shows during normal play, while a player walks around a level. It does not show on the main menu, the game
 menu, the loading screen or the credits, which are not in a level.
 
-These are not the HUD, and each has its own name: the **held weapon**, the **hit effect** (red and a blur from the
-screen's edges, with a shake), **motion blur**, **head bob**, **banners**, the **menu** and its pages, the **MAP
-page**, the **window title**, and everything inside the level (robots, lasers, mouths, pylons, consoles).
+These are not the HUD, and each has its own name: the **MAP page** (the whole level from above, in the menu or while
+`Tab` is held), the **held weapon**, the **hit effect** (red and a blur from the screen's edges, with a shake),
+**motion blur**, **head bob**, **banners**, the **menu** and its other pages, the **window title**, and everything
+inside the level (robots, lasers, mouths, pylons, consoles).
 
-Where the HUD shows when a menu, the `Tab` map or a banner is on screen is not settled: see the questions.
+Where the HUD shows when the menu, the `Tab` map, a banner or the lobby is on screen is not settled: see the
+questions.
 
 Retired: "mini map" and "mini-map" for the minimap, "player icons" for the minimap's dots.
 
@@ -152,10 +153,10 @@ hole above the middle, a crater wall as its level edge, and bunkers, domes and a
 
 ## Questions for the player
 
-1. **HUD's parts.** Is the **minimap** part of the HUD? And are the **held weapon** and the **hit effect** not?
-   Proposed: the minimap is, the other two are not.
-2. **HUD's visibility.** Is the HUD drawn behind the open **menu**, while `Tab` holds the **MAP page** over the
-   game, while the player is dead (under YOU DIED), and in the **lobby**? Proposed: shown in none of these.
+1. **HUD's other parts.** Are the **crosshair**, the **console bar** and the **readouts** part of the HUD?
+   Proposed: yes, since a player sees them while walking normally.
+2. **HUD's visibility.** Does the HUD stay on screen behind the open **menu**, under the `Tab` map, while the
+   player is dead (under YOU DIED), and in the **lobby**? Proposed: shown in none of these.
 3. **Game and match.** When a game starts it becomes a match: is *start* the right word, and what should the
    finished match's game be called, if anything? After a win, DESIGN.md says "a new game starts"; should that read
    "a new game is created, and starts as a match"?
