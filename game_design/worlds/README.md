@@ -17,6 +17,7 @@ One file per level, in the map's order from blue to red:
 - [Snow Planet](snow_planet.md)
 - [City Sphere](city_sphere.md)
 - [Dark Forest](dark_forest.md)
+- [Lunar Surface](lunar_surface.md)
 
 ## Naming rules
 
