@@ -25,6 +25,7 @@ terms.
 - [Pages and SWGs on the window](#pages-and-swgs-on-the-window)
 - [World objects](#world-objects)
 - [Worlds](#worlds)
+- [Moving and looking](#moving-and-looking)
 
 ## Structure of play
 
@@ -228,3 +229,16 @@ entity.
 Each level's world, with every object's name, is in [`worlds/`](worlds/README.md): one file per level, with its zones,
 its named objects and marked map pictures. An object's name there is its official name, such as "blue left pylon" or
 "blue hesco wall 3". The naming rules are in that folder's README.
+
+## Moving and looking
+
+| Say | Meaning | Might be called by the user |
+| --- | --- | --- |
+| **walk**, **sprint**, **crouch**, **jump** | The ways a player moves on the ground. Sprinting (`Shift`) is twice as fast as walking and uses energy, crouching (`Ctrl`) lowers the eye and halves the walking speed, and a jump (`Space`) gets a player onto a 1 m block. | "run" for sprint, "jog" for walk |
+| **aim** | Holding the right mouse button: the view zooms in, more with the sniper rifle, and turns more slowly. | |
+| **first person**, **third person** | The two views `V` switches between: from the player's eye, and from slightly behind and above the player's bot sprite. In both, shots leave the eye toward the crosshair. | "third-person view" |
+| **head bob** | The view moving up and down with each step. | "head bobbing" |
+| **gun sway** | The gun in hand swinging with each step. | "the way the gun moves" |
+| **flashlight** | A cone of light from the player's eye while `F` is held. Other players don't see it yet. | |
+| **deactivate** | To turn a console off: hold `E` for 10 s while aiming at it from within 3 m. Letting go, or aiming away, resets its progress. | "capture", "disable" |
+| **throw** | To send out one of the player's two wormhole mouths with `Q`. A throw that doesn't land within its flight time, or lands too close to a wall or another warp object, **fizzles**, and can be thrown again. | |
