@@ -31,7 +31,8 @@ use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
     GravitySettings, MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings,
-    SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
+    ShootingSettings, SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings,
+    WormholeSettings,
 };
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
@@ -130,6 +131,8 @@ pub struct ServerSettings {
     pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
@@ -443,6 +446,7 @@ mod tests {
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | `gravity` section (W-144) | left out (every file before it, built in: the shared values), one key (the others shared), 0 pull (allowed: none), pull of walking speed or more, full pull past its reach, a misspelt key (each fails) | `gravity_defaults_and_overrides` |
     //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | `shooting` section | present (built in, the old rules), missing in an old file (the old rules), a misspelt key (fails) | `shooting_switches_default_to_the_old_rules` |
     //! | Respawn section | the growing rule (built in), an old file's flat `delay_s` (loads, flat), a negative wait (fails, naming it) | `builtin_settings_read_and_survive_json`, `an_old_flat_respawn_delay_still_loads` |
 
     use super::*;
@@ -482,6 +486,28 @@ mod tests {
             .expect_err("a negative wait fails")
             .to_string();
         assert!(error.contains("respawn.start_s"), "{error}");
+    }
+
+    #[test]
+    fn shooting_switches_default_to_the_old_rules() {
+        assert_eq!(
+            ServerSettings::Builtin().shooting,
+            ShootingSettings::default()
+        );
+        let start: usize = BUILTIN_SERVER_YAML
+            .find("\nshooting:")
+            .expect("a shooting section");
+        let end: usize = start + BUILTIN_SERVER_YAML[start..].find("\n\n").expect("its end");
+        let old_yaml: String = format!(
+            "{}{}",
+            &BUILTIN_SERVER_YAML[..start],
+            &BUILTIN_SERVER_YAML[end..]
+        );
+        let old: ServerSettings = ServerSettings::FromYaml(&old_yaml, "old").expect("an old file");
+        assert_eq!(old.shooting, ShootingSettings::default());
+        let typo_yaml: String =
+            BUILTIN_SERVER_YAML.replace("  is_friendly_fire_on:", "  is_friendly_fire:");
+        assert!(ServerSettings::FromYaml(&typo_yaml, "typo").is_err());
     }
 
     #[test]

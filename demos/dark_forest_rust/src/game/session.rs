@@ -45,6 +45,7 @@ use warped_shared::hud::{
     AmmoBar, HudBars, HudPulses, PylonSquare, make_hit_effect, make_pylon_square_rects,
 };
 use warped_shared::movement::get_crouched_height_frac;
+use warped_shared::shot_gate::ShotMoves;
 use warped_shared::third_person::{ThirdPersonCamera, ViewSwitch, place_camera_flat};
 use warped_shared::weapons::take_hit_weight;
 
@@ -226,7 +227,6 @@ pub struct Session {
     pub weapons: Weapons,
     pub settings: ServerSettings,
     pub movement: Movement,
-    since_movement_key_s: f32,
     pub bots: Vec<Bot>,
     pub view_switch: ViewSwitch,
     own_body: Bot,
@@ -389,7 +389,6 @@ impl Session {
             nav,
             weapons: make_weapons(ShotNoise::FromClock()),
             movement,
-            since_movement_key_s: 0.0,
             settings: ServerSettings::Builtin(),
             bots,
             view_switch: ViewSwitch::FirstPerson(),
@@ -1288,11 +1287,13 @@ impl Session {
         }
         let is_walking_upright: bool =
             controls.player.move_axes != Vec2::ZERO && !controls.player.is_crouch_held;
-        self.since_movement_key_s = if is_walking_upright || controls.player.is_jump_pressed {
-            0.0
-        } else {
-            self.since_movement_key_s + dt_s
+        let shot_moves: ShotMoves = ShotMoves {
+            is_jumping: controls.player.is_jump_pressed,
+            is_walking_upright,
+            is_sprinting: self.player.moves.is_sprinting,
         };
+        self.weapons
+            .note_moves(&shot_moves, &self.settings.shooting, f64::from(dt_s));
         self.last_health = self.player.health;
         let bars: HudBars = self.get_hud_bars();
         self.hud_pulses
@@ -1358,7 +1359,7 @@ impl Session {
         let can_shoot: bool = self.player.is_alive()
             && self.console_hold_frac.is_none()
             && self.winner.is_none()
-            && f64::from(self.since_movement_key_s) >= self.settings.movement.shoot_after_moving_s;
+            && self.weapons.can_shoot(&self.settings.movement);
         let step: GunStep = GunStep {
             is_sprinting: self.player.moves.is_sprinting,
             bob_phase_rad: self.player.moves.bob_phase_rad,
