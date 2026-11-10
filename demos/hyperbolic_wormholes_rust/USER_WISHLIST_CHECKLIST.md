@@ -144,6 +144,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-168 Fading out into a black hole.** The user, 2026-11-09: "a graphical effect where the world gets darker and arker from outside in (and dims broadly, blurring) when you are pulled into a dark hole (NOT worm hole))". Related: W-144 (gravity toward black holes and wormholes).
 - [ ] **W-169 Better sounds.** The user, 2026-11-09: "getting sounds for all the guns etc.. and that the sounds should be better than what they are right now". New sounds come through the adding-assets skill (approval and credits).
 - [ ] **W-170 Wishlist to GitHub issues.** The user, 2026-11-09: "switching from wishlist markdown to github issues". Issues follow the github-issue skill (title format, template, labels); the agents' rules about the wishlist (in each demo's AGENTS.md) would move with it.
+- [ ] **W-171 The game out of demos/.** The user, 2026-11-09: "refactoring the code to not be in demos/ but instead to be in the main location as the main game". Related: the open refactor plan PR #375 (`game/REFACTOR_PLAN.md`: a `game/` workspace with warped-core, client and server), and the one-window app in `demos/warped_mvp_rust/` (W-141 (one window for the whole game)).
 
 ## Pending user review
 
