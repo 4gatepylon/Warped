@@ -159,7 +159,7 @@ pub enum TeamName {
 
 impl TeamName {
     /// `get_index` is the team's index in `net::TEAM_NAMES`.
-    fn get_index(self) -> u32 {
+    pub fn get_index(self) -> u32 {
         match self {
             TeamName::Blue => 0,
             TeamName::Red => 1,

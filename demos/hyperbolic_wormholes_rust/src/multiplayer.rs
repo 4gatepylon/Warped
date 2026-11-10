@@ -18,7 +18,7 @@ use glam::{DMat4, DVec3, DVec4};
 
 use crate::avatar_model::AvatarClip;
 use crate::black_hole_growth::BlackHoleGrowth;
-use crate::console_bot::{FightStep, Fighter, find_warp_dangers};
+use crate::console_bot::{FightStep, Fighter, find_enemy_hit, find_warp_dangers};
 use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use crate::minimap::TEAM_COLORS;
@@ -522,7 +522,8 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks after the nearest enemy around blocks and
 /// dangers and, once it sees them, faces them and fires (`console_bot::Fighter`) when moving lets
-/// it (`ShotGate`, by the server's `shooting` rules, as for players), reports hits
+/// it (`ShotGate`, by the server's `shooting` rules, as for players), reports hits on enemies only
+/// (`find_enemy_hit`; it steps out from behind a teammate its laser meets)
 /// (handing `save_view` its view, which it may save on another thread) and rejoins the server
 /// server's respawn wait after being hit (the one its elimination carries).
 /// The black hole grows with the server's consoles, or to `black_hole_strength` when given, and the
@@ -581,7 +582,7 @@ pub fn run_voxel_bot(
                 rejoin_at = None;
                 client.rejoin()?;
             }
-        } else if client.id.is_some() {
+        } else if let Some(own_id) = client.id {
             let team: u32 = client.team.expect("a welcome brings the team");
             let enemies: Vec<(u32, DVec4)> = client
                 .players
@@ -620,7 +621,11 @@ pub fn run_voxel_bot(
                 None,
                 BOT_VIEW_PX,
             );
-            if let Some(victim_id) = view.hit_player_id {
+            let victim: Option<u32> = find_enemy_hit(view.hit_player_id, &enemies);
+            if view.hit_player_id.is_some() && victim.is_none() {
+                fighter.note_teammate_hit(own_id, now_s);
+            }
+            if let Some(victim_id) = victim {
                 client.send_hit(victim_id, BOT_HITS_TO_KILL)?;
                 if last_victim != Some(victim_id) {
                     hit_count += 1;
@@ -628,8 +633,8 @@ pub fn run_voxel_bot(
                     save_view(view.frame, victim_id)?;
                 }
             }
-            last_victim = view.hit_player_id;
-            fighter.note_shot(view.hit_player_id.is_some(), own_step_s);
+            last_victim = victim;
+            fighter.note_shot(victim.is_some(), own_step_s);
             client.send_state(
                 camera,
                 is_laser_on,

@@ -525,8 +525,9 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
     }
 }
 
-/// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
-/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
+/// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest player of the other
+/// team (jumping when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`,
+/// reports hits on the other team only, so it never hurts a teammate (calling `save_view` with its
 /// view) and rejoins `BOT_REJOIN_S` after being hit. The black hole grows with the server's
 /// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. It returns how many players it hit and how often it was hit,
 /// and fails if the server curves space other than the built-in settings (`check_bot_space`).
@@ -584,9 +585,11 @@ pub fn run_voxel_bot(
         } else if client.id.is_some() {
             let camera: DMat4 = player.get_camera_frame(world);
             let eye: DVec4 = camera.col(AXIS_W);
+            let team: u32 = client.team.expect("a welcome brings the team");
             let target: Option<(&RemotePlayer, f64)> = client
                 .players
                 .iter()
+                .filter(|other| other.team != team)
                 .map(|other| (other, get_distance(eye, other.frame.col(AXIS_W)) * world.r))
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             let mut input: Input = Input::default();
@@ -606,7 +609,6 @@ pub fn run_voxel_bot(
             }
             input.up = input.forward && is_stuck;
             let before: DVec4 = player.body.col(AXIS_W);
-            let team: u32 = client.team.unwrap_or(0);
             let own_step_s: f64 =
                 BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
             player.step(world, &input, own_step_s, team as usize);
@@ -627,7 +629,11 @@ pub fn run_voxel_bot(
                 None,
                 BOT_VIEW_PX,
             );
-            if let Some(victim_id) = view.hit_player_id {
+            let victim: Option<u32> = view.hit_player_id.filter(|hit_id| {
+                let is_enemy = |other: &RemotePlayer| other.id == *hit_id && other.team != team;
+                client.players.iter().any(is_enemy)
+            });
+            if let Some(victim_id) = victim {
                 client.send_hit(victim_id, BOT_HITS_TO_KILL)?;
                 if last_victim != Some(victim_id) {
                     hit_count += 1;
@@ -635,7 +641,7 @@ pub fn run_voxel_bot(
                     save_view(&view.frame, victim_id)?;
                 }
             }
-            last_victim = view.hit_player_id;
+            last_victim = victim;
             client.send_state(
                 camera,
                 is_laser_on,
