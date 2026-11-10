@@ -46,7 +46,7 @@ pub const MARKER_NAME: &str = "a thrown wormhole";
 /// `FOG_DEPTHS` is how many of a fog's e-folding distances past its start a ray goes before it
 /// ends in the fog (5: the fog hides all but 0.7% of what lies beyond).
 pub const FOG_DEPTHS: f64 = 5.0;
-const MAX_MARKER_COUNT: usize = 16;
+const MAX_MARKER_COUNT: usize = 2 * crate::net::MAX_PLAYER_COUNT;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
 pub(crate) const BEND_STEP_FRAC: f64 = 0.16;

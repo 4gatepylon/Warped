@@ -22,6 +22,7 @@
 //!   crosshair, the hit effect and the banner's lobby and "YOU DIED" lines.
 //! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
 //! - `third_person`: the third-person view's switch, and its boom in flat space.
+//! - `level_net`: how many players a level server takes, and its snapshot's pages.
 //! - `app`: the interface between the one-window app (`../warped_mvp_rust/`) and a level.
 //! - `match_state`, `match_protocol`, `match_menu`: the match's rules, what its server and clients
 //!   share (levels file, view, client, network beacon) and its progression page.
@@ -50,6 +51,7 @@ pub mod hud;
 pub mod hud_bars;
 #[cfg(target_os = "macos")]
 pub mod key_bindings;
+pub mod level_net;
 pub mod match_menu;
 pub mod match_protocol;
 pub mod match_state;

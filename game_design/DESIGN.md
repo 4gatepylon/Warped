@@ -27,7 +27,7 @@ and in progress.
 
 | Term | Meaning |
 | --- | --- |
-| Team | Blue or red, ≈5 players each. A game holds at most 8 players for now. |
+| Team | Blue or red, ≈5 players each. A game holds at most 12 players (a 5v5 and a spare player each team). |
 | Match | One game between the two teams, played across the levels of one map. |
 | Map | A line of levels: the blue levels, one purple level in the middle, then the red levels. |
 | Level | One playable space. A blue or red level belongs to that team; the purple level to neither. |
@@ -345,7 +345,7 @@ The screens a player meets, in order:
   do:
   - NO ANSWER FROM THE SERVER: nothing came back for 2 s;
   - SERVER RUNS ANOTHER VERSION: the server's messages don't fit this build, so rebuild both from the same commit;
-  - THE GAME IS FULL: the server already has 8 players.
+  - THE GAME IS FULL: the server already has 12 players.
 - **In play:** the crosshair, bars and minimap below, and the other players as figures in their team's colour.
 - **Death:** the view darkens and says YOU DIED with a countdown until the player respawns (see
   [Respawning](#respawning)).

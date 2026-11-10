@@ -14,6 +14,9 @@
 //! Example: `let mut client = Client::Connect(net::find_server(Duration::from_secs(5))?)?;`
 //!
 //! Must know:
+//! - A snapshot of every player goes out in pages of `PLAYERS_PER_PAGE` players, each a datagram of
+//!   at most `level_net::MAX_SNAPSHOT_DATAGRAM_BYTES`, so a full server's snapshot is never split
+//!   along the way; a window keeps the latest copy of each page (`level_net::SnapshotPages`).
 //! - Messages are single UDP datagrams, little-endian, starting with a `Kind` byte. A lost state
 //!   or snapshot is replaced by the next one; joins are resent until welcomed. Nothing is
 //!   encrypted.
@@ -47,14 +50,15 @@ use crate::health::{add_damage, get_hit_damage_frac};
 use crate::settings::ServerSettings;
 use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
+use warped_shared::level_net::{self, SNAPSHOT_PAGE_HEADER_BYTES, SnapshotPages};
 use warped_shared::movement::{decode_crouch_level, encode_crouch_level};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub const DEFAULT_PORT: u16 = 47_810;
-pub const PROTOCOL_VERSION: u16 = 1;
-pub const MAX_PLAYER_COUNT: usize = 8;
+pub const PROTOCOL_VERSION: u16 = 2;
+pub use warped_shared::level_net::MAX_PLAYER_COUNT;
 pub const MAX_CONSOLE_COUNT: usize = 32;
 pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
 const NO_CONSOLE: u8 = u8::MAX;
@@ -98,8 +102,9 @@ const BYTES_PER_SECRET: usize = 32;
 const BYTES_PER_LOBBY: usize = 1 + TEAM_NAMES.len();
 const REFUSED_FOR_VERSION: u8 = 1;
 const REFUSED_FOR_PASSWORD: u8 = 2;
-const _: () =
-    assert!(2 + MAX_PLAYER_COUNT * (BYTES_PER_PLAYER + 1) + BYTES_PER_GAME <= MAX_DATAGRAM_BYTES);
+const PLAYERS_PER_PAGE: usize =
+    level_net::get_players_per_page(BYTES_PER_PLAYER + 1, BYTES_PER_GAME);
+const _: () = assert!(PLAYERS_PER_PAGE > 0 && MAX_PLAYER_COUNT <= u8::MAX as usize);
 
 /// `Kind` is a message's first byte.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -981,13 +986,27 @@ impl Server {
 
     /// `send_snapshot` sends every player the list of all players (each with how far along turning
     /// off a console they are, from `get_disabling_frac`), the game's state and each player's
-    /// health (a byte each, 255 full).
+    /// health (a byte each, 255 full), in pages of `PLAYERS_PER_PAGE` players.
     ///
     /// Example: `server.send_snapshot()?;`
     fn send_snapshot(&self) -> Result<()> {
+        let page_count: usize = self.slots.len().div_ceil(PLAYERS_PER_PAGE);
+        for (page_index, page) in self.slots.chunks(PLAYERS_PER_PAGE).enumerate() {
+            self.send_snapshot_page(page_index, page_count, page);
+        }
+        Ok(())
+    }
+
+    /// `send_snapshot_page` sends every player page `page_index` of a snapshot of `page_count`
+    /// pages: its index, the page count, then `send_snapshot`'s list for the players of `page`.
+    ///
+    /// Example: `self.send_snapshot_page(0, 2, &self.slots[..PLAYERS_PER_PAGE]);`
+    fn send_snapshot_page(&self, page_index: usize, page_count: usize, page: &[Slot]) {
         let mut message: Message = Message::New(Kind::Snapshot);
-        message.0.push(self.slots.len() as u8);
-        for slot in &self.slots {
+        message
+            .0
+            .extend([page_index as u8, page_count as u8, page.len() as u8]);
+        for slot in page {
             message = message.player(&RemotePlayer {
                 disabling_frac: self.get_disabling_frac(slot),
                 wormholes: PlayerWormholes {
@@ -998,7 +1017,7 @@ impl Server {
             });
         }
         message = message.game(&self.game);
-        for slot in &self.slots {
+        for slot in page {
             let health_frac: f64 = (1.0 - slot.damage_frac).clamp(0.0, 1.0);
             message
                 .0
@@ -1007,7 +1026,6 @@ impl Server {
         for slot in &self.slots {
             self.send(&message.0, slot.address);
         }
-        Ok(())
     }
 }
 
@@ -1292,6 +1310,7 @@ pub struct Client {
     pub team: Option<u32>,
     pub settings: Option<ServerSettings>,
     pub players: Vec<RemotePlayer>,
+    snapshot_pages: SnapshotPages<RemotePlayer>,
     pub game: GameState,
     pub health_frac: f64,
     pub wormhole_damage_frac: f64,
@@ -1329,6 +1348,7 @@ impl Client {
             team: None,
             settings: None,
             players: Vec::new(),
+            snapshot_pages: SnapshotPages::New(),
             game: GameState::default(),
             health_frac: 1.0,
             wormhole_damage_frac: 0.0,
@@ -1433,8 +1453,17 @@ impl Client {
                     }
                 }
                 Some(Kind::Snapshot) => {
-                    let count: usize = reader.take(1).map_or(0, |count| usize::from(count[0]));
-                    if length != 2 + count * (BYTES_PER_PLAYER + 1) + BYTES_PER_GAME {
+                    let Some(&[page_index, page_count, count]) = reader.take(3) else {
+                        self.last_bad_snapshot = Some(Instant::now());
+                        continue;
+                    };
+                    let count: usize = usize::from(count);
+                    if page_index >= page_count
+                        || length
+                            != SNAPSHOT_PAGE_HEADER_BYTES
+                                + count * (BYTES_PER_PLAYER + 1)
+                                + BYTES_PER_GAME
+                    {
                         self.last_bad_snapshot = Some(Instant::now());
                         continue;
                     }
@@ -1447,9 +1476,17 @@ impl Client {
                         self.health_frac = f64::from(healths[i]) / f64::from(u8::MAX);
                         self.wormhole_damage_frac = players[i].wormholes.damage_frac;
                     }
-                    self.players = players
+                    let own_id: Option<u32> = self.id;
+                    self.players = self
+                        .snapshot_pages
+                        .add_page(
+                            usize::from(page_index),
+                            usize::from(page_count),
+                            players,
+                            |player| player.id,
+                        )
                         .into_iter()
-                        .filter(|player| Some(player.id) != self.id)
+                        .filter(|player| Some(player.id) != own_id)
                         .collect();
                 }
                 Some(Kind::Eliminated) => {
@@ -1459,8 +1496,11 @@ impl Client {
                             self.id = None;
                             self.token = None;
                             self.players.clear();
+                            self.snapshot_pages.clear();
                         }
                         self.players.retain(|player| player.id != victim_id);
+                        self.snapshot_pages
+                            .remove_player(victim_id, |player| player.id);
                         events.push(NetEvent::Eliminated {
                             victim_id,
                             shooter_id,
@@ -1693,6 +1733,7 @@ mod tests {
     //! | Team asked for | blue or red (given), any or none (the smaller team), a different one on a repeated join (kept) | `players_join_the_team_they_choose_or_the_smaller` |
     //! | Hit | by a joined player, by a stranger, on a player who is gone | `only_joined_players_can_hit` |
     //! | Welcome size | the built-in settings with the longest map name | `the_welcome_fits_a_datagram` |
+    //! | Snapshot of a full server | `MAX_PLAYER_COUNT` players: pages within `level_net::MAX_SNAPSHOT_DATAGRAM_BYTES`, every other player read back | `a_full_servers_snapshot_comes_in_safe_pages` |
     //! | Hits to kill | 1 (eliminated at once), several (eliminated at the last) | `only_joined_players_can_hit`, `rifle_hits_add_up` |
     //! | Console held | the other team's (turned off after the settings' `hold_to_disable_s`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
     //! | Progress of turning off a console, in a snapshot | none held (0), part way (the seconds held over `hold_to_disable_s`), past the hold time (1) | `snapshots_carry_how_far_consoles_are_turned_off` |
@@ -1951,7 +1992,7 @@ mod tests {
         assert!(!client.is_other_version());
         let client_address: SocketAddr =
             address(client.socket.local_addr().expect("an address").port());
-        let short_snapshot: [u8; 3] = [Kind::Snapshot as u8, 1, 0];
+        let short_snapshot: [u8; SNAPSHOT_PAGE_HEADER_BYTES] = [Kind::Snapshot as u8, 0, 1, 1];
         server
             .socket
             .send_to(&short_snapshot, client_address)
@@ -2106,6 +2147,33 @@ mod tests {
             .player()
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_full_servers_snapshot_comes_in_safe_pages() {
+        let mut server: Server = make_server();
+        let mut client: Client = connect_client(&mut server, RED);
+        let listener: UdpSocket = make_listener();
+        let listener_address: SocketAddr = listener.local_addr().expect("an address");
+        join(&mut server, listener_address, ANY_TEAM);
+        for port in 2..MAX_PLAYER_COUNT as u16 {
+            join(&mut server, address(50_100 + port), ANY_TEAM);
+        }
+        assert_eq!(server.slots.len(), MAX_PLAYER_COUNT);
+        server.send_snapshot().expect("a snapshot");
+        let pages: Vec<Vec<u8>> = std::iter::from_fn(|| receive(&listener))
+            .filter(|datagram| datagram[0] == Kind::Snapshot as u8)
+            .collect();
+        assert_eq!(pages.len(), MAX_PLAYER_COUNT.div_ceil(PLAYERS_PER_PAGE));
+        for page in &pages {
+            assert!(page.len() <= level_net::MAX_SNAPSHOT_DATAGRAM_BYTES);
+        }
+        poll_until(&mut client, |client| {
+            client.players.len() == MAX_PLAYER_COUNT - 1
+        });
+        let mut ids: Vec<u32> = client.players.iter().map(|player| player.id).collect();
+        ids.sort();
+        assert_eq!(ids, (2..=MAX_PLAYER_COUNT as u32).collect::<Vec<u32>>());
     }
 
     #[test]

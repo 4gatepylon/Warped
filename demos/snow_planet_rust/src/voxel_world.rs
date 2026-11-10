@@ -48,7 +48,7 @@ const SNOW_STYLE: &str = "snow";
 const DEFAULT_SNOW_FOG_M: f64 = 110.0;
 /// `BLIZZARD_CUT_ITERATIONS` is how many halvings find where a shot runs out of reach in a blizzard.
 const BLIZZARD_CUT_ITERATIONS: usize = 24;
-const MAX_MARKER_COUNT: usize = 16;
+const MAX_MARKER_COUNT: usize = 2 * crate::net::MAX_PLAYER_COUNT;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
 pub(crate) const BEND_STEP_FRAC: f64 = 0.08;

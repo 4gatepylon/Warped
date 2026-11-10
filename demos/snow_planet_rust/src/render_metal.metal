@@ -209,7 +209,7 @@ constant float TILE_SIDE_COUNT = 4.0;
 constant float TILES_PER_VERTEX = 5.0;
 
 /**
- * @brief `Uniforms` matches the Rust `Uniforms` struct field by field (688 bytes). `row_tints[k]` is the colour of
+ * @brief `Uniforms` matches the Rust `Uniforms` struct field by field (848 bytes). `row_tints[k]` is the colour of
  * the thrown mouth a ray went through to come out in row k + 1, with w = 1 (w = 0 for a map's mouth).
  */
 struct Uniforms {

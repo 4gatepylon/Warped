@@ -41,7 +41,7 @@ use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_heig
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
 pub const MARKER_NAME: &str = "a thrown wormhole";
-const MAX_MARKER_COUNT: usize = 16;
+const MAX_MARKER_COUNT: usize = 2 * crate::net::MAX_PLAYER_COUNT;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
 const BAKED_TERRAIN_REACH_M: f64 = 250.0;

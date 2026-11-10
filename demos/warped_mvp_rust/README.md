@@ -19,7 +19,7 @@ popd
 - **Main menu**: the games on this network (each match server's beacon, UDP 47851) to join; joining
   a game by its address; the game to start, the five-level match or any one level of the levels
   manifest (Left/Right on "Game"), hosted for others, played alone, or with bots (on your team, 0
-  to 4, and on the other, 0 to 5, at most 7 together since a level takes 8 players; turning off
+  to 5, and on the other, 0 to 6, since a level takes 12 players, 6 a team; turning off
   consoles or fighting; you play blue); while this app hosts a game, going back to it or
   stopping it; player settings; credits; quit.
 - **Game menu**: the match's status (the progression page shared with the match window: the level

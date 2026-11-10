@@ -15,7 +15,7 @@
 #     make bench-levels LABEL=<label>: time every bench view of the five levels at 2560x1440 into .artifacts/bench_levels/ (tools/bench_levels.sh).
 #     make progression-pictures WIDTH_PX=<n> HEIGHT_PX=<n>: render the progression page for a few match states into .artifacts/progression_pictures/.
 #     make play-alone TEAM=<blue|red>: play a match without a second person: the match server, a bot that sits out every round, and your window (tools/play_with_bots.sh).
-#     make play-bots ALLIES=<0-4> ENEMIES=<0-5> BOT_OBJECTIVE=<consoles|fight> TEAM=<blue|red>: the same with bots on your team and the other (at most 7).
+#     make play-bots ALLIES=<0-5> ENEMIES=<0-6> BOT_OBJECTIVE=<consoles|fight> TEAM=<blue|red>: the same with bots on your team and the other (a level takes 12 players).
 #     make play-all-levels MATCH_PORT=<n> LEVEL_PORT=<n> LABEL=<label>: play a bot match steered through all five levels and check it (.artifacts/play_all_levels/).
 #     make e2e-match MATCH_PORT=<n> LEVEL_PORT=<n>: play a whole match of two bots, consoles off in 1 s (.artifacts/e2e_match/).
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.

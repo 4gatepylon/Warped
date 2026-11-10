@@ -244,6 +244,7 @@ pub struct Session {
     last_health: f32,
     frame_count: u64,
     spawn_counter: usize,
+    spawn_seat: Option<usize>,
     noise_state: u32,
     pub autopilot_waypoint: usize,
     autopilot_trigger_s: f32,
@@ -297,6 +298,8 @@ pub struct RemoteBot {
     pub wormholes: PlayerWormholes,
 }
 
+/// `FREE_SPAWN_M` is how near another player may stand to a spawn that still counts as free.
+const FREE_SPAWN_M: f32 = 2.0;
 /// `MESSAGE_S` is how long a message (a wormhole placed or destroyed) stays on screen.
 const MESSAGE_S: f32 = 3.0;
 /// `LONE_MOUTH_HITS_TO_DESTROY` is how many hits destroy a mouth down whose partner isn't (Lunar
@@ -405,6 +408,7 @@ impl Session {
             last_health: MAX_HEALTH,
             frame_count: 0,
             spawn_counter: 1,
+            spawn_seat: None,
             noise_state: 0xdead_beef,
             autopilot_waypoint: 0,
             autopilot_trigger_s: 0.0,
@@ -473,16 +477,36 @@ impl Session {
         self.settings = settings;
     }
 
+    /// `seat_player` makes this player, of id `id` on a network game's server, respawn on the first
+    /// of their team's spawns no other player stands on (`first_free_spawn`), going round them
+    /// from one their id picks, so teammates who join at once start apart.
+    ///
+    /// Example: `session.seat_player(3);`
+    pub fn seat_player(&mut self, id: u32) {
+        self.spawn_seat = Some(id as usize);
+    }
+
     /// `respawn_player` brings the player back, whole, at their team's spawn farthest from the
-    /// robots (`farthest_spawn`): after the respawn delay, and when they join
-    /// a team.
+    /// robots (`farthest_spawn`), or in a network game once seated (`seat_player`) at a spawn no
+    /// other player stands on: after the respawn delay, and when they join a team.
     ///
     /// Example: `session.respawn_player();`
     pub fn respawn_player(&mut self) {
         let bot_positions: Vec<Vec3> = self.bots.iter().map(|bot| bot.feet_m).collect();
         let team_spawns: &[(Vec3, f32)] = &self.arena.team_spawns[self.team as usize % 2];
         let spawns: Vec<Vec3> = team_spawns.iter().map(|(p, _)| *p).collect();
-        let spawn_m: Vec3 = Session::farthest_spawn(&spawns, &bot_positions, self.spawn_counter);
+        let spawn_m: Vec3 = match self.spawn_seat {
+            None => Session::farthest_spawn(&spawns, &bot_positions, self.spawn_counter),
+            Some(seat) => {
+                let others: Vec<Vec3> = self
+                    .remote_bots
+                    .iter()
+                    .filter(|remote| remote.bot.is_alive())
+                    .map(|remote| remote.bot.feet_m)
+                    .collect();
+                Session::first_free_spawn(&spawns, &others, seat + self.spawn_counter)
+            }
+        };
         let yaw_rad: f32 = team_spawns
             .iter()
             .find(|(p, _)| *p == spawn_m)
@@ -1109,6 +1133,19 @@ impl Session {
             self.player.take_damage(MAX_HEALTH / body_hits);
             audio.play(Sound::Hurt, 0.8, pan);
         }
+    }
+
+    /// `first_free_spawn` picks, going round `spawns` from index `start`, the first with no point of
+    /// `others` within `FREE_SPAWN_M`, or else the spawn farthest from them.
+    fn first_free_spawn(spawns: &[Vec3], others: &[Vec3], start: usize) -> Vec3 {
+        (0..spawns.len())
+            .map(|k| spawns[(start + k) % spawns.len()])
+            .find(|spawn| {
+                others
+                    .iter()
+                    .all(|other| other.distance(*spawn) >= FREE_SPAWN_M)
+            })
+            .unwrap_or_else(|| Session::farthest_spawn(spawns, others, 0))
     }
 
     /// `farthest_spawn` picks the spawn point farthest from a set of points.
@@ -2142,5 +2179,35 @@ fn get_dust_particle(dust: &DustParticle) -> Particle {
         color_rgba: Vec3::from(dust.albedo).extend(dust.opacity_frac as f32),
         kind: ParticleKind::Smoke,
         seed: (dust.orientation.to_axis_angle().1 / std::f64::consts::TAU) as f32,
+    }
+}
+
+/// `tests` checks where a player of a network game respawns.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | other players on the team's spawns | none (the seat's own), on the seat's (the next free), on all (the farthest) | `test_seated_players_take_free_spawns` |
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `test_seated_players_take_free_spawns` checks six spawns 4 m apart in a row.
+    #[test]
+    fn test_seated_players_take_free_spawns() {
+        let spawns: Vec<Vec3> = (0..6)
+            .map(|i| Vec3::new(4.0 * i as f32, 0.0, 0.0))
+            .collect();
+        assert_eq!(Session::first_free_spawn(&spawns, &[], 8), spawns[2]);
+        let on_two_and_three: [Vec3; 2] = [spawns[2], spawns[3] + Vec3::X];
+        assert_eq!(
+            Session::first_free_spawn(&spawns, &on_two_and_three, 8),
+            spawns[4]
+        );
+        let on_all: Vec<Vec3> = spawns
+            .iter()
+            .enumerate()
+            .map(|(i, &spawn)| spawn + Vec3::Y * (0.5 + 0.2 * i as f32))
+            .collect();
+        assert_eq!(Session::first_free_spawn(&spawns, &on_all, 3), spawns[5]);
     }
 }

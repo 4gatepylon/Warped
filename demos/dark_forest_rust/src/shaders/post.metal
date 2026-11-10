@@ -293,15 +293,15 @@ inline float3 grade_display(float3 color) {
  * rows), its view's slot and the tint (linear RGB) of what shows through it.
  */
 struct LensUniforms {
-    float4 centres[32];
-    float4 shapes[32];
+    float4 centres[40];
+    float4 shapes[40];
     float4 params;
-    float4 live_slots[8];
+    float4 live_slots[10];
     float4 movers[16];
     float4 live_params;
     float4 glow_starts[24];
     float4 glow_ends[24];
-    float4 thrown_looks[16];
+    float4 thrown_looks[24];
 };
 
 /**

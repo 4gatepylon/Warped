@@ -697,7 +697,7 @@ mod tests {
         let arena: Arena = Arena::from_map(&map);
         let solids: Vec<Aabb> = arena.boxes.iter().map(|world_box| world_box.aabb).collect();
         let spawns: Vec<(Vec3, f32)> = arena.team_spawns.concat();
-        assert_eq!(spawns.len(), 8);
+        assert_eq!(spawns.len(), warped_shared::level_net::MAX_PLAYER_COUNT);
         for (feet_m, yaw_rad) in spawns {
             let below = cast_ray(
                 &solids,

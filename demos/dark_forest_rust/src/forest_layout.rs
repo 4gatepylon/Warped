@@ -56,6 +56,11 @@ const PROP_JITTER_M: f32 = 0.6;
 /// `LOG_JITTER_SALT` and `ROCK_JITTER_SALT` give logs and rocks different jitter streams.
 const LOG_JITTER_SALT: u32 = 0x1065;
 const ROCK_JITTER_SALT: u32 = 0x60c4;
+/// `SPAWN_JITTER_SALT` gives the back row of spawns its own jitter stream, and
+/// `BACK_SPAWN_ROW_Z_M` puts that row behind the front one (at 52 m), inside the spawn's clearing,
+/// so each team has six spawns (W-155, play against bots: a 5v5 and a spare player).
+const SPAWN_JITTER_SALT: u32 = 0x5a0e;
+const BACK_SPAWN_ROW_Z_M: f32 = 55.0;
 /// `BRANCH_MIN_COUNT` to `BRANCH_MIN_COUNT + BRANCH_EXTRA_COUNT` branches fork from each culm's
 /// top into a leafy crown; the crowns together are the canopy that shades the forest.
 const BRANCH_MIN_COUNT: usize = 3;
@@ -615,6 +620,16 @@ fn add_team_side(layout: &mut Layout, side: Side) {
             frame: yaw_frame(side.at(x, 0.0, 52.0), side.yaw(0.0)),
         });
     }
+    for (index, x) in [-4.0, 4.0].into_iter().enumerate() {
+        let jitter_m: Vec2 = get_prop_jitter_m(SPAWN_JITTER_SALT, index);
+        layout.map.spawns.push(Spawn {
+            team: team.to_string(),
+            frame: yaw_frame(
+                side.at(x + jitter_m.x, 0.0, BACK_SPAWN_ROW_Z_M + jitter_m.y),
+                side.yaw(0.0),
+            ),
+        });
+    }
     let flat = |point: Vec3| Vec2::new(point.x, point.z);
     layout.keep_clear(flat(side.at(0.0, 0.0, 52.0)), Vec2::new(8.0, 3.0));
 
@@ -1152,7 +1167,7 @@ mod tests {
                 })
                 .count();
             assert_eq!(pylon_count, 2);
-            assert_eq!(map.spawns.iter().filter(|s| s.team == team).count(), 4);
+            assert_eq!(map.spawns.iter().filter(|s| s.team == team).count(), 6);
         }
     }
 

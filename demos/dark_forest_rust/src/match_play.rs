@@ -212,8 +212,11 @@ impl MatchPlay {
             }
         }
         if let Some(team) = client.team {
-            if team != session.team {
+            if team != session.team || !session.is_team_known {
                 session.team = team;
+                if let Some(id) = client.welcomed_id {
+                    session.seat_player(id);
+                }
                 session.respawn_player();
             }
             session.is_team_known = true;

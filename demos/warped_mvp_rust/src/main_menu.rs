@@ -275,7 +275,7 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Game choice | the match, every level of the shipped manifest, wrapping both ways | `every_manifest_level_can_be_chosen` |
-    //! | Start | hosted, alone, with bots (allies and enemies clamped to their maxima and to 7 together, objective switched) | `games_start_with_their_kind_and_bots` |
+    //! | Start | hosted, alone, with bots (allies and enemies clamped to their maxima, 5 and 6, objective switched) | `games_start_with_their_kind_and_bots` |
     //! | Rows | found games first, hosting rows only while hosting | `rows_list_found_games_and_hosting` |
     //! | Other rows | join a found game, by address, back to the game, stop, settings, credits, quit | `rows_lead_to_their_actions` |
 
