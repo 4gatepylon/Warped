@@ -28,7 +28,8 @@ make -C demos/warped_mvp_rust package-mac-app   # .build/Warped/Warped.app and .
 | `Contents/MacOS/warped-match` | the match server, the bots, and Lunar Surface (`../warped_match_rust`) |
 | `Contents/MacOS/levels/<level>` | every other level of the manifest, by its name (`dust`, `snow_planet`, ...) |
 | `Contents/Resources/match_levels.yaml` | the levels manifest, with each level's map picture beside it |
-| `Contents/Resources/assets`, `models` | the guns' and maps' models and textures |
+| `Contents/Resources/assets`, `models` | the guns' and maps' models, the textures and the sky (not the models built into the programs, `../warped_shared_rust/build.rs`) |
+| `Contents/Resources/repository/` | each level's own files, laid out as in the repository: its textures and map picture (`demos/<level>/assets`, `map_pictures`) and its map file (`common/maps/<level>/map.json`) |
 | `Contents/Resources/AppIcon.icns`, `Contents/Info.plist` | the match's icon and Info.plist (`../warped_match_rust/app/`) |
 
 The levels are built one after another into one shared target folder (`.build/levels_target/`), so
@@ -42,11 +43,18 @@ their common crates build once. The app is signed ad hoc (not by Apple).
    Security, Open Anyway; or in Terminal `xattr -dr com.apple.quarantine /Applications/Warped.app`.
 3. Allow Local Network access when asked, so games on the Wi-Fi can be found.
 
-**Limitation**: the levels still read their maps, textures and settings from the checkout they were
-built in (`CARGO_MANIFEST_DIR`), so the app plays its levels on the Mac that built it (and on a Mac
-with the same checkout at the same path). Running elsewhere needs each level to look its files up
-through `warped_shared::app_bundle` first; the levels-as-libraries and level-definition work
-(W-143) is the place for it. The menus, joining, hosting and the match server work anywhere.
+**Without the checkout**: every level finds its files inside the app (`warped_shared`'s
+`app_bundle.rs`: `ASSETS`, `MODELS`, `get_level_folder`), so the app doesn't need the repository. To
+check it, unzip `.build/Warped.zip` outside the repository and run the tour with the repository
+unreadable; every level must report its frames:
+
+```bash
+sandbox-exec -p '(version 1)(allow default)(deny file-read* file-write* (subpath "<the repository>"))' <unzipped>/Warped/Warped.app/Contents/MacOS/Warped --tour-levels
+```
+
+**Limitations**: the app is built for Apple silicon and was run only on the Mac that built it (the
+check above stands in for a second Mac). A level's downloaded textures (`make download-assets` in
+Dust, City Sphere and Dark Forest) go into the app only if they were downloaded before packaging.
 
 ## Screens
 

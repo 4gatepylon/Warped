@@ -29,6 +29,7 @@ use super::{
     load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
 };
 use warped_shared::app::{LevelEnd, LevelWindow};
+use warped_shared::app_bundle::get_level_folder;
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     HudBars, HudPulses, PylonSquare, get_death_lines, get_lobby_lines, make_bar_rects,
@@ -2861,7 +2862,7 @@ fn make_map_base(world: &CityWorld, size_px: (usize, usize)) -> Vec<u8> {
 
 /// `get_map_picture_path` gives where `--map-picture` saves the map page's picture.
 fn get_map_picture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH)
+    get_level_folder(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH)
 }
 
 /// `load_map_picture` reads the rendered map picture (`--map-picture`), or gives `None` when it is

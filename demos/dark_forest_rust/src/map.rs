@@ -13,6 +13,7 @@ use std::path::Path;
 
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
+use warped_shared::app_bundle::get_level_folder;
 
 /// `MapFile` is one `map.json` manifest.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -299,7 +300,7 @@ pub fn get_console_team(map: &MapFile, material: u8) -> Option<u32> {
 ///
 /// Example: `let map: MapFile = load(&default_map_path())?;`
 pub fn default_map_path() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../common/maps/dark_forest/map.json")
+    get_level_folder(env!("CARGO_MANIFEST_DIR")).join("../../common/maps/dark_forest/map.json")
 }
 
 /// `translation_frame` is the frame at a point, axes along the world's.

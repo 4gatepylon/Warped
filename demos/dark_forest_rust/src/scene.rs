@@ -26,6 +26,8 @@ use crate::render::{
     OccluderBox, Renderer, TextureFormat, TextureHandle, tiles::split_mesh_into_tiles,
 };
 
+/// `BEACON_MODEL` is the pylons' beacon, a folder of the maps' models (`common/maps/models/`).
+const BEACON_MODEL: &str = "scifi_beacon";
 /// `GROUND_ALBEDO` colors the sky's empty lower hemisphere.
 const GROUND_ALBEDO: Vec3 = Vec3::new(0.11, 0.1, 0.09);
 /// `MIDDLE_EXPOSURE` is the exposed brightness of a white surface in full daylight.
@@ -497,11 +499,7 @@ impl Scene {
             GunModel::BoltActionRifle,
             emissive_scale,
         );
-        let beacon_path: PathBuf = crate::map::default_map_path()
-            .parent()
-            .and_then(Path::parent)
-            .expect("the default map sits in common/maps/<map>/")
-            .join("models/scifi_beacon/scene.gltf");
+        let beacon_path: PathBuf = get_model_path(BEACON_MODEL);
         let beacon: Model = load_model(
             renderer,
             &beacon_path,

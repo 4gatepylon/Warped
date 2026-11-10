@@ -9,7 +9,7 @@
 //! Example: `let textures = SurfaceTextures::Load(&device)?;`
 
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use image::RgbaImage;
 use objc2::rc::Retained;
@@ -19,6 +19,7 @@ use rayon::prelude::*;
 
 use crate::fps_demo_assets::{check_asset, get_asset_path};
 use crate::texture_arrays::{make_array, make_mips};
+use warped_shared::app_bundle::get_level_folder;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -114,7 +115,7 @@ fn get_surface_texture_paths() -> Vec<PathBuf> {
                 .map(|id| {
                     let relative: String = format!("textures/{id}/{id}_{map}_2k.jpg");
                     if DUST_SETS.contains(id) {
-                        Path::new(env!("CARGO_MANIFEST_DIR"))
+                        get_level_folder(env!("CARGO_MANIFEST_DIR"))
                             .join("assets")
                             .join(relative)
                     } else {

@@ -22,6 +22,7 @@ use crate::geometry::{invert_lorentz, make_fermi_point};
 use crate::render_voxel::{HALF_FOV_RAD, VoxelFrame};
 use crate::voxel_world::{VoxelPlayer, VoxelWorld};
 use crate::{FrameData, Renderer};
+use warped_shared::app_bundle::get_level_folder;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -36,7 +37,7 @@ const STRAIGHT_DOWN_RAD: f64 = -std::f64::consts::FRAC_PI_2;
 ///
 /// Example: `let path = get_map_photo_path("snow_planet");`
 pub fn get_map_photo_path(map_name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    get_level_folder(env!("CARGO_MANIFEST_DIR"))
         .join("map_pictures")
         .join(format!("{map_name}.png"))
 }

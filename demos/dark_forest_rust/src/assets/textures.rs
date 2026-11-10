@@ -3,10 +3,12 @@
 //! Example:
 //!     let textures: Vec<TextureData> = decode_textures(&requests);
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 use image::imageops::FilterType;
 use image::{DynamicImage, RgbaImage};
+use warped_shared::fps_demo_assets::read_asset_file;
 
 use crate::render::{TextureData, TextureFormat};
 
@@ -34,8 +36,12 @@ pub struct TextureRequest {
 ///     let texture: TextureData = decode_texture(&request);
 pub fn decode_texture(request: &TextureRequest) -> TextureData {
     let image: DynamicImage = match &request.source {
-        TextureSource::File(path) => image::open(path)
-            .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display())),
+        TextureSource::File(path) => {
+            let bytes: Cow<'static, [u8]> = read_asset_file(path)
+                .unwrap_or_else(|error| panic!("cannot read the picture {error}"));
+            image::load_from_memory(&bytes)
+                .unwrap_or_else(|error| panic!("cannot decode {}: {error}", path.display()))
+        }
         TextureSource::Bytes(bytes) => image::load_from_memory(bytes)
             .unwrap_or_else(|error| panic!("cannot decode an embedded image: {error}")),
     };

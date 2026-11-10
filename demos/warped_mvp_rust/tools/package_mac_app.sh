@@ -3,8 +3,12 @@
 # (`warped`, as `Contents/MacOS/Warped`), the match server and Lunar Surface (`warped-match`), each
 # other level of the levels manifest (`Contents/MacOS/levels/<level>`), the manifest with its map
 # pictures and each level's server settings file (at its path from the manifest, for the game
-# master's settings), the shared assets and models, an icon and Info.plist; signs it ad hoc and zips it with
-# its note on opening it. The levels are built one after another into one shared target folder, so
+# master's settings), each level's own files (its `assets/` and `map_pictures/` folders, and its map
+# file in `common/maps/`, laid out under `Contents/Resources/repository/` as in the repository,
+# where `warped_shared`'s `app_bundle.rs` finds them), the shared assets and models (but the models
+# built into the programs, `warped_shared_rust/build.rs`, whose license forbids shipping them as
+# files: only their license files), an icon and Info.plist; signs it ad hoc and zips it with its
+# note on opening it. The levels are built one after another into one shared target folder, so
 # their common crates are built once.
 #
 # Interface:
@@ -21,16 +25,20 @@ readonly REPO_FOLDER="$(cd "$CRATE_FOLDER/../.." && pwd)"
 readonly MATCH_FOLDER="$REPO_FOLDER/demos/warped_match_rust"
 readonly APP_FOLDER="$CRATE_FOLDER/.build/Warped"
 readonly APP="$APP_FOLDER/Warped.app"
+readonly REPOSITORY_IN_APP="$APP/Contents/Resources/repository"
 readonly APP_ZIP="$CRATE_FOLDER/.build/Warped.zip"
 readonly ICONSET="$CRATE_FOLDER/.build/AppIcon.iconset"
 readonly LEVELS_TARGET="$CRATE_FOLDER/.build/levels_target"
 readonly ICON_SIZES="16 32 128 256 512"
+readonly LEVEL_OWN_FOLDERS="assets map_pictures"
+readonly SHARED_ASSET_FOLDERS="textures models hdri"
+readonly MAP_MODEL_BUILT_INTO_PROGRAMS="teal_robot"
 
 is_dry_run=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) is_dry_run=1; shift ;;
-        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) echo "package_mac_app.sh: unknown argument $1. Example: tools/package_mac_app.sh --dry-run" >&2; exit 2 ;;
     esac
 done
@@ -43,6 +51,7 @@ if [ "$is_dry_run" -eq 1 ]; then
     echo "match server: $MATCH_FOLDER (hyperbolic-wormholes) -> Contents/MacOS/warped-match"
     while IFS=$'\t' read -r slug folder program picture settings; do
         echo "level: $REPO_FOLDER/$folder ($program) -> Contents/MacOS/levels/$slug; picture $picture; settings $settings"
+        echo "  its own files ($LEVEL_OWN_FOLDERS, common/maps/$slug/map.json, where it has them) -> Contents/Resources/repository/"
     done <<< "$level_lines"
     exit 0
 fi
@@ -65,6 +74,16 @@ while IFS=$'\t' read -r slug folder program picture settings; do
         mkdir -p "$(dirname "$APP/Contents/Resources/$settings")"
         cp "$REPO_FOLDER/$folder/${settings#*"$folder"/}" "$APP/Contents/Resources/$settings"
     fi
+    for own_folder in $LEVEL_OWN_FOLDERS; do
+        if [ -d "$REPO_FOLDER/$folder/$own_folder" ]; then
+            mkdir -p "$REPOSITORY_IN_APP/$folder"
+            rsync -a "$REPO_FOLDER/$folder/$own_folder" "$REPOSITORY_IN_APP/$folder/"
+        fi
+    done
+    if [ -f "$REPO_FOLDER/common/maps/$slug/map.json" ]; then
+        mkdir -p "$REPOSITORY_IN_APP/common/maps/$slug"
+        cp "$REPO_FOLDER/common/maps/$slug/map.json" "$REPOSITORY_IN_APP/common/maps/$slug/map.json"
+    fi
 done <<< "$level_lines"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)"
 sed "s/@VERSION@/$version/" "$MATCH_FOLDER/app/Info.plist" > "$APP/Contents/Info.plist"
@@ -73,10 +92,12 @@ for size in $ICON_SIZES; do
     sips -z $((size * 2)) $((size * 2)) "$MATCH_FOLDER/app/app_icon.png" --out "$ICONSET/icon_${size}x${size}@2x.png" > /dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-mkdir -p "$APP/Contents/Resources/assets/models" "$APP/Contents/Resources/models"
-cp -R "$REPO_FOLDER/demos/fps_demo/assets/textures" "$APP/Contents/Resources/assets/textures"
-cp -R "$REPO_FOLDER/demos/fps_demo/assets/models/bolt_action_rifle_7_62" "$APP/Contents/Resources/assets/models/"
-rsync -a "$REPO_FOLDER/common/maps/models/" "$APP/Contents/Resources/models/"
+mkdir -p "$APP/Contents/Resources/assets" "$APP/Contents/Resources/models"
+for shared_folder in $SHARED_ASSET_FOLDERS; do
+    cp -R "$REPO_FOLDER/demos/fps_demo/assets/$shared_folder" "$APP/Contents/Resources/assets/$shared_folder"
+done
+rsync -a --include "$MAP_MODEL_BUILT_INTO_PROGRAMS/" --include "$MAP_MODEL_BUILT_INTO_PROGRAMS/license.txt" \
+    --exclude "$MAP_MODEL_BUILT_INTO_PROGRAMS/*" "$REPO_FOLDER/common/maps/models/" "$APP/Contents/Resources/models/"
 cp app/how_to_open.txt "$APP_FOLDER/How to open Warped.txt"
 codesign --force --deep --sign - "$APP"
 ditto -c -k --keepParent "$APP_FOLDER" "$APP_ZIP.partial"

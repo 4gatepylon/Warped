@@ -32,6 +32,7 @@ use crate::city_world::{CityWorld, Hole, TeamDome, get_up};
 use crate::fps_demo_assets::get_asset_path;
 use crate::mesh::{MeshMaterial, MeshModel};
 use crate::texture_arrays::{make_array, make_mips};
+use warped_shared::app_bundle::get_level_folder;
 use warped_shared::boundary_planes::{BOUNDARY_PLANES_METAL, get_shimmer_clock_s};
 use warped_shared::visuals::{GpuPlayerVisuals, PLAYER_VISUALS_METAL};
 
@@ -897,7 +898,7 @@ pub fn push_mesh(
 /// `get_texture_path` gives texture `id`'s 2k diffuse image: City Sphere's own (`make
 /// download-assets`, in `assets/textures/`) or else the fps demo's.
 fn get_texture_path(id: &str) -> std::path::PathBuf {
-    let own: std::path::PathBuf = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let own: std::path::PathBuf = get_level_folder(env!("CARGO_MANIFEST_DIR"))
         .join(format!("assets/textures/{id}/{id}_diff_2k.jpg"));
     if own.exists() {
         own

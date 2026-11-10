@@ -18,6 +18,7 @@
 //!   display's refresh rate, so they work the same in the one-window app's window.
 
 use warped_shared::app::{LevelEnd, LevelWindow};
+use warped_shared::app_bundle::{ASSETS, get_level_folder};
 use warped_shared::hud::{get_death_lines, make_respawn_bar_rects};
 use warped_shared::match_state::Team;
 use warped_shared::menu_and_map::{
@@ -603,16 +604,10 @@ impl LevelFiles {
     #[allow(non_snake_case)]
     pub fn Find(args: &Args) -> Result<LevelFiles, String> {
         let map_path: PathBuf = args.get_map_path();
-        let manifest_dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let assets_dir: PathBuf = args.assets_dir.clone().unwrap_or_else(|| {
-            manifest_dir
-                .join("../fps_demo")
-                .join(asset_manifest::ASSETS_DIR_NAME)
+        let assets_dir: PathBuf = args.assets_dir.clone().unwrap_or_else(|| ASSETS.get_path());
+        let textures_dir: PathBuf = args.textures_dir.clone().unwrap_or_else(|| {
+            get_level_folder(env!("CARGO_MANIFEST_DIR")).join(asset_manifest::ASSETS_DIR_NAME)
         });
-        let textures_dir: PathBuf = args
-            .textures_dir
-            .clone()
-            .unwrap_or_else(|| manifest_dir.join(asset_manifest::ASSETS_DIR_NAME));
         let map_file: map::MapFile = map::load(&map_path).map_err(|error| {
             format!("{error}; write it with --export-map {}", map_path.display())
         })?;
@@ -982,7 +977,7 @@ impl Level {
         )
         .map_err(|error| format!("can't join: {error}"))?;
         let mut minimap: Minimap = Minimap::New(&session.arena);
-        minimap.load_photo(&Path::new(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
+        minimap.load_photo(&get_level_folder(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
         let mut marks: Vec<Mark> = Vec::new();
         let mut screen: PlayScreen = PlayScreen {
             menu_and_map: MenuAndMap::New(),
