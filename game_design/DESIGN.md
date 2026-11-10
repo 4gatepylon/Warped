@@ -132,13 +132,25 @@ For example:
 
 ### Respawning
 
-A player who is eliminated sees their view darken with "YOU DIED" and a countdown, and comes back
-after the respawn time on a ring around their team's spawn, never on top of another player, with
-full health and energy. A player can't choose to respawn early.
+A player who is eliminated sees their view darken with "YOU DIED", a countdown and a bar that fills
+over the wait, and comes back after the respawn time on a ring around their team's spawn, never on
+top of another player, with full health and energy. A player can't choose to respawn early.
+
+The respawn time grows the longer a level goes on, so dying costs more later (W-142 (growing respawn
+time). In the user's words: "Respawns will happen on a cadence, and every n steps, it will increase in
+time linearly so that it takes longer to respawn as time progresses. This means that as time
+progresses, the stakes get basically higher to dying versus earlier on. The respawn rates should
+start at you being stuck dead for 20 seconds, and they should go up linearly every five minutes by 10
+seconds on a given level in the map." A player eliminated `t` seconds after the level (its round)
+started waits `start_s + step_s × floor(t / period_s)`; the level's server decides the wait and sends
+it with the elimination, so the countdown and bar show the server's wait. A new game on the level
+starts the clock again.
 
 | Parameter | Value |
 | --- | --- |
-| Respawn time | 3 s (`respawn.delay_s`) |
+| Respawn time at the level's start | 20 s (`respawn.start_s`) |
+| Added every period | 10 s (`respawn.step_s`) |
+| Period | 5 minutes (`respawn.period_s`) |
 
 ## Levels
 
@@ -486,8 +498,6 @@ time to kill.
 ## Open questions
 
 - **Consoles:** whether a hit that doesn't eliminate the player interrupts a deactivation.
-- **Respawning:** whether the respawn time should grow as a round goes on. An earlier design had
-  20 s at the start of a round plus 10 s every 5 minutes.
 - **Sprinting:** whether a kill should refill the killer's energy, as an earlier design had.
 - **Hyperbolic levels:** the topology of Dust.
 - **Warp objects:** how many black holes and wormholes each level but Lunar Surface has, and where.

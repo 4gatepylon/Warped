@@ -243,7 +243,7 @@ impl Player {
     /// `get_respawn_in_s` is how long until a dead player respawns, after a wait of
     /// `respawn_delay_s` (the session's `respawn_wait_s`; `None` while alive).
     ///
-    /// Example: `if let Some(left_s) = player.get_respawn_in_s(delay_s) { ... }`
+    /// Example: `if let Some(left_s) = player.get_respawn_in_s(20.0) { ... }`
     pub fn get_respawn_in_s(&self, respawn_delay_s: f32) -> Option<f32> {
         self.dead_time_s
             .map(|time_s: f32| (respawn_delay_s - time_s).max(0.0))
@@ -807,7 +807,7 @@ mod tests {
     }
 
     /// `test_respawn_waits_the_settings_delay` checks a dead player respawns once the delay it is
-    /// given (the server settings' `respawn.delay_s`, here not the built-in 3 s) has passed.
+    /// given (the session's `respawn_wait_s`, here not the built-in 20 s) has passed.
     #[test]
     fn test_respawn_waits_the_settings_delay() {
         let respawn_delay_s: f32 = 5.0;
