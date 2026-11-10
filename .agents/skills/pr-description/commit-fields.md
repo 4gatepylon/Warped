@@ -106,3 +106,6 @@ A value outside these tables needs the user's agreement. Add its row in the same
 | `audio` | sounds and music |
 | `networking` | what client and server send each other |
 | `none` | no technical field, such as a docs-only commit |
+
+> NOTE: if something is two kinds pick the main kind for a title. Wishlist always takes precedence. All kinds can be listed out in the kind listing below.
+> NOTE: to an agent---if the domain, component, or kind is not available, ask the user for help.
