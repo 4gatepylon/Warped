@@ -3,7 +3,7 @@
 //! BVH of a `MeshModel` for `render_voxel.metal` to ray-trace. The BVH is built once, on the first
 //! idle pose, and only refitted for each pose.
 //!
-//! Interface: `AvatarModel::Load`, `AvatarModel`, `AvatarClip`, `BODY_MODEL`.
+//! Interface: `AvatarModel::Load`, `AvatarModel`, `AvatarClip`, `BODY_MODEL`, `POSE_STEP_S`.
 //!
 //! Example: `let posed = AvatarModel::Load(BODY_MODEL, 2.0)?.make_posed(AvatarClip::Walk, 0.3);`
 //!
@@ -12,8 +12,11 @@
 //!   (the way a player looks), and its triangles' materials index `get_materials`.
 //! - The ray tracer draws every triangle opaque, so `Load` leaves out see-through (`BLEND`)
 //!   primitives: the robot's face glass, which would hide its glowing eyes.
+//! - Performance: posing takes about 0.4-0.9 ms a robot, so other players' robots change pose
+//!   `POSE_STEP_S` apart and share the last `POSE_CACHE_COUNT` poses (`get_stepped_pose`).
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use gltf::animation::Property;
@@ -25,6 +28,12 @@ use crate::mesh::{MeshMaterial, MeshModel, MeshTriangle, read_materials};
 
 /// `BODY_MODEL` is the folder of the players' body model in `common/maps/models/`.
 pub const BODY_MODEL: &str = "teal_robot";
+/// `POSE_STEP_S` is how often another player's robot changes pose: 30 times a second, which looks
+/// smooth at a robot's pace and lets robots in the same clip share poses.
+pub const POSE_STEP_S: f64 = 1.0 / 30.0;
+/// `POSE_CACHE_COUNT` is how many recent poses `get_stepped_pose` keeps (about 2 MB each): more
+/// than a full level's robots, so each robot's pose is still there on the next frame.
+const POSE_CACHE_COUNT: usize = 32;
 const JOINTS_PER_VERTEX: usize = 4;
 
 /// `AvatarClip` is one of the body's animations, named as in the model.
@@ -107,6 +116,23 @@ pub struct AvatarModel {
     clips: Vec<Clip>,
     to_chart: Mat4,
     placed: MeshModel,
+    pose_cache: Mutex<PoseCache>,
+}
+
+/// `PoseKey` names a stepped pose: the clip, the step of `POSE_STEP_S` within it (wrapped or held as
+/// the clip is), and the height share's bits.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PoseKey {
+    clip: AvatarClip,
+    step: i64,
+    height_frac_bits: u64,
+}
+
+/// `PoseCache` is the recent poses, each with when it was last used (a count of uses).
+#[derive(Default)]
+struct PoseCache {
+    poses: Vec<(PoseKey, Arc<MeshModel>, u64)>,
+    use_count: u64,
 }
 
 /// `read_clip` reads the animation `name` of `document`.
@@ -275,6 +301,7 @@ impl AvatarModel {
             clips,
             to_chart: Mat4::from_rotation_y(std::f32::consts::PI),
             placed: MeshModel::FromTriangles(Vec::new(), Vec::new()).0,
+            pose_cache: Mutex::new(PoseCache::default()),
         };
         let (positions, _) = body.skin(AvatarClip::Idle, 0.0);
         let (lo, hi) = positions
@@ -329,6 +356,19 @@ impl AvatarModel {
             .expect("every clip is listed")]
     }
 
+    /// `get_clip_time_s` gives `time_s` within clip `clip`: wrapped for a looping clip, held at the
+    /// ends otherwise.
+    ///
+    /// Example: `let t_s = body.get_clip_time_s(AvatarClip::Run, 1.25);`
+    fn get_clip_time_s(&self, clip: AvatarClip, time_s: f64) -> f64 {
+        let duration_s: f64 = f64::from(self.get_clip(clip).duration_s);
+        if clip.is_looping() {
+            time_s.rem_euclid(duration_s)
+        } else {
+            time_s.clamp(0.0, duration_s)
+        }
+    }
+
     /// `get_joint_matrices` gives each skin joint's matrix (its node's transform times its inverse
     /// bind matrix) in clip `clip` at `time_s`, wrapped for a looping clip and held at the ends
     /// otherwise.
@@ -336,11 +376,7 @@ impl AvatarModel {
     /// Example: `let matrices = body.get_joint_matrices(AvatarClip::Run, 0.25);`
     fn get_joint_matrices(&self, clip: AvatarClip, time_s: f64) -> Vec<Mat4> {
         let clip_data: &Clip = self.get_clip(clip);
-        let t_s: f32 = if clip.is_looping() {
-            (time_s as f32).rem_euclid(clip_data.duration_s)
-        } else {
-            (time_s as f32).clamp(0.0, clip_data.duration_s)
-        };
+        let t_s: f32 = self.get_clip_time_s(clip, time_s) as f32;
         let mut locals: Vec<(Vec3, Quat, Vec3)> = self.rest.clone();
         for channel in &clip_data.channels {
             let value: Vec4 = sample_channel(channel, t_s);
@@ -422,6 +458,54 @@ impl AvatarModel {
         posed.refit();
         posed
     }
+
+    /// `get_stepped_pose` gives `make_squashed`'s body at the start of `time_s`'s step of
+    /// `POSE_STEP_S` in clip `clip`, from the last `POSE_CACHE_COUNT` poses when it is among them
+    /// (the least recently used goes when a new one comes), so a robot is posed at most once a
+    /// step and robots in the same step of a clip share one pose. It is safe from several threads.
+    ///
+    /// Example: `let posed: Arc<MeshModel> = body.get_stepped_pose(AvatarClip::Run, 0.3, 1.0);`
+    pub fn get_stepped_pose(
+        &self,
+        clip: AvatarClip,
+        time_s: f64,
+        height_frac: f64,
+    ) -> Arc<MeshModel> {
+        let step: i64 = (self.get_clip_time_s(clip, time_s) / POSE_STEP_S).floor() as i64;
+        let key: PoseKey = PoseKey {
+            clip,
+            step,
+            height_frac_bits: height_frac.to_bits(),
+        };
+        if let Some(posed) = self.take_cached_pose(key) {
+            return posed;
+        }
+        let posed: Arc<MeshModel> =
+            Arc::new(self.make_squashed(clip, step as f64 * POSE_STEP_S, height_frac));
+        let mut cache = self.pose_cache.lock().expect("no thread panicked posing");
+        cache.use_count += 1;
+        let use_count: u64 = cache.use_count;
+        cache.poses.push((key, posed.clone(), use_count));
+        if cache.poses.len() > POSE_CACHE_COUNT {
+            let oldest: usize = (0..cache.poses.len())
+                .min_by_key(|&i| cache.poses[i].2)
+                .expect("the cache is full");
+            cache.poses.swap_remove(oldest);
+        }
+        posed
+    }
+
+    /// `take_cached_pose` gives the cached pose of `key`, marked as just used, or `None`.
+    ///
+    /// Example: `if let Some(posed) = self.take_cached_pose(key) { return posed; }`
+    fn take_cached_pose(&self, key: PoseKey) -> Option<Arc<MeshModel>> {
+        let mut cache = self.pose_cache.lock().expect("no thread panicked posing");
+        cache.use_count += 1;
+        let use_count: u64 = cache.use_count;
+        let entry = cache.poses.iter_mut().find(|entry| entry.0 == key)?;
+        entry.2 = use_count;
+        Some(entry.1.clone())
+    }
 }
 
 #[cfg(test)]
@@ -435,6 +519,8 @@ mod tests {
     //! | Time in a held clip | before the end, after the end (held) | `held_clips_end_on_their_last_pose` |
     //! | Pose's shape | standing (2 m tall, feet on y = 0, facing -z), lying (death's end, low) | `the_body_stands_and_lies` |
     //! | Squash | none (the posed body exactly), crouched (as tall as the share, feet still on y = 0) | `squashing_keeps_the_feet_down` |
+    //! | Stepped pose's time | within a step (the step's start, one shared pose), the next step, a whole loop later (the same pose) | `stepped_poses_share_a_step` |
+    //! | Stepped poses asked for | fewer than the cache holds (kept), more (the least recently used goes) | `stepped_poses_share_a_step` |
 
     use super::*;
 
@@ -573,5 +659,25 @@ mod tests {
         assert!((squashed_hi.y - hi.y * CROUCHED_HEIGHT_FRAC as f32).abs() < TOLERANCE_M);
         assert!((squashed_lo.y - lo.y * CROUCHED_HEIGHT_FRAC as f32).abs() < TOLERANCE_M);
         assert!((squashed_hi.x - hi.x).abs() < TOLERANCE_M);
+    }
+    #[test]
+    fn stepped_poses_share_a_step() {
+        let body: AvatarModel = AvatarModel::Load(BODY_MODEL, HEIGHT_M).expect("the body");
+        let run_s: f64 = f64::from(body.get_clip(AvatarClip::Run).duration_s);
+        let early: Arc<MeshModel> = body.get_stepped_pose(AvatarClip::Run, 2.2 * POSE_STEP_S, 1.0);
+        let late: Arc<MeshModel> = body.get_stepped_pose(AvatarClip::Run, 2.7 * POSE_STEP_S, 1.0);
+        let looped: Arc<MeshModel> =
+            body.get_stepped_pose(AvatarClip::Run, 2.2 * POSE_STEP_S + run_s, 1.0);
+        let next: Arc<MeshModel> = body.get_stepped_pose(AvatarClip::Run, 3.1 * POSE_STEP_S, 1.0);
+        assert!(Arc::ptr_eq(&early, &late) && Arc::ptr_eq(&early, &looped));
+        assert!(!Arc::ptr_eq(&early, &next));
+        let exact: MeshModel = body.make_squashed(AvatarClip::Run, 2.0 * POSE_STEP_S, 1.0);
+        assert_eq!(get_bounds(&early), get_bounds(&exact));
+        for step in 0..POSE_CACHE_COUNT {
+            body.get_stepped_pose(AvatarClip::Idle, step as f64 * POSE_STEP_S, 1.0);
+        }
+        let again: Arc<MeshModel> = body.get_stepped_pose(AvatarClip::Run, 2.2 * POSE_STEP_S, 1.0);
+        assert!(!Arc::ptr_eq(&early, &again));
+        assert_eq!(get_bounds(&again), get_bounds(&exact));
     }
 }
