@@ -268,9 +268,9 @@ impl App {
     /// processes is still alive afterwards.
     ///
     /// Example: `app.stop_hosting()?;`
-    pub fn stop_hosting(&mut self) -> Result<()> {
+    pub fn stop_hosting(&mut self) -> Result<(), String> {
         match self.hosted.take() {
-            Some(mut hosted) => hosted.stop(),
+            Some(mut hosted) => hosted.stop().map_err(|error| error.to_string()),
             None => Ok(()),
         }
     }

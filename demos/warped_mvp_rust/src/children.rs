@@ -24,8 +24,8 @@
 use std::error::Error;
 use std::fs;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::path::{Path, PathBuf};
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};

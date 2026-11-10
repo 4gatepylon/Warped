@@ -114,7 +114,12 @@ mod tests {
         let pictures: Vec<Option<Picture>> = load_map_pictures(&path, &levels).unwrap();
         assert_eq!(pictures.len(), levels.len());
         for (level, picture) in levels.iter().zip(&pictures) {
-            assert_eq!(picture.is_some(), level.map_picture.is_some(), "{}", level.name);
+            assert_eq!(
+                picture.is_some(),
+                level.map_picture.is_some(),
+                "{}",
+                level.name
+            );
         }
     }
 }

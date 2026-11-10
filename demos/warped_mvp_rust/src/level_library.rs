@@ -16,7 +16,10 @@ use warped_shared::match_protocol::LevelEntry;
 
 /// `LEVEL_LIBRARIES` is each level crate's folder (as the manifest names it) and its entry point.
 const LEVEL_LIBRARIES: [(&str, play_level_fn_t); 5] = [
-    ("demos/hyperbolic_wormholes_rust", lunar_surface_level::play_level),
+    (
+        "demos/hyperbolic_wormholes_rust",
+        lunar_surface_level::play_level,
+    ),
     ("demos/dust_rust", dust_level::play_level),
     ("demos/snow_planet_rust", snow_planet_level::play_level),
     ("demos/city_sphere_rust", city_sphere_level::play_level),
@@ -51,8 +54,7 @@ mod tests {
         let plays: Vec<usize> = levels
             .iter()
             .map(|level| {
-                get_play_level(level)
-                    .unwrap_or_else(|| panic!("{} has no library", level.name))
+                get_play_level(level).unwrap_or_else(|| panic!("{} has no library", level.name))
                     as usize
             })
             .collect();

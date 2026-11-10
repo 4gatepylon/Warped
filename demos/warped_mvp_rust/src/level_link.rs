@@ -253,7 +253,11 @@ mod tests {
         }
         assert_eq!(tour.get_step(), TourStep::Time);
         assert!(tour.get_frame_times().len() >= 13 && tour.get_frame_times().len() <= 15);
-        assert!(tour.get_frame_times().iter().all(|&ms| (ms - 10.0).abs() < 1e-6));
+        assert!(
+            tour.get_frame_times()
+                .iter()
+                .all(|&ms| (ms - 10.0).abs() < 1e-6)
+        );
     }
 
     #[test]

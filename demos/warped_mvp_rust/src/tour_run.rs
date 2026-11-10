@@ -83,11 +83,17 @@ impl TourRun {
         println!("tour: {level_name}: {summary:?}");
         self.summaries.push((level_name.to_string(), summary));
         let (shapes, page_size, pictures) = app.get_page();
-        let pixels: Vec<u8> =
-            render_page(self.size_px, page_size, &shapes, &pictures, PixelOrder::Rgba)?;
-        let path: PathBuf = self
-            .folder
-            .join(format!("game_menu_after_{}.png", get_level_slug(level_name)));
+        let pixels: Vec<u8> = render_page(
+            self.size_px,
+            page_size,
+            &shapes,
+            &pictures,
+            PixelOrder::Rgba,
+        )?;
+        let path: PathBuf = self.folder.join(format!(
+            "game_menu_after_{}.png",
+            get_level_slug(level_name)
+        ));
         image::save_buffer(
             &path,
             &pixels,
@@ -124,7 +130,11 @@ impl TourRun {
                     s.median_ms,
                     s.p99_ms,
                     s.max_ms,
-                    if s.p99_ms < TARGET_FRAME_MS { "yes" } else { "NO" }
+                    if s.p99_ms < TARGET_FRAME_MS {
+                        "yes"
+                    } else {
+                        "NO"
+                    }
                 )?,
                 None => writeln!(table, "| {name} | 0 | - | - | - | no frames |")?,
             }

@@ -574,10 +574,7 @@ mod tests {
         let all: Vec<usize> = get_tour_level_indices(&levels, &[]).unwrap();
         assert_eq!(all, (0..levels.len()).collect::<Vec<usize>>());
         let last: usize = levels.len() - 1;
-        let names: [String; 2] = [
-            levels[last].name.clone(),
-            get_level_slug(&levels[0].name),
-        ];
+        let names: [String; 2] = [levels[last].name.clone(), get_level_slug(&levels[0].name)];
         assert_eq!(get_tour_level_indices(&levels, &names).unwrap(), [last, 0]);
         let error: String = get_tour_level_indices(&levels, &["no such level".to_string()])
             .unwrap_err()
