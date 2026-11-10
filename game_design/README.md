@@ -8,6 +8,8 @@ Designing the game.
   but not built yet.
 - [`WINDOW_DESIGN.md`](WINDOW_DESIGN.md): how the app's windows work: which windows there are, how a player gets
   from one to the next, what each shows, which settings it has and who may change them.
+- `inside_game_design/`, `outside_game_design/` and `window_design/`: the pictures that belong to each of the three
+  design docs above (diagrams, mock-ups, screenshots), one folder per doc. A folder is made with its first picture.
 - [`FOUR_MAPS_HANDOFF.md`](FOUR_MAPS_HANDOFF.md): the state of the four level demos and the match on 2026-11-08, for
   whoever continues that work.
 - [`slides/`](slides/README.md): the official slide deck of the game as it is now, with pictures of the game.
