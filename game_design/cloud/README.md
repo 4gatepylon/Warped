@@ -7,3 +7,6 @@ the database schema, the API with its schemas, and the protocols.
 Until then, the design can be watched at work in the prototype,
 [`demos/system_design_visualization_and_prototyping/`](../../demos/system_design_visualization_and_prototyping/README.md):
 its system view shows the components, the messages between them, the fleet of game servers and the database tables.
+
+[`EARLY_DRAFT.md`](EARLY_DRAFT.md) is a first sketch from before the rules were written down, kept as raw material:
+it is out of date wherever it disagrees with `OUTSIDE_GAME_DESIGN.md`.

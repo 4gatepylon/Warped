@@ -14,6 +14,8 @@ make -C demos/system_design_visualization_and_prototyping run-prototype
 open http://127.0.0.1:8010/
 ```
 
+[`HANDOFF.md`](HANDOFF.md) says where this work stands and what is planned next.
+
 ## What is in it
 
 | Page | What it is |
