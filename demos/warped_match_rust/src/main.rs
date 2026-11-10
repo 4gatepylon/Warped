@@ -119,7 +119,7 @@ const LONE_MOUTH_HITS_TO_DESTROY: u8 = 1;
 const CPU_RENDER_SCALE: f64 = 0.35;
 const METAL_RENDER_SCALE: f64 = 1.0;
 const MIN_AUTO_RENDER_SCALE: f64 = 0.5;
-const AUTO_SCALE_TARGET_GPU_MS: f64 = 14.0;
+const AUTO_SCALE_TARGET_GPU_MS: f64 = 12.0;
 const AUTO_SCALE_MAX_STEP: f64 = 1.02;
 const AUTO_SCALE_MAX_DROP: f64 = 0.8;
 const RENDER_SCALE_QUANTUM: f64 = 0.05;
@@ -258,7 +258,7 @@ struct Arguments {
     /// Fraction of the output's pixels per side to ray-trace, upscaled with MetalFX (Metal) or by
     /// repeating pixels (CPU). In the window it defaults to 0.35 on the CPU, and with Metal it
     /// starts at 1 and lowers itself (to no less than 0.5) when a frame takes more than about
-    /// 14 ms of GPU time; otherwise 1.
+    /// 12 ms of GPU time; otherwise 1.
     #[arg(long)]
     render_scale: Option<f64>,
     /// W-136 (sharp centre, soft edges): the share of the image's width, across a circle around
