@@ -66,7 +66,8 @@ health bar (a segment per rifle hit to the body), the gun's ammo bar (the sniper
 rifle's heat in 20 segments, red once it overheats) and the sprint energy bar (sprinting empties it in 7.5 s),
 with glows that run along a bar while it changes; Lunar's crosshair; the console bar below the middle while `E` is
 held on an enemy console; red, blurred edges and a shake when you take any damage; and "YOU DIED" with the respawn
-countdown.
+countdown and a bar filling over the wait: 20 s, 10 s more for every 5 minutes into the level (online the server's
+wait, alone the same rule on the session's clock; W-142 (growing respawn time)).
 
 `WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it listens
 on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for network
@@ -138,7 +139,7 @@ The match session (`demos/warped_match_rust/`) starts levels with these flags:
 
 | Command | Does |
 | --- | --- |
-| `dark-forest --serve --port <port> [--map <map.json>] [--level-result-file <path>]` | runs a server without a window. With `--level-result-file`, once a team has turned off every console of the other, it writes `{"winner": "blue"}` or `{"winner": "red"}` to `<path>.partial`, renames it to `<path>`, and keeps running (no new game) until killed. Without it, a new game starts 10 s after a win. |
+| `dark-forest --serve --port <port> [--map <map.json>] [--level-result-file <path>] [--server-settings <path>]` | runs a server without a window, playing by `--server-settings` (a whole copy of [`server_settings.yaml`](server_settings.yaml), YAML or JSON; the match server writes one each round with the game master's settings) or the built-in file. With `--level-result-file`, once a team has turned off every console of the other, it writes `{"winner": "blue"}` or `{"winner": "red"}` to `<path>.partial`, renames it to `<path>`, and keeps running (no new game) until killed. Without it, a new game starts 10 s after a win. |
 | `dark-forest --join <address> --port <port> [--map <map.json>] [--team blue\|red]` | joins a server, on that team at once if `--team` is given. |
 | `dark-forest --join <address> --port <port> --bot --exit-after-s <s> --team <team> [--bot-objective consoles]` | a bot for tests and matches, in a hidden window that draws nothing. It hunts the other team's players and shoots them; with `--bot-objective consoles` it walks instead (by the ladders where needed) to each of the other team's consoles, holds `E` once in reach (which the server checks), and logs `bot reached console <i> on foot in <t> s`, until its team wins. |
 

@@ -13,6 +13,8 @@
 //! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
+//! - `shot_gate`: when a player may shoot after jumping, walking or sprinting (the `shooting` rules).
+//! - `laser_drop`: bullet drop, how a shot's path bends down (`shooting.drop_m_per_s_per_s`).
 //! - `mesh`, `avatar_model`: glTF models of the maps' structures and the players' robot body.
 //! - `gait`: which of the robot's clips another player shows, and where in it, from their motion.
 //! - `spaceships`: the spaceships in the sky.
@@ -27,6 +29,7 @@
 //! - `app`: the interface between the one-window app (`../warped_mvp_rust/`) and a level.
 //! - `match_state`, `match_protocol`, `match_menu`: the match's rules, what its server and clients
 //!   share (levels file, view, client, network beacon) and its progression page.
+//! - `game_settings`: the game master's settings, overrides of each level's server settings.
 //! - `network_scope`: whether sockets reach the local network or stay on loopback
 //!   (`WARPED_LOOPBACK_ONLY=1`, for tests).
 //! - `page`: a menu page's shapes in the debug font, and drawing them with SDL.
@@ -46,6 +49,7 @@ pub mod app_bundle;
 pub mod avatar_model;
 pub mod fps_demo_assets;
 pub mod gait;
+pub mod game_settings;
 pub mod geometry;
 pub mod gravity;
 pub mod health;
@@ -55,6 +59,7 @@ pub mod hud;
 pub mod hud_bars;
 #[cfg(target_os = "macos")]
 pub mod key_bindings;
+pub mod laser_drop;
 pub mod level_net;
 pub mod match_menu;
 pub mod match_protocol;
@@ -76,6 +81,7 @@ pub mod player_settings;
 pub mod render_mesh;
 pub mod settings_editor;
 pub mod shapes;
+pub mod shot_gate;
 pub mod shot_noise;
 pub mod spaceships;
 #[cfg(target_os = "macos")]

@@ -38,6 +38,7 @@ use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
 use warped_shared::gravity::{HyperbolicWarp, add_pull, get_hyperbolic_pull_m_per_s};
+use warped_shared::laser_drop::{DROP_PIECE_M, get_drop_curvature_per_m, turn_hyperbolic};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -909,7 +910,8 @@ impl VoxelWorld {
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
-    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
+    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows),
+    /// under that gravity times `surface.gravity_per_jump_gravity` (the jump's speed kept).
     ///
     /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
     pub fn set_settings(&mut self, settings: ServerSettings) {
@@ -923,7 +925,8 @@ impl VoxelWorld {
             jump_m_per_s,
             ..self.map_player
         };
-        self.gravity_m_per_s2 = jump_m_per_s / half_jump_s;
+        self.gravity_m_per_s2 =
+            jump_m_per_s / half_jump_s * settings.surface.gravity_per_jump_gravity;
         self.settings = settings;
     }
 
@@ -1849,7 +1852,8 @@ impl VoxelWorld {
     }
 
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between the
-    /// warps, bent inside them, through throats, to a block, the ground, a horizon or
+    /// warps (falling by the server settings' `shooting.drop_m_per_s_per_s` in pieces of
+    /// `DROP_PIECE_M`, `laser_drop.rs`), bent inside them, through throats, to a block, the ground, a horizon or
     /// `LASER_MAX_LENGTH_M` (through glass). The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where
     /// the window draws the tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
@@ -1857,6 +1861,15 @@ impl VoxelWorld {
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
     pub fn trace_laser(&self, camera: DMat4) -> Shot {
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
+        let drop_per_m: f64 = get_drop_curvature_per_m(
+            self.settings.shooting.drop_m_per_s_per_s,
+            self.settings.sniper.beam_speed_m_per_s,
+        );
+        let drop_piece_s: f64 = if drop_per_m > 0.0 {
+            DROP_PIECE_M / self.r
+        } else {
+            f64::INFINITY
+        };
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
         let mut pieces: Vec<Vec<DVec4>> = vec![vec![x]];
@@ -1868,8 +1881,15 @@ impl VoxelWorld {
                 break;
             }
             let Some(w) = inside else {
-                let (s_end, entering) = self.find_warp_entry(x, v, max_s - travelled);
-                if let Some(found) = self.trace_scene(x, v, s_end, None) {
+                let s_max: f64 = (max_s - travelled).min(drop_piece_s);
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_max);
+                }
+                let (s_end, entering) = self.find_warp_entry(x, v, s_max);
+                if let Some(found) = self
+                    .trace_scene(x, v, s_end, None)
+                    .filter(|found| found.s.is_finite())
+                {
                     pieces
                         .last_mut()
                         .expect("a piece")
@@ -1883,6 +1903,12 @@ impl VoxelWorld {
                 x = xn;
                 travelled += s_end;
                 pieces.last_mut().expect("a piece").push(x);
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_end);
+                    if entering.is_none() {
+                        continue;
+                    }
+                }
                 if entering.is_none() {
                     break;
                 }
@@ -1891,6 +1917,9 @@ impl VoxelWorld {
             };
             let ds: f64 = self.choose_bend_step(self.compute_bend(w, x, v).1);
             let (v0, x1, v1, rho) = self.step_bent(w, x, v, ds);
+            if !(ds.is_finite() && rho.is_finite()) {
+                break;
+            }
             if let Some(found) = self.trace_scene(x, v0, ds, Some(w)) {
                 pieces
                     .last_mut()

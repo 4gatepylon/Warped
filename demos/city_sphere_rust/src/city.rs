@@ -32,17 +32,19 @@ use super::{
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     HudBars, HudPulses, PylonSquare, get_death_lines, get_lobby_lines, make_bar_rects,
-    make_hit_effect, make_pylon_square_rects,
+    make_hit_effect, make_pylon_square_rects, make_respawn_bar_rects,
 };
+use warped_shared::laser_drop::get_drop_curvature_per_m;
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
+use warped_shared::shot_gate::ShotMoves;
 use warped_shared::shot_noise::ShotNoise;
 use warped_shared::third_person::{ThirdPersonCamera, place_camera_flat};
 use warped_shared::weapons::{Weapons, take_hit_weight};
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::city_world::{
-    CityInput, CityPlayer, CityWorld, Console, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M,
-    Target, get_up,
+    Bounces, CityInput, CityPlayer, CityWorld, Console, HEAD_HEIGHT_M, Shot, ShotHit, Side,
+    TORSO_HEIGHT_M, Target, get_up,
 };
 use crate::city_wormholes::{
     MOUTH_RADIUS_M, can_place_mouth, carry_through, find_crossing, fly_city_throw, get_mouth_frame,
@@ -200,10 +202,22 @@ pub fn run(arguments: &Arguments) -> Result<()> {
     play(arguments, metal)
 }
 
+/// `get_shot_drop_per_m` gives how much a shot turns toward the street per meter under
+/// `settings`' bullet drop (`shooting.drop_m_per_s_per_s` at the sniper's beam speed; W-157
+/// (bullet drop, by game setting)), 0 for straight shots.
+///
+/// Example: `let drop_per_m: f64 = get_shot_drop_per_m(&self.settings);`
+fn get_shot_drop_per_m(settings: &ServerSettings) -> f64 {
+    get_drop_curvature_per_m(
+        settings.shooting.drop_m_per_s_per_s,
+        settings.sniper.beam_speed_m_per_s,
+    )
+}
+
 /// `step_respawn` counts an eliminated player's `respawn_in_s` down by `dt_s` and asks the server
 /// to rejoin once it runs out; with no countdown running it keeps asking to join until welcomed
 /// (`net::Client::keep_joining`). A player waiting to respawn never asks, so they come back only
-/// after the settings' `respawn.delay_s`, as on Lunar Surface.
+/// after the server's respawn wait (the one their elimination carries), as on Lunar Surface.
 ///
 /// Example: `step_respawn(&mut client, &mut respawn_in_s, dt_s)?;`
 fn step_respawn(client: &mut net::Client, respawn_in_s: &mut Option<f64>, dt_s: f64) -> Result<()> {
@@ -1042,10 +1056,10 @@ struct CitySession {
     player: CityPlayer,
     is_spawned: bool,
     respawn_in_s: Option<f64>,
+    respawn_wait_s: f64,
     spawn_count: usize,
     shots: Vec<LiveShot>,
     weapons: Weapons,
-    since_movement_key_s: f64,
     was_firing: bool,
     has_shot_hit_wormholes: bool,
     remote_lasers: HashMap<u32, bool>,
@@ -1140,10 +1154,10 @@ impl CitySession {
             player,
             is_spawned: false,
             respawn_in_s: None,
+            respawn_wait_s: 0.0,
             spawn_count: 0,
             shots: Vec::new(),
             weapons,
-            since_movement_key_s: f64::INFINITY,
             was_firing: false,
             has_shot_hit_wormholes: false,
             remote_lasers: HashMap::new(),
@@ -1251,12 +1265,12 @@ impl CitySession {
         }
     }
 
-    /// `can_shoot` says whether this player may shoot, as on Lunar Surface: once no movement key
-    /// has been held for the server settings' `movement.shoot_after_moving_s` (standing or
-    /// falling with no key held may shoot), and only while in the game (spawned and welcomed), not
+    /// `can_shoot` says whether this player may shoot, as on Lunar Surface: once moving allows it
+    /// (`Weapons::can_shoot`, by the server settings' `shooting` rules and
+    /// `movement.shoot_after_moving_s`), and only while in the game (spawned and welcomed), not
     /// holding `E` on a console, and before a team has won.
     fn can_shoot(&self) -> bool {
-        self.since_movement_key_s >= self.settings.movement.shoot_after_moving_s
+        self.weapons.can_shoot(&self.settings.movement)
             && self.is_spawned
             && self.client.id.is_some()
             && self.disabling.is_none()
@@ -1419,6 +1433,7 @@ impl CitySession {
                     victim_id,
                     shooter_id,
                     is_self,
+                    respawn_wait_s,
                 } => {
                     if !is_self && Some(shooter_id) == self.client.id {
                         self.rifle_log
@@ -1428,7 +1443,8 @@ impl CitySession {
                     }
                     if is_self {
                         self.is_spawned = false;
-                        self.respawn_in_s = Some(self.settings.respawn.delay_s);
+                        self.respawn_in_s = Some(respawn_wait_s);
+                        self.respawn_wait_s = respawn_wait_s;
                         self.disabling = None;
                         self.thrown.clear();
                     }
@@ -1560,16 +1576,19 @@ impl CitySession {
     /// `update_gun_motion` moves the gun as Lunar Surface does on its voxel maps: it steps with
     /// the head bob that `move_player` stepped (its phase, and `bob_frac` easing in and out), and
     /// its pose goes toward jogging while sprinting and back to aiming otherwise. As on Lunar
-    /// Surface, it counts the time since a movement key (walking upright, not crouched, or
-    /// jumping) was last held, and moving ends the shot under way (`can_shoot`).
+    /// Surface, it notes the moves that may hold a shot (`Weapons::note_moves`: walking upright,
+    /// sprinting or jumping, by the `shooting` rules), and a held shot ends the shot under way
+    /// (`can_shoot`).
     fn update_gun_motion(&mut self, input: &CityInput, dt_s: f64) {
         let is_moving: bool = input.forward_frac != 0.0 || input.right_frac != 0.0;
         let is_walking_upright: bool = is_moving && !input.is_crouching;
-        self.since_movement_key_s = if is_walking_upright || input.is_jumping {
-            0.0
-        } else {
-            self.since_movement_key_s + dt_s
+        let shot_moves: ShotMoves = ShotMoves {
+            is_jumping: input.is_jumping,
+            is_walking_upright,
+            is_sprinting: self.player.move_state.is_sprinting,
         };
+        self.weapons
+            .note_moves(&shot_moves, &self.settings.shooting, dt_s);
         if !self.can_shoot() {
             self.weapons.shot_time_s = 0.0;
         }
@@ -1589,7 +1608,9 @@ impl CitySession {
     fn place_camera(&self, eye: DMat4) -> (DMat4, bool) {
         let boom_frac: f64 = self.view_switch.get_boom_frac(self.weapons.aim_frac);
         let get_clear_m = |from: DVec3, direction: DVec3, max_m: f64| -> f64 {
-            let shot: Shot = self.world.trace_shot(from, direction, max_m, 0, &[], None);
+            let shot: Shot =
+                self.world
+                    .trace_shot(from, direction, max_m, Bounces::NONE, &[], None);
             (shot.points[1] - from).length()
         };
         let placed: ThirdPersonCamera =
@@ -1607,13 +1628,14 @@ impl CitySession {
             return eye;
         }
         let from: DVec3 = camera.w_axis.truncate();
-        let crosshair: Shot = self.world.trace_shot(
+        let crosshair: Shot = self.world.trace_falling_shot(
             from,
             -camera.z_axis.truncate(),
             self.settings.glass.range_m,
-            0,
+            Bounces::NONE,
             &[],
             None,
+            get_shot_drop_per_m(&self.settings),
         );
         let at: DVec3 = eye.w_axis.truncate();
         let target: DVec3 = *crosshair.points.last().expect("a shot has an end");
@@ -1795,13 +1817,14 @@ impl CitySession {
         let (mut from, mut along, mut range_m) =
             (origin, direction.normalize(), self.settings.glass.range_m);
         loop {
-            let mut shot: Shot = self.world.trace_shot(
+            let mut shot: Shot = self.world.trace_falling_shot(
                 from,
                 along,
                 range_m,
-                self.settings.glass.max_bounce_count,
+                Bounces::FromGlass(&self.settings.glass),
                 targets,
                 shooter_id,
+                get_shot_drop_per_m(&self.settings),
             );
             let crossing = (legs.len() < MAX_WORMHOLE_LEGS)
                 .then(|| {
@@ -2339,6 +2362,12 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         if session.is_spawned && !session.menu_and_map.is_menu_open() {
             rects.extend(session.get_bar_rects());
             rects.extend(session.get_pylon_square_rects(window_px));
+        }
+        if session.menu_and_map.get_cover() == Cover::Nothing
+            && let Some(left_s) = session.respawn_in_s
+            && session.get_banner_lines() == Some(get_death_lines(left_s))
+        {
+            rects.extend(make_respawn_bar_rects(left_s, session.respawn_wait_s));
         }
         let minimap = (session.is_spawned
             && session.menu_and_map.get_cover() == Cover::Nothing
@@ -3172,7 +3201,7 @@ fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
             eye,
             (DVec3::new(0.3, 0.2, 0.1) - d).normalize(),
             90.0,
-            2,
+            Bounces::Perfect(2),
             &[],
             None,
         );
@@ -3313,7 +3342,14 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
         let origin: DVec3 = from + up * eye_m;
         (
             world
-                .trace_shot(origin, (to - origin).normalize(), 90.0, 2, &[], None)
+                .trace_shot(
+                    origin,
+                    (to - origin).normalize(),
+                    90.0,
+                    Bounces::Perfect(2),
+                    &[],
+                    None,
+                )
                 .points,
             team,
             1.0,
@@ -3504,13 +3540,14 @@ fn find_bot_aim(
     let origin: DVec3 = player.get_eye_frame().w_axis.truncate();
     targets.iter().find_map(|target| {
         let aim: DVec3 = (target.feet + target.up - origin).normalize();
-        let shot: Shot = world.trace_shot(
+        let shot: Shot = world.trace_falling_shot(
             origin,
             aim,
             settings.glass.range_m,
-            settings.glass.max_bounce_count,
+            Bounces::FromGlass(&settings.glass),
             targets,
             shooter_id,
+            get_shot_drop_per_m(settings),
         );
         matches!(shot.hit, ShotHit::Player { .. }).then_some(aim)
     })
@@ -3570,10 +3607,14 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                     is_spawned = true;
                     brain.restart();
                 }
-                net::NetEvent::Eliminated { is_self: true, .. } => {
+                net::NetEvent::Eliminated {
+                    is_self: true,
+                    respawn_wait_s,
+                    ..
+                } => {
                     is_spawned = false;
                     eliminated_count += 1;
-                    respawn_in_s = Some(settings.respawn.delay_s);
+                    respawn_in_s = Some(respawn_wait_s);
                 }
                 net::NetEvent::Eliminated { .. } => {}
             }
@@ -3670,6 +3711,14 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 &BrainSight::default(),
             );
             world.move_player(&mut player, &out.input, &settings, &head_bob, dt_s);
+            let shot_moves: ShotMoves = ShotMoves {
+                is_jumping: out.input.is_jumping,
+                is_walking_upright: (out.input.forward_frac != 0.0 || out.input.right_frac != 0.0)
+                    && !out.input.is_crouching,
+                is_sprinting: player.move_state.is_sprinting,
+            };
+            weapons.note_moves(&shot_moves, &settings.shooting, dt_s);
+            let can_shoot: bool = weapons.can_shoot(&settings.movement);
             let targets: Vec<Target> = client
                 .players
                 .iter()
@@ -3685,6 +3734,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 })
                 .collect();
             if weapons.sniper_reload_s <= 0.0
+                && can_shoot
                 && let Some(aim) = find_bot_aim(&world, &settings, &player, &targets, client.id)
             {
                 let eye_point: DVec3 = player.get_eye_frame().w_axis.truncate();
@@ -3692,15 +3742,16 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 weapons.fire_sniper(&settings.sniper);
                 has_shot_hit = false;
             }
-            if weapons.is_firing(true) {
+            if weapons.is_firing(can_shoot) {
                 let shot_eye: DMat4 = weapons.shot_offset.aim(player.get_eye_frame());
-                let shot: Shot = world.trace_shot(
+                let shot: Shot = world.trace_falling_shot(
                     shot_eye.w_axis.truncate(),
                     -shot_eye.z_axis.truncate(),
                     settings.glass.range_m,
-                    settings.glass.max_bounce_count,
+                    Bounces::FromGlass(&settings.glass),
                     &targets,
                     client.id,
+                    get_shot_drop_per_m(&settings),
                 );
                 if let ShotHit::Player { id, is_head } = shot.hit
                     && let Some(hits_to_kill) = take_hit_weight(
@@ -3914,7 +3965,7 @@ mod tests {
     const LUNAR_JUMP_AT_M: [f64; 2] = [-27.0, 0.0];
     const CROUCH_WALK_S: f64 = 0.5;
     const CROUCH_SPEED_TOLERANCE_FRAC: f64 = 1e-3;
-    const CITY_ONLY_SECTION: &str = "glass:";
+    const LEVEL_OWN_SECTIONS: [&str; 2] = ["glass:", "surface:"];
     const CITY_ONLY_SETTINGS: [&str; 2] = [
         "  walk_speed_per_map_speed:",
         "  sprint_speed_per_map_speed:",
@@ -4169,7 +4220,7 @@ mod tests {
         .expect("City's server settings");
         let shared = |text: &str| -> Vec<String> {
             text.lines()
-                .take_while(|line| !line.starts_with(CITY_ONLY_SECTION))
+                .take_while(|line| !LEVEL_OWN_SECTIONS.iter().any(|s| line.starts_with(s)))
                 .filter(|line| {
                     !CITY_ONLY_SETTINGS
                         .iter()
@@ -4223,13 +4274,13 @@ mod tests {
 
     /// `an_eliminated_player_respawns_only_after_the_delay` plays an elimination on a real server:
     /// the victim's window keeps polling and stepping its countdown, and must be welcomed back
-    /// only once `respawn.delay_s` has passed (W-119 (City Sphere demo): they came back at once,
+    /// only once the respawn wait (`respawn.start_s` here) has passed (W-119 (City Sphere demo): they came back at once,
     /// after one 0.5 s join retry), and then at a spawn of their team.
     #[test]
     fn an_eliminated_player_respawns_only_after_the_delay() {
         let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
         let mut settings: ServerSettings = ServerSettings::Builtin();
-        settings.respawn.delay_s = TEST_RESPAWN_DELAY_S;
+        (settings.respawn.start_s, settings.respawn.step_s) = (TEST_RESPAWN_DELAY_S, 0.0);
         let socket: std::net::UdpSocket =
             std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port");
         socket
@@ -4313,7 +4364,7 @@ mod tests {
                 eye.w_axis.truncate(),
                 -eye.z_axis.truncate(),
                 90.0,
-                2,
+                Bounces::Perfect(2),
                 &targets,
                 Some(0),
             );

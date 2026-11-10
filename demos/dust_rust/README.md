@@ -56,6 +56,9 @@ it); leave it unset to play across computers.
   wind's gradient adds to the mouth's own. The Metal shader (`wind_gradient`, `wind_kick`) and the CPU laser
   (`WindField` in `src/voxel_world.rs`) use the same rule. Dust's `direction` is the map's x, which is the
   Fermi v axis, so the wind blows across the line between the spawns.
+- **Wind strength** (`sandstorm.wind_per_map_wind` in `server_settings.yaml`, W-158, per-map game settings): the
+  map's k times this, so the game master can calm the storm (0) or strengthen it; it also scales the drift of a
+  shot's dust.
 - **Gusts** (`atmosphere.wind.gust`): the wind keeps one direction and only its strength changes, by 1 plus
   `strength_frac` (20%) times the mean of three sine waves with phases from `seed`, periods of 5, 7 and 11 s and
   wavelengths of a few `size_m` (3000 m, so almost the same everywhere on the map). Every window and the server

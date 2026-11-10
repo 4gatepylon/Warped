@@ -187,9 +187,9 @@ impl MatchPlay {
     }
 
     /// `update_online` exchanges this frame's state with the server. A player eliminated by the
-    /// server asks to join again only once their respawn delay has passed (`client.rejoin`), not
-    /// every `JOIN_RETRY_S` while dead, so the server sees them back after the same delay as in
-    /// every level.
+    /// server asks to join again only once the server's respawn wait, which the elimination
+    /// carries, has passed (`client.rejoin`), not every `JOIN_RETRY_S` while dead, so the server
+    /// sees them back after the same wait as in every level.
     fn update_online(
         &mut self,
         client: &mut Client,
@@ -198,7 +198,13 @@ impl MatchPlay {
         dt_s: f32,
     ) -> Result<(), Box<dyn Error>> {
         for event in client.poll()? {
-            if let NetEvent::Eliminated { is_self: true, .. } = event {
+            if let NetEvent::Eliminated {
+                is_self: true,
+                respawn_wait_s,
+                ..
+            } = event
+            {
+                session.respawn_wait_s = Some(respawn_wait_s as f32);
                 session.player.take_damage(f32::MAX);
             }
         }

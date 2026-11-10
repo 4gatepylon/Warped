@@ -31,7 +31,8 @@ use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
     GravitySettings, MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings,
-    SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
+    ShootingSettings, SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings,
+    WormholeSettings,
 };
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
@@ -44,8 +45,9 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 23] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 26] = [
     "glass.max_bounce_count",
+    "glass.reflectivity_frac",
     "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
     "sniper.reload_s",
@@ -63,7 +65,9 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 23] = [
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
-    "respawn.delay_s",
+    "respawn.start_s",
+    "respawn.step_s",
+    "shooting.drop_m_per_s_per_s",
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
@@ -120,12 +124,22 @@ pub struct PerPlayerSettings {
 }
 
 /// `GlassSettings` is how shots meet City Sphere's glass from the glass level: how many times a
-/// shot may reflect off it and how far a shot goes in all (metres, every leg counted).
+/// shot may reflect off it, how far a shot goes in all (metres, every leg counted), and the share
+/// of the range left that each reflection keeps (`reflectivity_frac`, W-158, per-map game
+/// settings; 1 when a file leaves it out, a perfect mirror).
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct GlassSettings {
     pub max_bounce_count: u32,
     pub range_m: f64,
+    #[serde(default = "get_perfect_reflectivity_frac")]
+    pub reflectivity_frac: f64,
+}
+
+/// `get_perfect_reflectivity_frac` is `GlassSettings::reflectivity_frac` for a file without it:
+/// a perfect mirror, as before the setting.
+fn get_perfect_reflectivity_frac() -> f64 {
+    1.0
 }
 
 /// `ServerSettings` is everything in `server_settings.yaml`.
@@ -139,6 +153,8 @@ pub struct ServerSettings {
     pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
