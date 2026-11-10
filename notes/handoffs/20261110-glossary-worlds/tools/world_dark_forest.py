@@ -28,9 +28,9 @@ BLUE = [
     C("blue spawn", (-53, 0), 26, "t"),
     R("blue palisade", "blue palisade", "r"),
     C("blue left pylon", pyl["blue pylon 0"], 14, "b"),
-    R("blue treehouse", "blue treehouse", "t"),
+    R("blue treehouse", "blue treehouse", "tl!"),
     C("blue right pylon", pyl["blue pylon 1"], 14, "l"),
-    C("blue treehouse ladder", lad["blue treehouse ladder"], 10, "r"),
+    C("blue treehouse ladder", lad["blue treehouse ladder"], 10, "r!"),
     R("blue home bridge", "blue home bridge", "l"),
     C("blue rock 3", groups["blue rock 3"][0][:2], 14, "t"),
     C("blue rock 2", groups["blue rock 2"][0][:2], 14, "r"),
@@ -60,6 +60,12 @@ MID = [
     C("red rock 0", groups["red rock 0"][0][:2], 14, "l"),
     R("red middle deck", "red middle deck", "r"),
     C("red middle ladder", lad["red middle ladder"], 10, "l"),
+    C("blue flank ladder", lad["blue flank ladder"], 10, "l"),
+    C("red flank ladder", lad["red flank ladder"], 10, "r"),
+    C("blue lookout ladder", lad["blue lookout ladder"], 10, "l!"),
+    C("red lookout ladder", lad["red lookout ladder"], 10, "br"),
+    C("blue centre ladder", lad["blue centre ladder"], 10, "tr!"),
+    C("red centre ladder", lad["red centre ladder"], 10, "bl"),
 ]
 RED_ZONE = [
     C("mid gate, red mouth", warp["gate 2 mouth 0"], 34, "l"),
@@ -68,14 +74,14 @@ RED_ZONE = [
     C("red rock 3", groups["red rock 3"][0][:2], 14, "b"),
     C("red home gate, mouth A", warp["gate 3 mouth 0"], 22, "l"),
     C("red home gate, mouth B", warp["gate 3 mouth 1"], 22, "t"),
-    R("red treehouse", "red treehouse", "b"),
-    C("red right pylon", pyl["red pylon 1"], 14, "r"),
+    R("red treehouse", "red treehouse", "br!"),
+    C("red right pylon", pyl["red pylon 1"], 14, "r!"),
     R("red palisade", "red palisade", "l"),
     C("red left pylon", pyl["red pylon 0"], 14, "t"),
-    C("red treehouse ladder", lad["red treehouse ladder"], 10, "l"),
+    C("red treehouse ladder", lad["red treehouse ladder"], 10, "l!"),
     C("red spawn", (53, 0), 26, "b"),
 ]
 pic = REPO / "demos/dark_forest_rust/assets/map_picture.png"
 annotate(pic, 2, to_px, BLUE, "dark_forest_map_1_blue_zone.jpg", crop=(0, 80, 840, 480), font_px=30)
-annotate(pic, 2, to_px, MID, "dark_forest_map_2_middle_zone.jpg", crop=(0, 400, 840, 960), font_px=30)
+annotate(pic, 3, to_px, MID, "dark_forest_map_2_middle_zone.jpg", crop=(0, 400, 840, 960), font_px=32, line_px=6)
 annotate(pic, 2, to_px, RED_ZONE, "dark_forest_map_3_red_zone.jpg", crop=(0, 880, 840, 1280), font_px=30)

@@ -41,9 +41,6 @@ for name, u, v in spawns:
     x, y = to_px(u, v)
     colour = (90, 150, 255) if name.startswith("blue") else (255, 90, 80)
     draw.polygon([(x, y - 14), (x + 12, y + 10), (x - 12, y + 10)], fill=colour)
-caption_font = ImageFont.truetype(FONT_PATH, 22)
-for x0 in (10, 850, 1650):
-    draw.text((x0, H - 34), "Drawn from the level layout, not a game screenshot", font=caption_font, fill=(190, 190, 190))
 base_path = OUT / "_lunar_base.png"
 OUT.mkdir(exist_ok=True)
 base.save(base_path)
@@ -52,7 +49,7 @@ def pick(name, z):
     return sorted([(u, v) for n, u, v in singles + warps + spawns if n == name and zone(u) == z], key=lambda t: (-t[0], t[1]))
 def C(label, pos, r, anchor="r"):
     return (label, pos[0], pos[1], "c", r, anchor)
-WALL_ANCHORS = {"blue": ["b", "t", "b", "r", "r", "b", "t"], "red": ["t", "b"]}
+WALL_ANCHORS = {"blue": ["b", "t", "b", "r", "r", "r", "r"], "red": ["t", "b"]}
 def wall_marks(team, order):
     ws = sorted([w for w in walls if zone(w[1]) == team], key=order)
     return [(f"{team} hesco wall {i + 1}", w[1], w[2], "r", (w[3] * S / 2 + 12, w[4] * S / 2 + 12), WALL_ANCHORS[team][i]) for i, w in enumerate(ws)]
@@ -77,14 +74,19 @@ rp = sorted(pick("red pylon", "red"), key=lambda t: -t[1])
 RED_ZONE = [
     C("red spawn", pick("red spawn", "red")[0], 20, "b"), C("red hangar", pick("red spawn hangar", "red")[0], 38, "t"),
     C("red left pylon", rp[0], 18, "b"), C("red mid pylon", rp[1], 18, "t"), C("red right pylon", rp[2], 18, "t"),
-    C("red habitat", pick("red habitat module", "red")[0], 30, "b"), C("red landing pad and pad mouth", pick("red landing pad", "red")[0], 38, "b"),
+    C("red habitat", pick("red habitat module", "red")[0], 30, "b"), C("red landing pad, red pad mouth", pick("red landing pad", "red")[0], 38, "b"),
     C("red solar array", pick("red solar array", "red")[0], 24, "t"), C("red crates", pick("red crates", "red")[0], 18, "b"),
     C("red watchtower", pick("red watchtower", "red")[0], 18, "t"), C("red dome", pick("red dome", "red")[0], 28, "b"),
     C("red antenna", pick("red antenna", "red")[0], 16, "b"), C("red walkway", pick("red walkway", "red")[0], 28, "t"),
 ] + wall_marks("red", lambda w: (w[1], w[2]))
-annotate(base_path, 1, to_px, BLUE, "lunar_surface_map_1_blue_zone.jpg", crop=(0, 0, 900, H), font_px=26, line_px=4)
-annotate(base_path, 1, to_px, MID, "lunar_surface_map_2_middle_zone.jpg", crop=(820, 0, 1820, H), font_px=26, line_px=4)
-annotate(base_path, 1, to_px, RED_ZONE, "lunar_surface_map_3_red_zone.jpg", crop=(1740, 0, W, H), font_px=26, line_px=4)
+annotate(base_path, 1, to_px, BLUE, "lunar_surface_map_1_blue_zone.jpg", crop=(0, 0, 1180, H), font_px=26, line_px=4, bottom_margin_px=44)
+annotate(base_path, 1, to_px, MID, "lunar_surface_map_2_middle_zone.jpg", crop=(820, 0, 1820, H), font_px=26, line_px=4, bottom_margin_px=44)
+annotate(base_path, 1, to_px, RED_ZONE, "lunar_surface_map_3_red_zone.jpg", crop=(1740, 0, W, H), font_px=26, line_px=4, bottom_margin_px=44)
 base_path.unlink()
+caption_font = ImageFont.truetype(FONT_PATH, 22)
+for out_name in ("lunar_surface_map_1_blue_zone.jpg", "lunar_surface_map_2_middle_zone.jpg", "lunar_surface_map_3_red_zone.jpg"):
+    pic = Image.open(OUT / out_name)
+    ImageDraw.Draw(pic).text((10, H - 34), "Drawn from the level layout, not a game screenshot", font=caption_font, fill=(190, 190, 190))
+    pic.save(OUT / out_name, "JPEG", quality=85)
 for nm, ms in [("BLUE", BLUE), ("MID", MID), ("RED", RED_ZONE)]:
     print(nm, [(m[0], round(m[1]), round(m[2])) for m in ms])
