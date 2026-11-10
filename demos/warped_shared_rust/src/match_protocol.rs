@@ -9,7 +9,7 @@
 //! (`Connect`, `poll`, `send_play`, `send_settings`), `parse_hello`, `parse_play`, `make_play`, `stop_child`, `is_sitting_out`, `is_level_restart_due`,
 //! `describe_outcome`, `MatchBeacon`, `BeaconPhase`, `MatchAnnouncer`, `MatchListener`,
 //! `FoundMatch`, `update_found_matches`, `MATCH_PORT`, `MATCH_DISCOVERY_PORT`,
-//! `CLIENT_TIMEOUT_S`, `MAX_DATAGRAM_BYTES`, `SELF_PROGRAM`.
+//! `CLIENT_TIMEOUT_S`, `MAX_DATAGRAM_BYTES`, `allow_full_datagrams`, `SELF_PROGRAM`.
 //!
 //! Example: `let mut client = MatchClient::Connect(server, Some(Team::Blue))?; client.poll()?;`
 //!
@@ -28,6 +28,7 @@ use std::error::Error;
 use std::fs;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Child;
 use std::time::{Duration, Instant};
@@ -48,6 +49,30 @@ pub const CLIENT_TIMEOUT_S: f64 = 3.0;
 pub const MAX_DATAGRAM_BYTES: usize = 65_000;
 pub const SELF_PROGRAM: &str = "self";
 const MATCH_BEACON_MAGIC: &[u8; 8] = b"WARPMTCH";
+
+/// `allow_full_datagrams` lets `socket` send datagrams of up to `MAX_DATAGRAM_BYTES`, the largest
+/// its readers take, by making its send buffer that large: macOS refuses a datagram larger than
+/// the socket's send buffer (`Message too long`), which starts at 9216 bytes, less than the game
+/// settings' answer.
+///
+/// Example: `allow_full_datagrams(&socket)?;`
+pub fn allow_full_datagrams(socket: &UdpSocket) -> std::io::Result<()> {
+    let send_buffer_bytes: libc::c_int = MAX_DATAGRAM_BYTES as libc::c_int;
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE KERNEL READING THE WRONG BYTES AS THE BUFFER SIZE WILL HAPPEN
+    let status: libc::c_int = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            (&raw const send_buffer_bytes).cast::<libc::c_void>(),
+            size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if status != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
 const MATCH_BEACON_VERSION: u8 = 1;
 const MATCH_BEACON_PERIOD_S: f64 = 0.5;
 const BYTES_PER_MATCH_BEACON: usize = MATCH_BEACON_MAGIC.len() + 1 + 2 + 2 + 1 + 1;
@@ -670,6 +695,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Levels file | an even count (the shipped one: `match_flow.rs`) | `an_even_level_count_is_refused` |
     //! | Hello | each team, any, garbage | `hellos_name_a_team` |
+    //! | Datagram size | the largest the readers take, far above a socket's starting send buffer | `a_socket_sends_the_largest_datagram_once_allowed` |
     //! | Play | every level of a five-level match, the match, past the last level, garbage, a hello | `play_messages_choose_any_level_or_the_match` |
     //! | Steered bot | unsteered, its team's round, the other's, past the list | `steered_bots_sit_out_the_other_teams_rounds` |
     //! | Level restart | none stopped, no view, a view from before the stop, too soon after, late enough | `a_stopped_level_restarts_only_on_a_fresh_view` |
@@ -891,6 +917,24 @@ mod tests {
         assert!(parse_play(b"play 5", 5).is_err());
         assert!(parse_play(b"play dust", 5).is_err());
         assert!(parse_play(b"hello blue", 5).is_err());
+    }
+
+    #[test]
+    fn a_socket_sends_the_largest_datagram_once_allowed() {
+        let receiver: UdpSocket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let sender: UdpSocket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        allow_full_datagrams(&sender).unwrap();
+        let sent: Vec<u8> = (0..MAX_DATAGRAM_BYTES).map(|i| i as u8).collect();
+        sender
+            .send_to(&sent, receiver.local_addr().unwrap())
+            .unwrap();
+        let mut buffer: Vec<u8> = vec![0; MAX_DATAGRAM_BYTES];
+        let (length, _) = receiver.recv_from(&mut buffer).unwrap();
+        assert_eq!(length, MAX_DATAGRAM_BYTES);
+        assert_eq!(buffer, sent);
     }
 
     #[test]

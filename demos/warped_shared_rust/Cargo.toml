@@ -16,6 +16,7 @@ edition = "2024"
 glam = "0.34"
 gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_materials_transmission"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+libc = "0.2"
 rayon = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }

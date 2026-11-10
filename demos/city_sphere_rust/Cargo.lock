@@ -979,6 +979,7 @@ dependencies = [
  "glam",
  "gltf",
  "image",
+ "libc",
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",
