@@ -712,7 +712,12 @@ mod tests {
             kills,
             deaths: 0,
         };
-        let scores: Vec<Score> = vec![score(1, 1, 0), score(2, 0, 1), score(3, 1, 4), score(4, 0, 3)];
+        let scores: Vec<Score> = vec![
+            score(1, 1, 0),
+            score(2, 0, 1),
+            score(3, 1, 4),
+            score(4, 0, 3),
+        ];
         let unknown: Scoreboard = Scoreboard::Scores {
             scores: &scores,
             own_id: None,
@@ -727,7 +732,11 @@ mod tests {
                 get_own_team_lines(scoreboard).expect("this player's team");
             assert_eq!((own_team, end_excl - first), (team, 2));
             let lines: Vec<(String, bool)> = menu.get_lines(&mine, "", scoreboard);
-            assert!(lines[first..end_excl].iter().all(|(line, _)| line.starts_with(team_name)));
+            assert!(
+                lines[first..end_excl]
+                    .iter()
+                    .all(|(line, _)| line.starts_with(team_name))
+            );
             assert!(!lines[first - 1].0.starts_with(team_name));
             assert!(!lines[end_excl].0.starts_with(team_name));
         }

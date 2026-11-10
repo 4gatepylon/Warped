@@ -5291,8 +5291,9 @@ mod tests {
         let team_box: Picture =
             make_team_box_picture(menu::get_own_team_lines(scoreboard).expect("own team"));
         let mask_max_px: [i32; 2] = [MENU_MASK_PX.0 as i32, MENU_MASK_PX.1 as i32];
-        assert!((0..2).all(|a| team_box.min_mask_px[a] >= 0
-            && team_box.max_excl_mask_px[a] <= mask_max_px[a]));
+        assert!((0..2).all(
+            |a| team_box.min_mask_px[a] >= 0 && team_box.max_excl_mask_px[a] <= mask_max_px[a]
+        ));
         for menu in [settings_menu, scores_menu, credits_menu, quit_menu] {
             let menu_text: OverlayText = OverlayText {
                 lines: menu.get_lines(&mine, &long_path, scoreboard),
