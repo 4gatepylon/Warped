@@ -20,6 +20,7 @@ terms.
 
 - [How to use it](#how-to-use-it)
 - [Structure of play](#structure-of-play)
+- [People and entities](#people-and-entities)
 
 ## Structure of play
 
@@ -43,3 +44,20 @@ terms.
 | **route**, **floor** | One way across the middle zone; one walkable layer inside a level. | |
 | **level edge** | The soft edge of a level, where players slow down without end as they climb, so they never leave. | "map edge" |
 | **instance** | One particular copy of something that is defined once. Each hesco wall in a world is an instance of the hesco block structure, and a level being played in a round is an instance of that level. | |
+
+## People and entities
+
+| Say | Meaning | Might be called by the user |
+| --- | --- | --- |
+| **entity** | A thing in a world that acts, for a person or by itself: a player or a bot. Every entity has a sprite. | |
+| **player** | The entity of a person who is playing. It has the bot sprite. | |
+| **bot** | The entity the computer controls, on your team or the other. | "robot" |
+| **sprite** | The visuals of an entity or an object: its shape and its **skin**, the colours and textures on it. | "skin" |
+| **bot sprite** | The robot-shaped sprite that every player and every bot has, in its team's colour. | "robot", "robot sprite", "bot skin", "robot skin" |
+| **game master** | The person who chooses what everyone plays and changes the game settings. | |
+| **operator** | The person who runs a game server. | |
+| **elimination** | A player or bot is hit enough to be out of health. It counts as a *death* for them and, when an enemy did it, a *kill* for the shooter. | "died", "killed" |
+| **respawn** | An eliminated player's or bot's return, after the respawn time, on a ring around their team's spawn. | |
+| **health** | What a hit takes away. | |
+| **energy** | What sprinting uses up and time refills. | |
+| **ammo** | What a gun uses when it fires. The sniper rifle holds one shot and reloads after it; the rifle heats up as it fires and cools down afterwards. Ammo never runs out for good. | |
