@@ -202,12 +202,9 @@ constant float ZONE_STRIP_M = 0.8;
 constant float ZONE_TINT_GAIN = 1.5;
 constant float ZONE_TINT_FRAC = 0.07;
 constant int MAX_ZONE_WALL_COUNT = __MAX_ZONE_WALL_COUNT__;
-constant float ZONE_WALL_BRIGHTNESS = 0.8;
-constant float ZONE_WALL_FOOT_M = 0.4;
-constant float ZONE_WALL_BODY_FRAC = 0.6;
-constant float ZONE_WALL_TOP_FADE_FRAC = 0.4;
-constant float ZONE_WALL_SOFT_TOP_FRAC = 0.25;
 constant float ZONE_WALL_END_M = 4.0;
+constant float ZONE_WALL_SHIMMER_MIN_FRAC = 0.02;
+constant float ZONE_WALL_SHIMMER_MIN_COS = 0.1;
 constant float ZONE_WALL_MAX_SLANT = 4.0;
 constant float ZONE_WALL_FACE_FRAC = 0.7;
 constant float ZONE_WALL_SAMPLE_M = 1.0;
@@ -521,7 +518,7 @@ struct Spaceship {
 
 /**
  * @brief `ZoneWalls` is `zone_walls.rs`'s `GpuZoneWalls`: per wall its plane's (n_z, -n_w, edge u in meters, team),
- * then (height, opacity, thickness in meters, unused), the boundary's (u, v) semi-axes in meters (0 without one), and
+ * then (height, opacity, thickness in meters, the shimmer's clock in seconds), the boundary's (u, v) semi-axes in meters (0 without one), and
  * (wall count, unused).
  */
 struct ZoneWalls {
@@ -2209,10 +2206,9 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
 
 /**
  * @brief `get_zone_wall_depth` gives the optical depth of a zone wall seen face-on (straight through its thickness) at
- * point p, `distance_s` from the eye, for the wall on the edge at Fermi u `wall_u_m`: the map's opacity at the ground,
- * falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`, then by `ZONE_WALL_TOP_FADE_FRAC` of that up
- * to the wall's height above the ground, over whose top `ZONE_WALL_SOFT_TOP_FRAC` it fades out; it also fades out over
- * the last `ZONE_WALL_END_M` before the boundary, and thins in the haze.
+ * point p, `distance_s` from the eye, for the wall on the edge at Fermi u `wall_u_m`: the map's opacity at the ground
+ * times the boundary planes' profile up to the wall's height (`get_boundary_profile`, `boundary_planes.metal`, W-148);
+ * it also fades out over the last `ZONE_WALL_END_M` before the boundary, and thins in the haze.
  * @par Example
  * @code
  * float depth = get_zone_wall_depth(scene, p, -45.0, s);
@@ -2225,9 +2221,7 @@ static float get_zone_wall_depth(thread const Scene &scene, float4 p, float wall
     float3 f = get_fermi(p, r);
     float v_end_m = boundary.y > 0.0 ? boundary.y * sqrt(max(1.0 - (wall_u_m / boundary.x) * (wall_u_m / boundary.x), 0.0)) : NO_HIT_S;
     float above_m = max(f.z - (scene.u.has_terrain != 0 ? terrain_height_m(scene, f.x, f.y) : 0.0), 0.0);
-    float height_frac = above_m / look.x;
-    float profile = mix(ZONE_WALL_BODY_FRAC * (1.0 - ZONE_WALL_TOP_FADE_FRAC * height_frac), 1.0, exp(-above_m / ZONE_WALL_FOOT_M))
-                  * (1.0 - smoothstep(1.0 - ZONE_WALL_SOFT_TOP_FRAC, 1.0, height_frac));
+    float profile = get_boundary_profile(above_m, look.x);
     float haze_frac = 1.0 - exp(-max(distance_s * r - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
     float opacity = look.y * profile * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y)) * (1.0 - HAZE_MAX_FRAC * haze_frac);
     return -log(1.0 - opacity);
@@ -2276,8 +2270,45 @@ static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float
             float slant = min(1.0 / max(abs(a * sinh(s_out) + b * cosh(s_out)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
             depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_out), wall.z, travelled + s_out);
         }
-        dust += float4(to_linear(wall.w > HALF_KIND ? RED_COLOR : BLUE_COLOR) * ZONE_WALL_BRIGHTNESS * depth, depth);
+        dust += float4(to_linear(get_boundary_color(int(wall.w > HALF_KIND))) * BOUNDARY_BRIGHTNESS * depth, depth);
     }
+}
+
+/**
+ * @brief `find_zone_wall_crossing` finds the first zone wall whose middle plane the chord from x along v crosses before
+ * `s_end` (`travelled` from the eye), of those not crossed yet (`crossed`, a bit per wall), where the wall shows
+ * (`get_zone_wall_depth` above `ZONE_WALL_SHIMMER_MIN_FRAC` of its opacity): what is seen through a boundary plane
+ * shimmers there (W-149, shimmer through boundary planes). It moves `s_end` to the crossing and gives how far the view
+ * turns there (`bend`, along the world's x and y axes: `get_boundary_shimmer` at the crossing's Fermi (v, h), times how
+ * opaque the wall is there), and returns the wall's index, or -1 without one.
+ * @par Example
+ * @code
+ * int wall = find_zone_wall_crossing(scene, x, v, travelled, crossed_walls, s_end, bend);
+ * @endcode
+ */
+static int find_zone_wall_crossing(thread const Scene &scene, float4 x, float4 v, float travelled, int crossed,
+                                   thread float &s_end, thread float2 &bend) {
+    constant ZoneWalls &walls = scene.u.zone_walls;
+    float r = scene.u.curvature_radius_m, crossing_s = s_end;
+    int found = -1;
+    for (int i = 0; i < walls.counts.x; i++) {
+        float4 wall = walls.walls[i];
+        float t = -(x.z * wall.x + x.w * wall.y) / (v.z * wall.x + v.w * wall.y);
+        if (((crossed >> i) & 1) != 0 || !(t > 0.0 && t < LAMBDA_LIMIT)) continue;
+        float s = atanh(t);
+        if (s < crossing_s) { crossing_s = s; found = i; }
+    }
+    if (found < 0) return -1;
+    float4 wall = walls.walls[found];
+    float4 p = geodesic_point(x, v, crossing_s);
+    float shown_frac = (1.0 - exp(-get_zone_wall_depth(scene, p, wall.z, travelled + crossing_s))) / walls.look.y;
+    if (shown_frac < ZONE_WALL_SHIMMER_MIN_FRAC) return -1;
+    float4 v_at = geodesic_tangent(x, v, crossing_s);
+    float face_cos = max(abs(v_at.z * wall.x + v_at.w * wall.y), ZONE_WALL_SHIMMER_MIN_COS);
+    float footprint_m = (travelled + crossing_s) * r * scene.u.pixel_angle_rad / face_cos;
+    bend = get_boundary_shimmer(get_fermi(p, r).yz, walls.look.w, footprint_m) * shown_frac;
+    s_end = crossing_s;
+    return found;
 }
 
 /**
@@ -2403,6 +2434,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
     int outcome = OUTCOME_LOST, last_warp = -1, tint = 0;
+    int crossed_walls = 0;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
     float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
@@ -2419,6 +2451,8 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 float s_in = max(clamp_atanh(b / a) - acosh(reach_cosh * rsqrt(max(closest_sq, 1.0))), 0.0);
                 if (s_in < s_end) { s_end = s_in; entering = w; }
             }
+            float2 shimmer_bend = float2(0.0);
+            int shimmer_wall = u.zone_walls.counts.x > 0 ? find_zone_wall_crossing(scene, x, v, travelled, crossed_walls, s_end, shimmer_bend) : -1;
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
@@ -2428,6 +2462,14 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+            if (shimmer_wall >= 0) {
+                float4 xn = geodesic_point(x, v, s_end);
+                v = normalize_tangent(xn, geodesic_tangent(x, v, s_end) + float4(shimmer_bend, 0.0, 0.0));
+                x = xn * rsqrt(-mdot(xn, xn));
+                travelled += s_end;
+                crossed_walls |= 1 << shimmer_wall;
+                continue;
+            }
             if (entering < 0) {
                 if (last_warp >= 0) back_to_reach(scene, last_warp, x, v);
                 outcome = OUTCOME_SKY;

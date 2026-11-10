@@ -48,6 +48,7 @@ use crate::voxel_world::{
     BeamSegment, FOG_DEPTHS, MAX_MATERIAL_COUNT, VoxelWarp, VoxelWorld, clip_beam_to_map,
 };
 use crate::zone_walls::{GpuZoneWalls, MAX_ZONE_WALL_COUNT};
+use warped_shared::boundary_planes::{BOUNDARY_PLANES_METAL, get_shimmer_clock_s};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -716,7 +717,7 @@ impl VoxelFrame {
             .collect();
         gpu_beams.extend(get_beacon_beams(world));
         let (dust_bursts, dust_particles) = pack_dust(dust);
-        let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
+        let mut zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
             GpuZoneWalls {
                 walls: [[0.0; 4]; MAX_ZONE_WALL_COUNT],
                 look: [0.0; 4],
@@ -725,6 +726,7 @@ impl VoxelFrame {
             },
             |walls| walls.to_gpu(r),
         );
+        zone_walls.look[3] = get_shimmer_clock_s(world.sky_time_s);
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
         let (planet, e1, e2) = match world.planet {
             Some((d, radius_rad)) => {
@@ -1040,7 +1042,8 @@ fn make_hdr_texture(
 fn make_library(
     device: &ProtocolObject<dyn MTLDevice>,
 ) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
-    let source: String = SHADER_SOURCE
+    let source: String = format!("{BOUNDARY_PLANES_METAL}
+{SHADER_SOURCE}")
         .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
         .replace(
             "__BYTES_PER_RAY_END__",
