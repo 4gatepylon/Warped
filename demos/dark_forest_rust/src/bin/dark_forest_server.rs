@@ -3,7 +3,7 @@
 //! Example: `dark-forest-server --port 47840 --level-result-file /tmp/result.json`
 //!
 //! Interface: `--port <port>`, `--map <path to map.json>`, `--level-result-file <path>`,
-//! `--game-password-file <path>`.
+//! `--game-password-file <path>`, `--server-settings <path>`.
 //!
 //! Must know: it shares `net.rs`, `server.rs`, `map.rs`, `console_reach.rs` and `settings.rs` with
 //! the game, so both speak the same protocol and check console holds alike.
@@ -53,6 +53,9 @@ struct Arguments {
     /// A file holding the game password players must know.
     #[arg(long)]
     game_password_file: Option<PathBuf>,
+    /// The server settings file (default: the built-in server_settings.yaml).
+    #[arg(long)]
+    server_settings: Option<PathBuf>,
 }
 
 /// `main` serves until killed.
@@ -64,6 +67,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             map_path: arguments.map.unwrap_or_else(map::default_map_path),
             level_result_file: arguments.level_result_file,
             game_password: net::read_game_password(arguments.game_password_file.as_deref())?,
+            server_settings: arguments.server_settings,
         },
         &AtomicBool::new(false),
     )

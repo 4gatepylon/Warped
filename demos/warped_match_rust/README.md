@@ -101,6 +101,17 @@ match where it was; either ends the round under way, and every client follows in
 match's state, protocol and progression page live in `warped_shared` (`match_state`,
 `match_protocol`, `match_menu`); this crate's files of those names re-export them.
 
+## Game settings (the game master's, W-158)
+
+The match server keeps the game settings: each level's default server settings (its `server_settings` file) and
+the game master's overrides, one shared section (laid over every level that has the key: a key at least two levels'
+files have) and one per level (keys only that level has: Lunar Surface's `surface`, City Sphere's `glass`, Dust's
+`sandstorm`, Snow Planet's `blizzard`; Dark Forest has none). A client sends `settings?`, `set <shared|level index>
+<key> <value>` or `reset <scope> <key>` and gets `settings <json>` back (only clients that ask, so older ones never
+see it); a value must be a finite number of at least 0, whole where the default is. Each round starts with the
+settings as they are then (`warped_shared::game_settings`, `src/match_flow.rs`). The one-window app's game menu edits
+them.
+
 ## Level interface
 
 Each level is a program that the match runs once per round. `match_levels.yaml` says which
@@ -108,8 +119,12 @@ program plays each level (`program: self` is this demo's binary, else a path fro
 and its `--map`. A level program implements:
 
 ```text
-Server: <program> --serve --port <port> [--map <map>] --level-result-file <path> [server_args]
+Server: <program> --serve --port <port> [--map <map>] --level-result-file <path> [--server-settings <path>] [server_args]
 ```
+
+`--server-settings` comes when the level's entry names its default settings (`server_settings`, a path from the
+levels file's folder): the match server writes `round_<n>_server_settings.yaml` (or `free_round_<n>_...`) in its run
+folder, the level's defaults with the game master's settings laid over them, and the level plays by it.
 
 When one team has turned off every console of the other team, the server writes `<path>` once,
 atomically (`<path>.partial`, then a rename): `{"winner": "blue"}` or `{"winner": "red"}`. It
