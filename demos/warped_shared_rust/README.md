@@ -42,6 +42,11 @@ the settings sections, `weapons`, `movement` (through `Ground`), `gait`, `avatar
 | `hud` | the HUD: the crosshair, the bars (health, ammo or heat, sprint energy, the console being turned off; `HudBars`, `make_bar_rects`) and their pulses (`HudPulses`), the hit effect's look (`make_hit_effect`), the banner's lobby and "YOU DIED" lines, the HUD line's gun | no (Metal) |
 | `gait` | which of the robot's clips another player shows, and where in it, from their speed over the ground and take-off (Lunar's `avatar_animation` rules; every level's) | yes |
 | `third_person` | the third-person view's switch (`ViewSwitch`: `V`, eased, back to the eye while aiming) and its boom in flat space (`place_camera_flat`, City Sphere's and Dark Forest's); Lunar Surface's copies place it in their curved space themselves | yes |
+| `app` | the interface between the one-window app (`../warped_mvp_rust/`) and a level: `LevelJoin`, `LevelEnd`, `MatchLink`, `LevelWindow`, `play_level_fn_t` | yes (`LevelWindow` macOS) |
+| `match_state`, `match_protocol`, `match_menu` | the match's rules (and free play on one level), what its server and clients share (levels file, view, `MatchClient`, the game master's `play` message, the network beacon) and its progression page and MATCH page lines; moved from `../warped_match_rust/` | yes |
+| `page` | a menu page's shapes in the debug font, drawn with SDL (`draw_shapes`) | yes (`draw_shapes` macOS) |
+| `player_settings` | `player_settings.yaml`: reading (old saves upgraded), checking, saving, and the numbers a settings page edits; the levels' own copies switch to it when they become libraries | no (SDL keys) |
+| `settings_editor` | a settings page any menu shows: numbers (stepped or typed), key bindings, buttons, over a settings file's keys | yes |
 | `weapons` | the two guns' state (`Weapons`: fire, reload, heat and overheat, recoil, aim, each shot's noise), `Gun`, how much a hit weighs, the gun in hand's place and sway (`make_wand`, `get_sway`; `make_wand_camera_from_muzzle` for a level that draws a gun model there), `MUZZLE_M` | no (Metal) |
 
 `overlay` and `texture_arrays` are parts of files that differ per level, taken out verbatim: the overlay types of
