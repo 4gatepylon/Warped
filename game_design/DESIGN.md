@@ -309,6 +309,12 @@ Speeds are set per level as a multiple of the level map's own speeds (`movement`
 Players can sprint, with head bob, as in other first-person shooters. Sprinting uses up energy,
 which has nothing to do with the guns' heat.
 
+- Sprinting speeds up and slows down (W-202): while Shift is held with energy left, the legs' speed rises from
+  walking speed to the sprint's top speed at 15 m/s² (`movement.sprint_up_m_per_s_per_s`); the moment Shift is let
+  go or the energy runs out it falls back at 15 m/s² (`movement.sprint_down_m_per_s_per_s`). Walking itself starts
+  and stops at once. (Dust, Snow Planet, Lunar Surface and the match; City Sphere and Dark Forest still switch
+  speed at once.)
+
 - Energy drains at a steady rate while a player sprints, and refills at a steady rate while they
   don't: as fast as it drains while crouched, and half as fast while walking or standing.
 - Energy never goes above full. A player who runs out of energy can't sprint.
@@ -328,29 +334,32 @@ which has nothing to do with the guns' heat.
 
 ### Gravity toward warps
 
-Black holes and wormhole mouths pull players along the ground, in every level (W-144): the
-level's own warps, and the thrown mouths once linked. Each adds a speed toward itself to the
-player's walk, so running toward one is faster, running away slower, and a player standing still
-drifts toward it. The pull is relatively weak but noticeable: strongest near the warp, falling off
-with distance, and never stopping a player who walks away.
+Black holes and wormhole mouths pull players along the ground (W-202, pull toward wormholes and black holes in
+the game settings): the level's own warps, and the thrown mouths once linked. Inside a radius of a warp's centre a
+player is accelerated straight toward it, by the same amount everywhere inside the radius. A player can walk near a
+warp and be fine, but too close the pull wins and the player goes through.
 
-- The pull points at the warp along the ground; a warp overhead (Lunar Surface's black hole, Snow
-  Planet's) pulls by the part of its direction along the ground, so a player drifts to stand
-  under it.
-- A mouth's pull fades to nothing at its throat, so a player drifting in stops at the mouth
-  rather than being pulled through it; walking in still goes through.
-- All warps' pulls together are capped at the strongest pull. It is a share of walking speed, so
-  it scales with each level's walking speed: more than crouching speed (crouching away from a
-  warp that close is pulled in), less than walking speed.
-- The game server's settings hold it (`gravity` in `server_settings.yaml`, the same built-in
-  values in every level when left out, which a level or the game master can change).
+- The pull builds up a drift, a velocity added to the player's walk. Inside a radius nothing brakes it; outside
+  every radius it dies away quickly.
+- Going through a mouth keeps the speed: the player comes out of the other mouth as fast as it went in, and that
+  mouth's pull then slows it. A player who touches nothing swings back and forth through the pair.
+- The pull is weaker than sprinting speeds up, so a sprinting player always gets away.
+- The pull points at the warp along the ground; a warp overhead pulls by the part of its direction along the
+  ground. A warp whose horizon is wider than the radius doesn't pull.
+- A move a wall refuses ends the drift. Flying players are not pulled.
+- The game server's settings hold it (`gravity` in `server_settings.yaml`), and the game master can change it.
+- The numbers below are a proposal the user is tuning in the game (`WARPED_TUNE_PULL=1` turns on keys that change
+  them while playing); the equations are in `demos/warp_pull_js/EQUATIONS.md`.
+- Dust, Snow Planet, Lunar Surface and the match have this pull. City Sphere and Dark Forest still have the earlier
+  one (a speed of up to 0.75 of walking speed toward a warp, fading out over 24 m, and to nothing at a mouth's
+  throat) until they are moved over.
 
 | Parameter | Value |
 | --- | --- |
-| Strongest pull | 0.75 of walking speed (Lunar Surface: 7.5 m/s) (`gravity.max_pull_per_walk_speed`) |
-| Full pull | within 3 m of a black hole's horizon or a mouth's throat (`gravity.full_pull_m`) |
-| Falling off | as the square of the share of the way left to the reach |
-| Reach | 24 m out from the horizon or throat (`gravity.reach_m`) |
+| Radius | 5 m from the warp's centre, 2.5 bodies (`gravity.radius_m`) |
+| Strength | 11.9 m/s² (`gravity.acceleration_m_per_s_per_s`): a fall from the radius reaches a thrown mouth's throat at 9 m/s |
+| Shape | the same everywhere inside the radius (`gravity.profile`: `constant`; also `stronger_near_mouth`, `harmonic`) |
+| Braking outside every radius | 15 m/s² (`gravity.brake_m_per_s_per_s`) |
 
 ### Map edge
 

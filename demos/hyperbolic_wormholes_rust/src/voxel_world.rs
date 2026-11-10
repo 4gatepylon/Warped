@@ -2820,7 +2820,7 @@ mod tests {
             top_m_per_s > 0.7 * fall_m_per_s && top_m_per_s < 1.3 * fall_m_per_s,
             "{top_m_per_s}"
         );
-        let mut turned: VoxelPlayer = drifted.clone();
+        let mut turned: VoxelPlayer = drifted;
         turned.look(std::f64::consts::FRAC_PI_2 / LOOK_RAD_PER_PX, 0.0);
         assert!((turned.drift_m_per_s.length() - drifted.drift_m_per_s.length()).abs() < 1e-12);
         assert!(turned.drift_m_per_s.x.abs() > 0.99 * drifted.drift_m_per_s.length());
