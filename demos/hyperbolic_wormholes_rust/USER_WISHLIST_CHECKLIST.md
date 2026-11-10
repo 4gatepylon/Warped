@@ -174,6 +174,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
+- [?] **W-146 Pylon squares and own-team box.** The user, 2026-11-09: "the squares mechanic for how many flags have been captured/pylons deactivated should be in every map" and "also there should be a colored box around the team that is your team so players can easily tell which team they are on". #520: in every level (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest) a square per console at the top centre (3, 3, 2, 1, 2 per team), an empty slot once turned off, with a box in your team's colour around your team's squares; your team's rows boxed on the scores page, and "you play ..." boxed on the match's progression page (the app's game menu).
+
 - [?] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
   #486: in every level (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest): holding `Tab`
   shows the map over the game while play goes on; `Esc` opens the menu (freeing the mouse), `Esc` again closes it;
