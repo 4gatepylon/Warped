@@ -40,6 +40,8 @@ use crate::menu_page::{LINE, MARGIN, MenuInput, MenuRow, push_heading, push_rows
 use crate::player_settings_page::{PageOutcome, PlayerSettingsPage};
 use crate::screens::{Navigator, Screen};
 
+/// `DOUBLE_CLICK_COUNT` is SDL's click count from which a click on a level starts it at once.
+const DOUBLE_CLICK_COUNT: u8 = 2;
 const PLAY_RESEND_S: f64 = 0.5;
 const SETTINGS_REQUEST_PERIOD_S: f64 = 0.5;
 const SMALL_PAGE_SIZE: [f32; 2] = [640.0, 455.0];
@@ -142,6 +144,9 @@ pub struct App {
     hosted: Option<HostedGame>,
     hosted_team: Option<Team>,
     pending_play: Option<(Option<usize>, Option<Instant>)>,
+    /// `pending_now` is a double-clicked choice (W-204, double-click a level to enter at once)
+    /// the match server is still to start without its break, and when it was last asked.
+    pending_now: Option<(Option<usize>, Option<Instant>)>,
     left_round: Option<(usize, usize)>,
     level_round: Option<(usize, usize)>,
     is_level_started: bool,
@@ -189,6 +194,7 @@ impl App {
             hosted: None,
             hosted_team: None,
             pending_play: None,
+            pending_now: None,
             left_round: None,
             level_round: None,
             is_level_started: false,
@@ -260,6 +266,7 @@ impl App {
     fn leave(&mut self) {
         self.client = None;
         self.pending_play = None;
+        self.pending_now = None;
         self.game_settings_page = None;
         self.navigator.leave_game();
     }
@@ -397,10 +404,12 @@ impl App {
 
     /// `click` applies a left click at `at` in a window of `size` (both in window points): on the
     /// game menu, a click on a level of the match's status plays it freely (the game master's
-    /// choice), and during free play the "back to the match" button goes back.
+    /// choice), and during free play the "back to the match" button goes back. A double click
+    /// (`click_count` 2 or more) also asks the match server to start at once, without the break
+    /// before the round (W-204, double-click a level to enter at once).
     ///
-    /// Example: `app.click([320.0, 120.0], [1280.0, 800.0]);`
-    pub fn click(&mut self, at: [f32; 2], size: [f32; 2]) {
+    /// Example: `app.click([320.0, 120.0], [1280.0, 800.0], 1);`
+    pub fn click(&mut self, at: [f32; 2], size: [f32; 2], click_count: u8) {
         if self.navigator.get_screen() != Screen::GameMenu {
             return;
         }
@@ -417,8 +426,13 @@ impl App {
             PageClick::Match => None,
         };
         self.pending_play = Some((choice, None));
-        self.game_menu.message =
-            Some("Asked the match server; everyone follows after the break.".to_string());
+        self.game_menu.message = Some(if click_count >= DOUBLE_CLICK_COUNT {
+            self.pending_now = Some((choice, None));
+            "Asked the match server to start at once.".to_string()
+        } else {
+            "Asked the match server; everyone follows after the break (double-click to skip it)."
+                .to_string()
+        });
     }
 
     /// `handle` applies one input to the screen shown.
@@ -633,10 +647,23 @@ impl App {
             if view.state.get_free_play().map(|free_play| free_play.level) == choice {
                 self.pending_play = None;
             } else if sent_at.is_none_or(|at| at.elapsed().as_secs_f64() >= PLAY_RESEND_S) {
-                if let Err(error) = client.send_play(choice) {
+                if let Err(error) = client.send_play(choice, false) {
                     self.game_menu.message = Some(error.to_string());
                 }
                 self.pending_play = Some((choice, Some(Instant::now())));
+            }
+        }
+        if let (Some((choice, sent_at)), Some(view)) = (self.pending_now, &client.view) {
+            let is_chosen: bool =
+                view.state.get_free_play().map(|free_play| free_play.level) == choice;
+            let is_waiting: bool = matches!(view.phase, Phase::Intermission { .. });
+            if is_chosen && !is_waiting {
+                self.pending_now = None;
+            } else if sent_at.is_none_or(|at| at.elapsed().as_secs_f64() >= PLAY_RESEND_S) {
+                if let Err(error) = client.send_play(choice, true) {
+                    self.game_menu.message = Some(error.to_string());
+                }
+                self.pending_now = Some((choice, Some(Instant::now())));
             }
         }
     }
@@ -871,7 +898,7 @@ mod tests {
     //! | Address | an IP, an IP with a port, garbage | `addresses_parse_with_the_default_port` |
     //! | Following the match | no team (stays in the game menu), a round starts (level), Escape (in-level menu), exit (game menu, not re-entered), rejoin (level), the round ends (game menu), Escape (main menu) | `the_app_follows_the_match_into_and_out_of_levels` |
     //! | Game master | a choice sent until the server's view shows it | `the_game_masters_choice_is_sent_until_taken` |
-    //! | Clicks on the game menu | elsewhere (nothing), on the first level (free play there) | `clicking_a_level_plays_it` |
+    //! | Clicks on the game menu | elsewhere (nothing), on the first level (free play there, after the break), a double click on it (also asked to start at once) | `clicking_a_level_plays_it` |
     //! | Game master's settings | the page asks, shows the answer, sends a step up, Escape back to the game menu (UDP 48392, 48393) | `the_game_masters_settings_go_to_the_match_server` |
     //! | Run id | the format | `run_ids_are_utc_times` |
 
@@ -1120,10 +1147,16 @@ mod tests {
         exchange(&mut app, &server, &waiting);
         let (_, page_size, _) = app.get_page();
         let window: [f32; 2] = [page_size[0] * 2.0, page_size[1] * 2.0];
-        app.click([1.0, 1.0], window);
+        app.click([1.0, 1.0], window, 1);
         assert!(app.pending_play.is_none());
-        app.click([2.0 * 30.0, 2.0 * 100.0], window);
+        app.click([2.0 * 30.0, 2.0 * 100.0], window, 1);
         assert_eq!(app.pending_play, Some((Some(0), None)));
+        assert_eq!(app.pending_now, None);
+        let (_, page_size, _) = app.get_page();
+        let window: [f32; 2] = [page_size[0] * 2.0, page_size[1] * 2.0];
+        app.click([2.0 * 30.0, 2.0 * 100.0], window, 2);
+        assert_eq!(app.pending_now, Some((Some(0), None)));
+        assert!(app.game_menu.message.as_ref().unwrap().contains("at once"));
     }
 
     #[test]

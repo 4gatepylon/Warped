@@ -359,10 +359,11 @@ fn run_window(arguments: &Arguments, mut app: App, tour_level_indices: Vec<usize
                     mouse_btn: sdl3::mouse::MouseButton::Left,
                     x,
                     y,
+                    clicks,
                     ..
                 } => {
                     let (width, height) = window.get_window().size();
-                    app.click([x, y], [width as f32, height as f32]);
+                    app.click([x, y], [width as f32, height as f32], clicks);
                 }
                 _ => {}
             }

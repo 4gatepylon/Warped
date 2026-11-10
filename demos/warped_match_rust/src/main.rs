@@ -187,6 +187,8 @@ const SERVER_SILENT_S: f64 = 2.0;
 const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route and --export-map.";
 const MENU_DIM_FRAC: f32 = 0.8;
 const HELD_MAP_DIM_FRAC: f32 = 0.6;
+/// `DOUBLE_CLICK_COUNT` is SDL's click count from which a click on a level starts it at once (W-204).
+const DOUBLE_CLICK_COUNT: u8 = 2;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 40];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 318];
 const PICTURE_PX_PER_MASK_PX: i32 = 2;
@@ -896,15 +898,17 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                     Scancode::_2 if client.team.is_none() => {
                         client.team = Some(match_state::Team::Red)
                     }
-                    Scancode::M => client.send_play(None)?,
+                    Scancode::M => client.send_play(None, false)?,
                     _ => {}
                 },
                 Event::MouseButtonDown {
                     mouse_btn: sdl3::mouse::MouseButton::Left,
                     x,
                     y,
+                    clicks,
                     ..
                 } => {
+                    let is_now: bool = clicks >= DOUBLE_CLICK_COUNT;
                     if let (Some(view), Some(canvas)) = (&client.view, &canvas) {
                         let (width, height) = canvas.window().size();
                         let at: [f32; 2] = warped_shared::page::get_page_point(
@@ -915,9 +919,9 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                         match match_menu::get_click_target(view, at) {
                             Some(match_menu::PageClick::Level(level)) => {
                                 println!("playing {} freely (clicked)", view.levels[level].name);
-                                client.send_play(Some(level))?;
+                                client.send_play(Some(level), is_now)?;
                             }
-                            Some(match_menu::PageClick::Match) => client.send_play(None)?,
+                            Some(match_menu::PageClick::Match) => client.send_play(None, is_now)?,
                             None => {}
                         }
                     }

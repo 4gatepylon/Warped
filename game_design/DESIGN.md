@@ -347,9 +347,17 @@ warp and be fine, but too close the pull wins and the player goes through.
 - The pull points at the warp along the ground; a warp overhead pulls by the part of its direction along the
   ground. A warp whose horizon is wider than the radius doesn't pull.
 - A move a wall refuses ends the drift. Flying players are not pulled.
+- A black hole pulls differently from a mouth: over twice the radius, with half the strength, and in all three
+  directions, so one overhead also lifts (a player in the air can still walk). Inside its radius a player's legs
+  give only 0.75 of their speed, which still lets a sprinting player get away. Inside its minimum radius it pulls
+  no further and holds players out, so nobody is pulled in. The view darkens as a player gets closer (W-168, fading
+  out into a black hole): the edges go black and blur, reaching further in, and the whole picture dims, up to 0.85
+  dark at the minimum radius. Lunar Surface's black hole hangs 17 m up, so with these numbers its pull doesn't
+  reach the ground.
 - The game server's settings hold it (`gravity` in `server_settings.yaml`), and the game master can change it.
-- The numbers below are a proposal the user is tuning in the game (`WARPED_TUNE_PULL=1` turns on keys that change
-  them while playing); the equations are in `demos/warp_pull_js/EQUATIONS.md`.
+- The user approved the mouths' numbers below (2026-11-10); the black holes' are being tuned in the game
+  (`WARPED_TUNE_PULL=1` turns on keys that change them while playing, until the user approves them). The equations
+  are in `demos/warp_pull_js/EQUATIONS.md`.
 - Dust, Snow Planet, Lunar Surface and the match have this pull. City Sphere and Dark Forest still have the earlier
   one (a speed of up to 0.75 of walking speed toward a warp, fading out over 24 m, and to nothing at a mouth's
   throat) until they are moved over.
@@ -360,6 +368,11 @@ warp and be fine, but too close the pull wins and the player goes through.
 | Strength | 11.9 m/s² (`gravity.acceleration_m_per_s_per_s`): a fall from the radius reaches a thrown mouth's throat at 9 m/s |
 | Shape | the same everywhere inside the radius (`gravity.profile`: `constant`; also `stronger_near_mouth`, `harmonic`) |
 | Braking outside every radius | 15 m/s² (`gravity.brake_m_per_s_per_s`) |
+| Black hole's radius | 2 times the radius, 10 m (`gravity.black_hole_radius_per_radius`) |
+| Black hole's strength | 0.5 of the strength (`gravity.black_hole_acceleration_frac`) |
+| Legs' speed near a black hole | 0.75 (`gravity.black_hole_speed_frac`) |
+| Black hole's minimum radius | 3 m from its centre (`gravity.black_hole_min_radius_m`) |
+| Darkness at the minimum radius | 0.85 (`gravity.black_hole_darkness_frac`) |
 
 ### Map edge
 

@@ -48,7 +48,10 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 26] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 29] = [
+    "gravity.black_hole_acceleration_frac",
+    "gravity.black_hole_min_radius_m",
+    "gravity.black_hole_darkness_frac",
     "gravity.acceleration_m_per_s_per_s",
     "gravity.brake_m_per_s_per_s",
     "movement.shoot_after_moving_s",

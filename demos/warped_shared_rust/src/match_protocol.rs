@@ -228,14 +228,26 @@ pub fn parse_hello(datagram: &[u8]) -> Result<Option<Team>> {
 /// `PLAY_MATCH` is the word of a `play` message that goes back from free play to the match.
 const PLAY_MATCH: &str = "match";
 
+/// `PLAY_NOW_SUFFIX` ends a `play` message that also asks to start at once, without the break
+/// before the round (W-204, double-click a level to enter at once).
+const PLAY_NOW_SUFFIX: &str = " now";
+
+/// `is_play_now` says whether a `play` datagram asks to start at once (it ends in ` now`).
+///
+/// Example: `assert!(is_play_now(b"play 2 now"));`
+pub fn is_play_now(datagram: &[u8]) -> bool {
+    datagram.starts_with(b"play ") && datagram.ends_with(PLAY_NOW_SUFFIX.as_bytes())
+}
+
 /// `parse_play` gives the game master's choice in a `play <level>` datagram (a level's index, for
-/// free play on it) or `play match` (`None`, back to the match), checked against `level_count`;
-/// any other datagram is an error.
+/// free play on it) or `play match` (`None`, back to the match), checked against `level_count`,
+/// with or without ` now` after it (`is_play_now`); any other datagram is an error.
 ///
 /// Example: `assert_eq!(parse_play(b"play 2", 5)?, Some(2));`
 pub fn parse_play(datagram: &[u8], level_count: usize) -> Result<Option<usize>> {
     let text: &str = std::str::from_utf8(datagram).map_err(|_| "not a play message")?;
     let choice: &str = text.strip_prefix("play ").ok_or("not a play message")?;
+    let choice: &str = choice.strip_suffix(PLAY_NOW_SUFFIX).unwrap_or(choice);
     if choice == PLAY_MATCH {
         return Ok(None);
     }
@@ -252,13 +264,15 @@ pub fn parse_play(datagram: &[u8], level_count: usize) -> Result<Option<usize>> 
     Ok(Some(level))
 }
 
-/// `make_play` gives the datagram `parse_play` reads for `choice`.
+/// `make_play` gives the datagram `parse_play` reads for `choice`, asking to start at once
+/// (`is_play_now`) if `is_now`.
 ///
-/// Example: `socket.send_to(&make_play(Some(2)), server)?;`
-pub fn make_play(choice: Option<usize>) -> Vec<u8> {
+/// Example: `socket.send_to(&make_play(Some(2), false), server)?;`
+pub fn make_play(choice: Option<usize>, is_now: bool) -> Vec<u8> {
+    let suffix: &str = if is_now { PLAY_NOW_SUFFIX } else { "" };
     match choice {
-        Some(level) => format!("play {level}").into_bytes(),
-        None => format!("play {PLAY_MATCH}").into_bytes(),
+        Some(level) => format!("play {level}{suffix}").into_bytes(),
+        None => format!("play {PLAY_MATCH}{suffix}").into_bytes(),
     }
 }
 
@@ -301,8 +315,9 @@ impl MatchClient {
     /// (its index), or the match (`None`). A server older than free play ignores it.
     ///
     /// Example: `client.send_play(Some(4))?;`
-    pub fn send_play(&mut self, choice: Option<usize>) -> Result<()> {
-        self.socket.send_to(&make_play(choice), self.server)?;
+    pub fn send_play(&mut self, choice: Option<usize>, is_now: bool) -> Result<()> {
+        self.socket
+            .send_to(&make_play(choice, is_now), self.server)?;
         Ok(())
     }
 
@@ -862,9 +877,17 @@ mod tests {
     #[test]
     fn play_messages_choose_any_level_or_the_match() {
         for level in 0..5 {
-            assert_eq!(parse_play(&make_play(Some(level)), 5).unwrap(), Some(level));
+            assert_eq!(
+                parse_play(&make_play(Some(level), false), 5).unwrap(),
+                Some(level)
+            );
+            let now: Vec<u8> = make_play(Some(level), true);
+            assert_eq!(parse_play(&now, 5).unwrap(), Some(level));
+            assert!(is_play_now(&now) && !is_play_now(&make_play(Some(level), false)));
         }
-        assert_eq!(parse_play(&make_play(None), 5).unwrap(), None);
+        assert_eq!(parse_play(&make_play(None, false), 5).unwrap(), None);
+        assert_eq!(parse_play(&make_play(None, true), 5).unwrap(), None);
+        assert!(is_play_now(&make_play(None, true)) && !is_play_now(b"hello now"));
         assert!(parse_play(b"play 5", 5).is_err());
         assert!(parse_play(b"play dust", 5).is_err());
         assert!(parse_play(b"hello blue", 5).is_err());
