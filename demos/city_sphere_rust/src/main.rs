@@ -4002,7 +4002,7 @@ impl Session {
             &self.hud_pulses,
         ));
         if let Some(multiplayer) = &self.multiplayer
-            && self.menu.is_none()
+            && self.menu_and_map.get_cover() == menu_and_map::Cover::Nothing
             && multiplayer.is_eliminated
             && self.get_banner_lines() == Some(get_death_lines(multiplayer.respawn_in_s))
         {

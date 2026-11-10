@@ -2313,7 +2313,7 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         if session.is_spawned && !session.menu_and_map.is_menu_open() {
             rects.extend(session.get_bar_rects());
         }
-        if session.menu.is_none()
+        if session.menu_and_map.get_cover() == Cover::Nothing
             && let Some(left_s) = session.respawn_in_s
             && session.get_banner_lines() == Some(get_death_lines(left_s))
         {

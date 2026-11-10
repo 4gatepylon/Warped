@@ -188,7 +188,7 @@ impl TryFrom<RespawnFile> for RespawnSettings {
                 );
             }
         };
-        if !(settings.period_s > 0.0) {
+        if settings.period_s.is_nan() || settings.period_s <= 0.0 {
             return Err(format!(
                 "respawn.period_s must be above 0, not {}",
                 settings.period_s

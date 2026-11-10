@@ -66,7 +66,8 @@ health bar (a segment per rifle hit to the body), the gun's ammo bar (the sniper
 rifle's heat in 20 segments, red once it overheats) and the sprint energy bar (sprinting empties it in 7.5 s),
 with glows that run along a bar while it changes; Lunar's crosshair; the console bar below the middle while `E` is
 held on an enemy console; red, blurred edges and a shake when you take any damage; and "YOU DIED" with the respawn
-countdown.
+countdown and a bar filling over the wait: 20 s, 10 s more for every 5 minutes into the level (online the server's
+wait, alone the same rule on the session's clock; W-142 (growing respawn time)).
 
 ## The level
 

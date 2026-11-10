@@ -424,7 +424,10 @@ mod tests {
     fn the_respawn_bar_fills_over_the_wait() {
         const WAIT_S: f64 = 20.0;
         assert_eq!(get_respawn_filled_frac(WAIT_S, WAIT_S), 0.0);
-        assert_eq!(get_respawn_filled_frac(WAIT_S * HALF_FRAC, WAIT_S), HALF_FRAC);
+        assert_eq!(
+            get_respawn_filled_frac(WAIT_S * HALF_FRAC, WAIT_S),
+            HALF_FRAC
+        );
         assert_eq!(get_respawn_filled_frac(0.0, WAIT_S), 1.0);
         assert_eq!(get_respawn_filled_frac(-1.0, WAIT_S), 1.0);
         assert_eq!(get_respawn_filled_frac(WAIT_S + 1.0, WAIT_S), 0.0);
