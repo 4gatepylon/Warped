@@ -2,7 +2,7 @@
 //! bounding sphere, so the renderer can cull each tile against the camera and every shadow
 //! cascade instead of drawing the whole forest in every pass.
 //!
-//! Interface: `MeshTile`, `split_mesh_into_tiles`.
+//! Interface: `MeshTile`, `MeshTile::Bounding`, `split_mesh_into_tiles`.
 //!
 //! Example:
 //!     let tiles: Vec<MeshTile> = split_mesh_into_tiles(&mesh, STATIC_TILE_M);
@@ -66,24 +66,34 @@ pub fn split_mesh_into_tiles(mesh: &MeshData, tile_m: f32) -> Vec<MeshTile> {
                 }
                 indices.push(index_in_tile[vertex]);
             }
-            let (low_m, high_m) = vertices.iter().fold(
-                (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
-                |(low_m, high_m), vertex| {
-                    let position_m: Vec3 = Vec3::from_array(vertex.position);
-                    (low_m.min(position_m), high_m.max(position_m))
-                },
-            );
-            MeshTile {
-                mesh: MeshData {
-                    vertices,
-                    skin_vertices: None,
-                    indices,
-                },
-                bounds_center_m: (low_m + high_m) * 0.5,
-                bounds_radius_m: (high_m - low_m).length() * 0.5,
-            }
+            MeshTile::Bounding(MeshData {
+                vertices,
+                skin_vertices: None,
+                indices,
+            })
         })
         .collect()
+}
+
+impl MeshTile {
+    /// `Bounding` makes `mesh` a tile, with the sphere around its vertices' box.
+    ///
+    /// Example: `let tile: MeshTile = MeshTile::Bounding(mesh);`
+    #[allow(non_snake_case)]
+    pub fn Bounding(mesh: MeshData) -> MeshTile {
+        let (low_m, high_m) = mesh.vertices.iter().fold(
+            (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(low_m, high_m), vertex| {
+                let position_m: Vec3 = Vec3::from_array(vertex.position);
+                (low_m.min(position_m), high_m.max(position_m))
+            },
+        );
+        MeshTile {
+            mesh,
+            bounds_center_m: (low_m + high_m) * 0.5,
+            bounds_radius_m: (high_m - low_m).length() * 0.5,
+        }
+    }
 }
 
 /// `tests` checks that tiles together hold exactly the mesh's triangles, that a triangle goes

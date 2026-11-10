@@ -5,9 +5,13 @@
 //! Example:
 //!     let arena: Arena = Arena::from_map(&map::load(&path)?);
 //!     let meshes: Vec<(Surface, MeshData)> = arena.surface_meshes();
+//!
+//! The leaf sprays are also built per tile at a near and a far detail (`leaf_tile_meshes`), so the
+//! renderer can draw far canopy with fewer triangles.
 
 use crate::game::warps::Warps;
 use glam::{Mat3, Mat4, Vec2, Vec3};
+use std::collections::BTreeMap;
 
 use super::collision::Aabb;
 use crate::map::{self, MapFile};
@@ -172,10 +176,24 @@ pub struct Arena {
 const CYLINDER_SEGMENT_COUNT: usize = 14;
 /// `ACCRETION_DISK_RADIUS_FRAC` is a black hole's glowing disk radius per horizon radius.
 const ACCRETION_DISK_RADIUS_FRAC: f32 = 2.6;
-/// `ELLIPSOID_RING_COUNT` and `ELLIPSOID_SEGMENT_COUNT` are a leaf spray's latitude and longitude
-/// divisions.
-const ELLIPSOID_RING_COUNT: usize = 4;
-const ELLIPSOID_SEGMENT_COUNT: usize = 6;
+/// `LeafDetail` is how finely a leaf spray's ellipsoid is divided: its latitude rings and longitude
+/// segments.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LeafDetail {
+    pub ring_count: usize,
+    pub segment_count: usize,
+}
+
+/// `NEAR_LEAF_DETAIL` is a leaf spray as drawn near the camera (36 triangles), and
+/// `FAR_LEAF_DETAIL` as drawn far from it (16 triangles), where the haze leaves only its outline.
+pub const NEAR_LEAF_DETAIL: LeafDetail = LeafDetail {
+    ring_count: 4,
+    segment_count: 6,
+};
+pub const FAR_LEAF_DETAIL: LeafDetail = LeafDetail {
+    ring_count: 3,
+    segment_count: 4,
+};
 /// `WARP_RING_COUNT` and `WARP_SEGMENT_COUNT` divide the smooth spheres and disks of warps.
 const WARP_RING_COUNT: usize = 16;
 const WARP_SEGMENT_COUNT: usize = 32;
@@ -429,14 +447,39 @@ impl Arena {
                         ShapeKind::Cylinder { axis } => {
                             append_cylinder(&mut mesh, shape, axis, surface.tile_size_m())
                         }
-                        ShapeKind::Ellipsoid => {
-                            append_ellipsoid(&mut mesh, shape, surface.tile_size_m())
-                        }
+                        ShapeKind::Ellipsoid => append_ellipsoid(
+                            &mut mesh,
+                            shape,
+                            surface.tile_size_m(),
+                            NEAR_LEAF_DETAIL,
+                        ),
                     }
                 }
                 (!mesh.indices.is_empty()).then_some((*surface, mesh))
             })
             .collect()
+    }
+
+    /// `leaf_tile_meshes` builds the leaf sprays at `detail`, one mesh per tile `tile_m` wide on x
+    /// and z, each spray whole in the tile under its centre, tiles in z-major order. Every detail
+    /// puts the same sprays in the same tiles, so a tile's meshes at two details are swappable.
+    ///
+    /// Example: `let far: Vec<MeshData> = arena.leaf_tile_meshes(8.0, FAR_LEAF_DETAIL);`
+    pub fn leaf_tile_meshes(&self, tile_m: f32, detail: LeafDetail) -> Vec<MeshData> {
+        let mut meshes_by_tile: BTreeMap<(i32, i32), MeshData> = BTreeMap::new();
+        for shape in self.shapes.iter().filter(|s| s.surface == Surface::Leaves) {
+            let tile: (i32, i32) = (
+                (shape.centre_m.z / tile_m).floor() as i32,
+                (shape.centre_m.x / tile_m).floor() as i32,
+            );
+            let mesh: &mut MeshData = meshes_by_tile.entry(tile).or_insert_with(|| MeshData {
+                vertices: Vec::new(),
+                skin_vertices: None,
+                indices: Vec::new(),
+            });
+            append_ellipsoid(mesh, shape, Surface::Leaves.tile_size_m(), detail);
+        }
+        meshes_by_tile.into_values().collect()
     }
 
     /// `occluders` are the boxes that block sky light: everything solid but the ground.
@@ -554,9 +597,15 @@ fn append_cylinder(mesh: &mut MeshData, shape: &WorldShape, axis: usize, tile_si
 }
 
 /// `append_ellipsoid` adds a latitude-longitude ellipsoid, turned with its structure's frame.
-fn append_ellipsoid(mesh: &mut MeshData, shape: &WorldShape, tile_size_m: f32) {
+/// A leaf spray is divided as `leaf_detail` says.
+fn append_ellipsoid(
+    mesh: &mut MeshData,
+    shape: &WorldShape,
+    tile_size_m: f32,
+    leaf_detail: LeafDetail,
+) {
     let (ring_count, segment_count): (usize, usize) = if shape.surface == Surface::Leaves {
-        (ELLIPSOID_RING_COUNT, ELLIPSOID_SEGMENT_COUNT)
+        (leaf_detail.ring_count, leaf_detail.segment_count)
     } else {
         (WARP_RING_COUNT, WARP_SEGMENT_COUNT)
     };
@@ -676,6 +725,7 @@ fn append_box(mesh: &mut MeshData, aabb: &Aabb, tile_size_m: f32) {
 /// | --- | --- | --- |
 /// | box face | each of the six faces | `test_box_faces_wind_outward` |
 /// | spawn | each of both teams' (on the ground, the body clear, facing open forest) | `test_every_spawn_stands_clear_facing_open_forest` |
+/// | leaf detail | near, far (the same sprays per tile; every spray) | `test_leaf_tiles_hold_the_same_sprays_at_both_details` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,6 +737,9 @@ mod tests {
     const LIFT_M: f32 = 0.05;
     const GROUND_PROBE_M: f32 = 0.2;
     const MIN_OPEN_VIEW_M: f32 = 3.0;
+    const TILE_M: f32 = 8.0;
+    const NEAR_SPRAY_TRIANGLE_COUNT: usize = 36;
+    const FAR_SPRAY_TRIANGLE_COUNT: usize = 16;
 
     /// `test_every_spawn_stands_clear_facing_open_forest` checks each team spawn of the Dark Forest
     /// map stands on something solid, with room for a body, and faces at least `MIN_OPEN_VIEW_M`
@@ -740,5 +793,31 @@ mod tests {
             let normal: Vec3 = Vec3::from(mesh.vertices[triangle[0] as usize].normal);
             assert!(face_normal.dot(normal) > 0.0);
         }
+    }
+
+    /// `test_leaf_tiles_hold_the_same_sprays_at_both_details` checks the Dark Forest's leaf tiles
+    /// come in the same number at the near and the far detail, each pair holding the same sprays
+    /// (36 and 16 triangles each), and together every spray `surface_meshes` draws.
+    #[test]
+    fn test_leaf_tiles_hold_the_same_sprays_at_both_details() {
+        let map = crate::map::load(&crate::map::default_map_path()).expect("the map loads");
+        let arena: Arena = Arena::from_map(&map);
+        let near: Vec<MeshData> = arena.leaf_tile_meshes(TILE_M, NEAR_LEAF_DETAIL);
+        let far: Vec<MeshData> = arena.leaf_tile_meshes(TILE_M, FAR_LEAF_DETAIL);
+        assert_eq!(near.len(), far.len());
+        let triangle_count = |mesh: &MeshData| mesh.indices.len() / 3;
+        for (near_tile, far_tile) in near.iter().zip(&far) {
+            assert_eq!(
+                triangle_count(near_tile) / NEAR_SPRAY_TRIANGLE_COUNT,
+                triangle_count(far_tile) / FAR_SPRAY_TRIANGLE_COUNT
+            );
+        }
+        let (_, all_leaves) = arena
+            .surface_meshes()
+            .into_iter()
+            .find(|(surface, _)| *surface == Surface::Leaves)
+            .expect("the forest has leaves");
+        let near_total: usize = near.iter().map(triangle_count).sum();
+        assert_eq!(near_total, triangle_count(&all_leaves));
     }
 }
