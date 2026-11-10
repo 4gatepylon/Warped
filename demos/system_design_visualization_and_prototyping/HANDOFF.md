@@ -15,6 +15,20 @@ the option that best fits `game_design/OUTSIDE_GAME_DESIGN.md` and what is writt
 its reason in the PR's Decisions section and in `DECISIONS.md` beside this file (create it, numbered, newest
 last), and go on. Stop only for something that can't be undone or that costs money.
 
+**Work for a long time.** The point is that you and the user work in parallel for as long as possible. Don't stop
+at the end of a part to report or to ask: go straight on to the next. If one thing is blocked, write down why and
+what you tried, and move to the next thing that isn't. Commit and push after every piece that works, and keep this
+file current, so that nothing is lost if you are cut off and another agent can take over.
+
+**Everything important must be checkable afterwards, without you.** The user wasn't watching, so a claim counts
+only if they can verify it later:
+
+- every rule and every behaviour that matters has an automated test, and `make test` runs them all;
+- every flow a person would use has a command that reproduces it and screenshots of it attached to its PR;
+- every run that produced a result keeps its `command.txt` and outputs in `.artifacts/` (root `AGENTS.md`);
+- each PR's Testing section lists the commands run and what they printed, and says plainly what was not tested;
+- keep `VERIFY.md` beside this file: one row per feature, with what to run or open and what the user should see.
+
 ## The work, in order
 
 1. **The mechanics outside a match, as documents:** `game_design/OUTSIDE_GAME_DESIGN.md` and
