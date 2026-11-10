@@ -920,8 +920,7 @@ impl VoxelGpu {
         device: &ProtocolObject<dyn MTLDevice>,
         textures: SurfaceTextures,
     ) -> Result<VoxelGpu> {
-        let source: String = format!("{BOUNDARY_PLANES_METAL}
-{SHADER_SOURCE}")
+        let source: String = format!("{BOUNDARY_PLANES_METAL}\n{SHADER_SOURCE}")
             .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
             .replace(
                 "__BYTES_PER_RAY_END__",
