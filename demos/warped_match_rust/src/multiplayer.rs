@@ -232,6 +232,7 @@ pub fn run_bot(
                     victim_id,
                     shooter_id,
                     is_self,
+                    ..
                 } => {
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {
@@ -520,7 +521,7 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks after the nearest enemy around blocks and
 /// dangers and, once it sees them, faces them and fires (`console_bot::Fighter`), reports hits
 /// (handing `save_view` its view, which it may save on another thread) and rejoins the server
-/// settings' `respawn.delay_s` after being hit.
+/// server's respawn wait after being hit (the one its elimination carries).
 /// With `objective` `Consoles` it walks to the other team's consoles instead (`consoles`, each
 /// one's place) and turns them off on foot (`console_bot::ConsoleWalker`) until a team wins.
 /// The black hole grows with the server's consoles, or to `black_hole_strength` when given, and the
@@ -570,16 +571,12 @@ pub fn run_voxel_bot(
                     victim_id,
                     shooter_id,
                     is_self,
+                    respawn_wait_s,
                 } => {
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {
                         eliminated_count += 1;
-                        let settings: &ServerSettings = client
-                            .settings
-                            .as_ref()
-                            .expect("a welcome brings the settings");
-                        let delay_s: f64 = settings.respawn.delay_s;
-                        rejoin_at = Some(Instant::now() + Duration::from_secs_f64(delay_s));
+                        rejoin_at = Some(Instant::now() + Duration::from_secs_f64(respawn_wait_s));
                     }
                 }
             }

@@ -216,7 +216,9 @@ fn get_flicker_scale(time_s: f32, index: usize, flicker_frac: f32) -> f32 {
     1.0 - flicker_frac * (0.5 + 0.5 * wave)
 }
 
-/// `Session` is one match.
+/// `Session` is one match. While the player is dead, `respawn_wait_s` is how long they wait in all:
+/// online the server's wait (`match_play.rs`), alone the settings' rule at `time_s` when they died
+/// (`RespawnSettings::get_wait_s`).
 pub struct Session {
     pub arena: Arena,
     pub nav: NavGraph,
@@ -231,6 +233,7 @@ pub struct Session {
     pub shot_eye: Mat4,
     pub kill_count: u32,
     pub death_count: u32,
+    pub respawn_wait_s: Option<f32>,
     pub time_s: f32,
     pub is_autopilot: bool,
     pub show_frame_ms: Option<f32>,
@@ -394,6 +397,7 @@ impl Session {
             shot_eye: Mat4::IDENTITY,
             kill_count: 0,
             death_count: 0,
+            respawn_wait_s: None,
             time_s: 0.0,
             is_autopilot,
             show_frame_ms: None,
@@ -493,6 +497,7 @@ impl Session {
             .map_or(0.0, |(_, yaw)| *yaw);
         self.spawn_counter += 1;
         self.player = Player::new(spawn_m, yaw_rad);
+        self.respawn_wait_s = None;
     }
 
     /// `random_signed` returns a pseudo-random number in [-1, 1].
@@ -1377,9 +1382,12 @@ impl Session {
         self.was_firing = is_firing;
         self.is_flashlight_on = controls.is_flashlight_held && self.player.is_alive();
         self.is_trigger_down = is_firing;
-        if self
-            .player
-            .should_respawn(self.settings.respawn.delay_s as f32)
+        if !self.player.is_alive() && self.respawn_wait_s.is_none() {
+            let wait_s: f64 = self.settings.respawn.get_wait_s(f64::from(self.time_s));
+            self.respawn_wait_s = Some(wait_s as f32);
+        }
+        if let Some(wait_s) = self.respawn_wait_s
+            && self.player.should_respawn(wait_s)
         {
             self.death_count += 1;
             self.respawn_player();

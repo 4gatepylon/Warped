@@ -7,8 +7,9 @@ after the nearest enemy and shoots. It logs each level's start, winner and durat
 (consoles) went off, which pylons the console bot reached on foot, the eliminations and the respawns, then a table of
 them per level, and fails on a stall (a round longer than `--round-timeout-s`), a process that stops early, a round,
 level result file, pylon count or outcome that differs from `_PLAN`, a pylon turned off but not reached on foot, a
-fighting level without an elimination or a respawn, a respawn early or late against the settings' `respawn.delay_s`,
-a player more than the level's bots, or a panic or error in a log.
+fighting level without an elimination or a respawn, a respawn wait that breaks the settings' growing rule
+(`respawn.start_s` plus `step_s` every `period_s` into the level, W-142 (growing respawn time)), a respawn early or late
+against the wait its server gave, a player more than the level's bots, or a panic or error in a log.
 
 Interface:
     --match-port: The match server's UDP port (default 48110, away from the game's 47850).
@@ -85,7 +86,13 @@ _PYLON_OFF_LINE: re.Pattern[str] = re.compile(r"turned off console (\d+)")
 _JOIN_LINE: re.Pattern[str] = re.compile(r"^player (\d+) joined the (blue|red) team", re.MULTILINE)
 _KILL_LINE: re.Pattern[str] = re.compile(r"^player (\d+) (?:was hit by player (\d+)|froze in a blizzard)", re.MULTILINE)
 _MAP_LINE: re.Pattern[str] = re.compile(r"^\s*map: (\S+)$", re.MULTILINE)
-_RESPAWN_DELAY: re.Pattern[str] = re.compile(r"^respawn:.*\n\s+delay_s: ([\d.]+)", re.MULTILINE)
+_RESPAWN_RULE: re.Pattern[str] = re.compile(
+    r"^respawn:.*\n(?:\s*#.*\n)*\s+start_s: ([\d.]+).*\n\s+step_s: ([\d.]+).*\n\s+period_s: ([\d.]+)", re.MULTILINE
+)
+_WAIT_LINE: re.Pattern[str] = re.compile(
+    r"^player (\d+) respawns in ([\d.]+) s \(([\d.]+) s into the level\)$", re.MULTILINE
+)
+_LOG_ROUNDING_S: float = 0.05
 _NO_BOT_LABEL: str = "takes_bot_label: false"
 _RESPAWN_EARLY_S: float = 0.5
 _RESPAWN_LATE_S: float = 3.0
@@ -179,6 +186,7 @@ class _LevelLog:
         pylons_off: Each console turned off: seconds from the start and its index.
         kills: Each elimination: seconds, the victim's id and the shooter's (`None` for a blizzard).
         joins: Each join or rejoin: seconds, the player's id and team.
+        waits: Each elimination's respawn wait: seconds, the victim's id, the wait and the seconds into the level.
 
     Example:
         >>> level_log = _LevelLog(match_folder / "round_1_server.log", time.monotonic())
@@ -191,6 +199,7 @@ class _LevelLog:
         self.pylons_off: list[tuple[float, int]] = []
         self.kills: list[tuple[float, int, int | None]] = []
         self.joins: list[tuple[float, int, str]] = []
+        self.waits: list[tuple[float, int, float, float]] = []
 
     def read(self) -> None:
         """`read` notes the events of the whole lines written since the last read, timed now.
@@ -211,6 +220,23 @@ class _LevelLog:
             (now_s, int(line[1]), int(line[2]) if line[2] else None) for line in _KILL_LINE.finditer(whole_lines)
         ]
         self.joins += [(now_s, int(line[1]), line[2]) for line in _JOIN_LINE.finditer(whole_lines)]
+        self.waits += [
+            (now_s, int(line[1]), float(line[2]), float(line[3])) for line in _WAIT_LINE.finditer(whole_lines)
+        ]
+
+    def get_respawns(self) -> list[tuple[float, float, float]]:
+        """`get_respawns` gives, for each elimination followed by a rejoin of its victim, the seconds between, the
+        wait the server gave it and how far into the level it came.
+
+        Example:
+            >>> delay_s, wait_s, level_s = level_log.get_respawns()[0]
+        """
+        respawns: list[tuple[float, float, float]] = []
+        for kill_s, victim, wait_s, level_s in self.waits:
+            rejoins_s: list[float] = [join_s for join_s, id_, _ in self.joins if id_ == victim and join_s > kill_s]
+            if rejoins_s:
+                respawns.append((min(rejoins_s) - kill_s, wait_s, level_s))
+        return respawns
 
     def get_respawn_delays_s(self) -> list[float]:
         """`get_respawn_delays_s` gives, for each elimination followed by a rejoin of its victim, the seconds between.
@@ -218,12 +244,7 @@ class _LevelLog:
         Example:
             >>> delays_s = level_log.get_respawn_delays_s()
         """
-        delays_s: list[float] = []
-        for kill_s, victim, _ in self.kills:
-            rejoins_s: list[float] = [join_s for join_s, id_, _ in self.joins if id_ == victim and join_s > kill_s]
-            if rejoins_s:
-                delays_s.append(min(rejoins_s) - kill_s)
-        return delays_s
+        return [delay_s for delay_s, _, _ in self.get_respawns()]
 
 
 def _find_level_block(level: str) -> str:
@@ -241,23 +262,41 @@ def _find_level_block(level: str) -> str:
     return blocks[level]
 
 
-def _get_respawn_delay_s(level: str) -> float:
-    """`_get_respawn_delay_s` gives the `respawn.delay_s` of the server settings `level` plays by in this test.
+def _get_respawn_rule(level: str) -> tuple[float, float, float]:
+    """`_get_respawn_rule` gives the `respawn` section (`start_s`, `step_s`, `period_s`) of the server settings
+    `level` plays by in this test.
 
     A level with built-in settings and no settings file (`_BUILTIN_SETTINGS_FILES`) reads the file its built-in
     settings match: Dark Forest's are Lunar Surface's, which its `settings.rs` test checks.
 
     Example:
-        >>> delay_s = _get_respawn_delay_s("Dust")
+        >>> start_s, step_s, period_s = _get_respawn_rule("Dust")
     """
     if level in _BUILTIN_SETTINGS_FILES:
-        return float(_RESPAWN_DELAY.search((_REPO_FOLDER / _BUILTIN_SETTINGS_FILES[level]).read_text())[1])
-    block: str = _find_level_block(level)
-    argument: re.Match[str] | None = _SETTINGS_ARGUMENT.search(block)
-    is_self: bool = _PROGRAM_LINE.search(block)[1] == "self"
-    level_folder: Path = _CRATE_FOLDER if is_self else _REPO_FOLDER / _FOLDER_LINE.search(block)[1]
-    settings_path: Path = _CRATE_FOLDER / argument[1] if argument else level_folder / "server_settings.yaml"
-    return float(_RESPAWN_DELAY.search(settings_path.read_text())[1])
+        settings_path: Path = _REPO_FOLDER / _BUILTIN_SETTINGS_FILES[level]
+    else:
+        block: str = _find_level_block(level)
+        argument: re.Match[str] | None = _SETTINGS_ARGUMENT.search(block)
+        is_self: bool = _PROGRAM_LINE.search(block)[1] == "self"
+        level_folder: Path = _CRATE_FOLDER if is_self else _REPO_FOLDER / _FOLDER_LINE.search(block)[1]
+        settings_path = _CRATE_FOLDER / argument[1] if argument else level_folder / "server_settings.yaml"
+    rule: re.Match[str] = _RESPAWN_RULE.search(settings_path.read_text())
+    return float(rule[1]), float(rule[2]), float(rule[3])
+
+
+def _is_wait_by_rule(wait_s: float, level_s: float, rule: tuple[float, float, float]) -> bool:
+    """`_is_wait_by_rule` says whether `wait_s` is the respawn wait `rule` gives `level_s` into the level (the
+    server's `RespawnSettings::get_wait_s`), within the log's rounding of `level_s` near a step.
+
+    Example:
+        >>> _is_wait_by_rule(30.0, 300.0, (20.0, 10.0, 300.0))
+        True
+    """
+    start_s, step_s, period_s = rule
+    expected_s: set[float] = {
+        start_s + step_s * ((level_s + rounding_s) // period_s) for rounding_s in (-_LOG_ROUNDING_S, _LOG_ROUNDING_S)
+    }
+    return any(abs(wait_s - expected) <= _LOG_ROUNDING_S for expected in expected_s)
 
 
 def _start_fighters(
@@ -500,12 +539,16 @@ def _check_match(match_folder: Path, rounds: list[_round_t]) -> None:
             raise _MatchCheckFailed(f"{player_count} players joined {level} in round {number}, not {expected_count}")
         if not round_["has_fighters"]:
             continue
-        delays_s: list[float] = level_log.get_respawn_delays_s()
-        if not level_log.kills or not delays_s:
-            raise _MatchCheckFailed(f"{level}: {len(level_log.kills)} eliminations and {len(delays_s)} respawns")
-        delay_s: float = _get_respawn_delay_s(level)
-        if wrong := [d for d in delays_s if not delay_s - _RESPAWN_EARLY_S <= d <= delay_s + _RESPAWN_LATE_S]:
-            raise _MatchCheckFailed(f"{level}: respawns after {wrong} s, not about {delay_s} s")
+        respawns: list[tuple[float, float, float]] = level_log.get_respawns()
+        if not level_log.kills or not respawns:
+            raise _MatchCheckFailed(f"{level}: {len(level_log.kills)} eliminations and {len(respawns)} respawns")
+        if len(level_log.waits) != len(level_log.kills):
+            raise _MatchCheckFailed(f"{level}: {len(level_log.kills)} eliminations but {len(level_log.waits)} waits")
+        rule: tuple[float, float, float] = _get_respawn_rule(level)
+        if wrong := [(w, at) for _, w, at in respawns if not _is_wait_by_rule(w, at, rule)]:
+            raise _MatchCheckFailed(f"{level}: waits {wrong} (s, s into the level) break the rule {rule}")
+        if late := [(d, w) for d, w, _ in respawns if not w - _RESPAWN_EARLY_S <= d <= w + _RESPAWN_LATE_S]:
+            raise _MatchCheckFailed(f"{level}: respawns after {late} (s, the server's wait)")
     report: dict[str, Any] = json.loads((match_folder / "match.json").read_text())
     if report["outcome"] != _OUTCOME:
         raise _MatchCheckFailed(f"the match ended {report['outcome']}, not {_OUTCOME}")
