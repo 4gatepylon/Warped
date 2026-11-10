@@ -28,7 +28,7 @@ use warped_shared::network_scope;
 use warped_shared::page::{Shape, get_page_point};
 use warped_shared::player_settings::PerPlayerSettings;
 
-use crate::children::{GameKind, HostedGame, Programs, make_run_folder};
+use crate::children::{GameKind, HostedGame, Programs, describe_game_kind, make_run_folder};
 use crate::game_menu::{
     GameAction, GameMenu, LevelMenu, LevelMenuAction, get_level_shapes, get_round,
 };
@@ -363,14 +363,43 @@ impl App {
     /// `open_game_settings` opens the game master's settings page over the game menu; it asks the
     /// match server for the settings at once.
     ///
-    /// Example: `self.open_game_settings();`
-    fn open_game_settings(&mut self) {
+    /// Example: `app.open_game_settings();`
+    pub fn open_game_settings(&mut self) {
         let level_names: Vec<String> = self.get_view().map_or(Vec::new(), |view| {
             view.levels.iter().map(|level| level.name.clone()).collect()
         });
         self.game_settings_page = Some(GameSettingsPage::New(level_names));
         self.settings_requested_at = None;
         self.navigator.open(Screen::GameSettings);
+    }
+
+    /// `has_game_settings` says whether the game master's settings page is open and shows the
+    /// match server's settings (not still waiting for them).
+    ///
+    /// Example: `if app.has_game_settings() { ... }`
+    pub fn has_game_settings(&self) -> bool {
+        self.game_settings_page
+            .as_ref()
+            .is_some_and(|page| !page.is_waiting())
+    }
+
+    /// `describe_game` says who is in the game this player is in, for the play log: the game
+    /// this app hosts (alone, with how many bots, for others) or one it joined, and the players
+    /// on each team as the match server last counted them (bots too).
+    ///
+    /// Example: `let game: String = app.describe_game();`
+    pub fn describe_game(&self) -> String {
+        let kind: String = match &self.hosted {
+            Some(hosted) => describe_game_kind(hosted.kind),
+            None => "a game joined".to_string(),
+        };
+        match self.get_view() {
+            Some(view) => format!(
+                "{kind}; {} blue, {} red",
+                view.team_counts[0], view.team_counts[1]
+            ),
+            None => kind,
+        }
     }
 
     /// `handle_game_settings` applies an input to the game master's settings page, sending each
@@ -1087,6 +1116,7 @@ mod tests {
         exchange(&mut app, &server, &waiting);
         app.open_game_settings();
         assert_eq!(app.navigator.get_screen(), Screen::GameSettings);
+        assert!(!app.has_game_settings());
         let mut settings: GameSettings = GameSettings::New(vec![
             Some(serde_json::json!({"respawn": {"delay_s": 3.0}})),
             Some(serde_json::json!({"respawn": {"delay_s": 3.0}})),
@@ -1132,9 +1162,12 @@ mod tests {
                 value: 3.1,
             }]
         );
+        assert!(app.has_game_settings());
+        assert!(app.describe_game().starts_with("a game joined; "));
         app.handle(MenuInput::Back);
         assert_eq!(app.navigator.get_screen(), Screen::GameMenu);
         assert!(app.game_settings_page.is_none());
+        assert!(!app.has_game_settings());
     }
 
     #[test]
