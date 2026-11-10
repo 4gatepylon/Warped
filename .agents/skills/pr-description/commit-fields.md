@@ -21,8 +21,9 @@ other commit rules are in the "Commits" section of [`SKILL.md`](SKILL.md).
 
 ## The trailers
 
-One block at the end of the message, after the body, in this order. The agent's own trailer (the attribution
-table in `SKILL.md`) goes last in the same block.
+One block at the end of the message, after the body, the history and the agent traces
+([`commit-agent-traces.md`](commit-agent-traces.md)), in this order. The agent's own trailer (the
+attribution table in `SKILL.md`) goes last in the same block.
 
 | Trailer | Holds | Values |
 | --- | --- | --- |
@@ -51,6 +52,14 @@ wishlist(demos/hyperbolic_wormholes_rust): claim W-203 (pull toward black holes)
 [demos/hyperbolic_wormholes_rust/W-203 (pull toward black holes)] HISTORY
 
 * 1a2b3c4d5e6f: (null -> [ ]) ADD TO WISHLIST: W-203 (pull toward black holes): "<the user's words>"
+
+AGENT TRACES
+
+* Claude Code 2.1.321, trace 00000000-0000-4000-8000-000000000000, desktop
+  contributed: claimed the item
+  workspace: ~/git/Warped/.claude/worktrees/example, branch claude/example
+  transcript: ~/.claude/projects/-Users-$USER-git-Warped--claude-worktrees-example/00000000-0000-4000-8000-000000000000.jsonl
+  read it: claude --resume 00000000-0000-4000-8000-000000000000
 
 Kind: wishlist, feature
 Component: game-design
