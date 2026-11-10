@@ -86,7 +86,6 @@ pub fn render_page(
 /// `Painter` shows pages in a window's `CAMetalLayer`: the device's command queue, and a shared
 /// texture of the drawable's size that each page is copied into.
 pub struct Painter {
-    device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     texture: texture_slot_t,
 }
@@ -94,25 +93,25 @@ pub struct Painter {
 impl Painter {
     /// `New` makes a painter on `device`.
     ///
-    /// Example: `let painter = Painter::New(device.clone())?;`
+    /// Example: `let painter = Painter::New(window.get_device())?;`
     #[allow(non_snake_case)]
-    pub fn New(device: Retained<ProtocolObject<dyn MTLDevice>>) -> Result<Painter> {
+    pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<Painter> {
         let queue = device.newCommandQueue().ok_or("Metal: no command queue")?;
         Ok(Painter {
-            device,
             queue,
             texture: None,
         })
     }
 
     /// `paint` shows `bgra` (BGRA pixels of the layer's drawable size, rows top first) in the
-    /// layer's next drawable, waiting for the copy; it returns false when the layer had no
-    /// drawable free.
+    /// layer's next drawable, on the layer's `device`, waiting for the copy; it returns false when
+    /// the layer had no drawable free.
     ///
-    /// Example: `painter.paint(&layer, &pixels, (2560, 1440))?;`
+    /// Example: `painter.paint(layer, window.get_device(), &pixels, (2560, 1440))?;`
     pub fn paint(
         &mut self,
         layer: &CAMetalLayer,
+        device: &ProtocolObject<dyn MTLDevice>,
         bgra: &[u8],
         size_px: (usize, usize),
     ) -> Result<bool> {
@@ -146,8 +145,7 @@ impl Painter {
             };
             descriptor.setUsage(MTLTextureUsage::ShaderRead);
             descriptor.setStorageMode(MTLStorageMode::Shared);
-            let texture = self
-                .device
+            let texture = device
                 .newTextureWithDescriptor(&descriptor)
                 .ok_or("Metal: no memory for the menu's texture")?;
             self.texture = Some((texture, size_px));
