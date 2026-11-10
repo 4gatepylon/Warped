@@ -2,7 +2,9 @@
 # it still contains and can still play with `--map lunar-surface` or `--map house-demo`).
 #
 # Interface:
-#     city-sphere: the game (macOS only: Metal and SDL), what `cargo run` runs.
+#     city_sphere_level: the level as a library (src/lib.rs, macOS only: Metal and SDL), whose
+#         play_level the one-window app (../warped_mvp_rust/) calls.
+#     city-sphere: the game alone (src/main.rs, which runs the library), what `cargo run` runs.
 #     city_sphere_server: a game server alone (src/bin/city_sphere_server.rs), which also builds for Linux.
 #
 # Example:
@@ -37,6 +39,13 @@ objc2-metal-fx = "0.3"
 objc2-quartz-core = "0.3"
 sdl3 = { version = "0.22", features = ["build-from-source-static"] }
 
+[lib]
+name = "city_sphere_level"
+
 [[bin]]
 name = "city_sphere_server"
 test = false
+
+[[test]]
+name = "in_one_window"
+harness = false

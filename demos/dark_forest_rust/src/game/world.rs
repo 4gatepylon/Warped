@@ -1,6 +1,7 @@
 //! `world` turns a portable map (`common/maps/dark_forest/map.json`) into the arena: its
 //! meshes (boxes, tree trunks, canopies, logs and rope ladders, with world-space UVs), its
-//! collision boxes, its ladders, its pylon consoles, its lights and its spawns.
+//! collision boxes, its ladders, its pylon consoles, its lights, its spawns, and its playable area
+//! with the soft edge past it (W-145, no walls at map edges).
 //!
 //! Example:
 //!     let arena: Arena = Arena::from_map(&map::load(&path)?);
@@ -8,6 +9,7 @@
 
 use crate::game::warps::Warps;
 use glam::{Mat3, Mat4, Vec2, Vec3};
+use warped_shared::map_edge::SoftEdge;
 
 use super::collision::Aabb;
 use crate::map::{self, MapFile};
@@ -149,7 +151,11 @@ pub struct Pylon {
 }
 
 /// `Arena` is the whole level; `map_player` and `map_gravity_m_per_s2` are how players move on
-/// its map before the server settings (`player::Movement`).
+/// its map before the server settings (`player::Movement`). On a map with a boundary,
+/// `playable_min_m` to `playable_max_m` is the playable area's box (where bots find their way),
+/// `soft_edge` slows players past it (if the boundary has one), and `bounds_min_m` to
+/// `bounds_max_m` is that box grown by the soft edge's width (where players can be: the map picture, the minimap, the sky's
+/// visibility, thrown wormholes); on one without, all three boxes are everything in the map.
 pub struct Arena {
     pub map_player: crate::map::PlayerSpec,
     pub map_gravity_m_per_s2: f32,
@@ -166,6 +172,9 @@ pub struct Arena {
     pub bot_spawns: Vec<Vec3>,
     pub bounds_min_m: Vec3,
     pub bounds_max_m: Vec3,
+    pub playable_min_m: Vec3,
+    pub playable_max_m: Vec3,
+    pub soft_edge: Option<SoftEdge>,
     /// `boundary_planes` are the team boundary planes (W-148), from the map's zones.
     pub boundary_planes: Vec<BoundaryPlane>,
 }
@@ -190,6 +199,7 @@ fn get_boundary_planes(regions: Option<&crate::map::Regions>) -> Vec<BoundaryPla
     let Some(crate::map::Regions {
         zones,
         zone_walls: Some(walls),
+        ..
     }) = regions
     else {
         return Vec::new();
@@ -423,6 +433,27 @@ impl Arena {
             bounds_min_m = bounds_min_m.min(shape.centre_m - shape.half_m);
             bounds_max_m = bounds_max_m.max(shape.centre_m + shape.half_m);
         }
+        let (mut playable_min_m, mut playable_max_m) = (bounds_min_m, bounds_max_m);
+        let boundary: Option<&map::Boundary> = map
+            .regions
+            .as_ref()
+            .and_then(|regions| regions.boundary.as_ref());
+        if let Some(boundary) = boundary {
+            let half_m: Vec2 = Vec2::new(boundary.v_m, boundary.u_m);
+            let reach_m: Vec2 = half_m + Vec2::splat(boundary.soft_edge_m.unwrap_or(0.0));
+            (playable_min_m.x, playable_min_m.z) = (-half_m.x, -half_m.y);
+            (playable_max_m.x, playable_max_m.z) = (half_m.x, half_m.y);
+            (bounds_min_m.x, bounds_min_m.z) = (-reach_m.x, -reach_m.y);
+            (bounds_max_m.x, bounds_max_m.z) = (reach_m.x, reach_m.y);
+        }
+        let soft_edge: Option<SoftEdge> = boundary.and_then(|boundary| {
+            Some(SoftEdge::FromBoundary(
+                &boundary.kind,
+                f64::from(boundary.u_m),
+                f64::from(boundary.v_m),
+                f64::from(boundary.soft_edge_m?),
+            ))
+        });
         Arena {
             map_player: map.player.clone(),
             map_gravity_m_per_s2: map.gravity_m_per_s2,
@@ -437,6 +468,9 @@ impl Arena {
             bot_spawns,
             bounds_min_m,
             bounds_max_m,
+            playable_min_m,
+            playable_max_m,
+            soft_edge,
             warps,
             pylons,
             boundary_planes: get_boundary_planes(map.regions.as_ref()),

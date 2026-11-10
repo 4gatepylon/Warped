@@ -9,6 +9,7 @@
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
 //! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
+//! - `map_edge`: the soft edge of every map: past the playable area players slow without end.
 //! - `gravity`: the pull of black holes and wormhole mouths on a player on the ground.
 //! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
@@ -34,6 +35,10 @@
 //! - `network_scope`: whether sockets reach the local network or stay on loopback
 //!   (`WARPED_LOOPBACK_ONLY=1`, for tests).
 //! - `page`: a menu page's shapes in the debug font, and drawing them with SDL.
+//! - `level_loop`: the frame loop's skeleton every level shares (`LevelFrames`, `play_frames`),
+//!   how it ends (`app::LevelEnd`), and a level's command line from an `app::LevelJoin`.
+//! - `level_test`: a check of a level's entry point in one offscreen window (QUIT, round over,
+//!   QUIT again, and no GPU memory left behind).
 //! - `metal_window`: the one window a program draws in with Metal (SDL3 window, `CAMetalLayer`,
 //!   device, event pump), lent to a level as an `app::LevelWindow`.
 //! - `player_settings`, `settings_editor`: `player_settings.yaml`, and a settings page any menu
@@ -62,6 +67,11 @@ pub mod hud_bars;
 #[cfg(target_os = "macos")]
 pub mod key_bindings;
 pub mod laser_drop;
+#[cfg(target_os = "macos")]
+pub mod level_loop;
+#[cfg(target_os = "macos")]
+pub mod level_test;
+pub mod map_edge;
 pub mod match_menu;
 pub mod match_protocol;
 pub mod match_state;

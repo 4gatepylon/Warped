@@ -57,6 +57,18 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --team blue
 cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --team blue --bot-objective consoles
 ```
 
+## In the one-window app
+
+W-141 (one window for the whole game): this crate is a library, `snow_planet_level` (`src/lib.rs`), and `src/main.rs` only runs
+it. The one-window app ([`../warped_mvp_rust/`](../warped_mvp_rust/)) calls `snow_planet_level::play_level`
+(`warped_shared::app::play_level_fn_t`) with its window and Metal device, the level server's address, the team
+(`--team`) and the player's settings file. Snow Planet then plays in that window until the match's round ends
+(`RoundOver`), the player confirms the menu's QUIT page (`LeaveLevel`) or closes the window (`CloseWindow`), and frees
+its renderer's GPU resources before it returns. Run alone, the program plays through the same frame loop
+(`warped_shared::level_loop`) in a window of its own (`warped_shared::metal_window`), exactly as before.
+`RUN_GPU_TESTS=1 cargo test --release --test in_one_window` checks the entry point in an offscreen window (it uses the
+GPU).
+
 ## How it works
 
 - **Shared code**: the files every Rust level shares (geometry, the gun held in hand, the HUD's bars and overlay
@@ -68,10 +80,14 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
   of every black hole and wormhole mouth, the map's and the linked thrown ones (`VoxelWorld::get_warp_pull_m_per_s`,
   along the geodesic to each, across the body's up), to the walk: faster toward a warp, slower away, a slow drift
   standing still. Bots step by the same rule.
-- Space: the map is Euclidean with torus periods 112 × 72 m; the loader (`Map::curve_flat`) turns it into
-  hyperbolic space of curvature radius 160 m, nearly flat, so the copied H³ ray marcher, physics, lasers and
-  black-hole and wormhole lensing work unchanged. The level ends at its edge; walking across the torus seam is not
-  done yet (DECISIONS S1).
+- Space: the map is plain Euclidean (no torus since W-145, no walls at map edges); the loader (`Map::curve_flat`)
+  turns it into hyperbolic space of curvature radius 160 m, nearly flat, so the copied H³ ray marcher, physics,
+  lasers and black-hole and wormhole lensing work unchanged.
+- Edge: no wall. Past the playable ellipse (120 × 80 m) the map's `regions.boundary.soft_edge_m` (12 m) is a band where
+  each step outward is cut by the share of it already walked (`warped_shared::map_edge`, the rule Lunar Surface's
+  crater wall uses), so players slow without end and never reach its far side, and the view stretches as on Lunar
+  Surface; walking back in is at full speed. Walking bots and thrown wormholes stay inside the ellipse (DECISIONS
+  S18).
 - Blizzards: `VoxelWorld::find_blizzard` (a point's blizzard), `get_blizzard_frac` (how much of a shot's reach a
   chord uses) and `stop_in_blizzards` (cuts the laser) in `src/voxel_world.rs`; `VoxelPlayer::step` slows the
   player; the server freezes players standing in one (`net::Server::freeze_players`, `net::Freezing`); the shader's
@@ -148,7 +164,7 @@ GPU; they should be measured on a real Mac.
 
 ## Not done yet
 
-- The torus: walking, seeing and shooting across the map's edges (DECISIONS S1).
+- The torus: walking, seeing and shooting across the map's edges (DECISIONS S1; W-161, real toroidal flat space).
 - Ice that slides, textures for snow and ice (procedural for now).
 - The blizzard slowdown is the moving window's own (like all movement in this demo); the server doesn't check it.
 - Fog of light bent into a blizzard by a black hole is only along the first straight part of the ray.

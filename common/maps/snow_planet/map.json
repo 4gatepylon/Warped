@@ -2,14 +2,10 @@
  "format": "warped-map",
  "version": 1,
  "name": "snow_planet",
- "description": "A snow field on a torus (T\u00b2 \u00d7 \u211d): two pylons a team, five black holes, a wormhole pair, open snow with six rounded mounds, light snowfall and fog, and one tall blizzard.",
+ "description": "A snow field in flat space, slowing players without end past its edge: two pylons a team, five black holes, a wormhole pair, open snow with six rounded mounds, light snowfall and fog, and one tall blizzard.",
  "source": "demos/snow_planet_rust/tools/make_map.py, scatter seed 7 (after demos/levels/snow_planet/index.html)",
  "space": {
-  "kind": "euclidean",
-  "torus_periods_m": [
-   112.0,
-   72.0
-  ]
+  "kind": "euclidean"
  },
  "gravity_m_per_s2": 9.81,
  "player": {
@@ -923,7 +919,8 @@
   "boundary": {
    "kind": "fermi_ellipse",
    "u_m": 60.0,
-   "v_m": 40.0
+   "v_m": 40.0,
+   "soft_edge_m": 12.0
   },
   "zone_walls": {
    "height_m": 6.0,

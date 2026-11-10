@@ -327,7 +327,7 @@ fn get_muzzle_from_model(muzzle_m: Vec3, scale: f32) -> Mat4 {
 }
 
 /// `make_gpu_boundary_planes` gives the arena's team boundary planes as the tone map reads them
-/// (W-148), across the arena's width on its floor; the clock is set each frame.
+/// (W-148), across the playable area's width on its floor; the clock is set each frame.
 ///
 /// Example: `renderer.set_boundary_planes(make_gpu_boundary_planes(&arena));`
 fn make_gpu_boundary_planes(arena: &Arena) -> crate::render::GpuBoundaryPlanes {
@@ -344,7 +344,7 @@ fn make_gpu_boundary_planes(arena: &Arena) -> crate::render::GpuBoundaryPlanes {
     if let Some(first) = planes.first() {
         gpu.look = [first.height_m, first.opacity_frac, 0.0, 0.0];
     }
-    gpu.extent = [arena.bounds_min_m.x, arena.bounds_max_m.x, 0.0, 0.0];
+    gpu.extent = [arena.playable_min_m.x, arena.playable_max_m.x, 0.0, 0.0];
     gpu.counts = [planes.len() as i32, 0, 0, 0];
     gpu
 }

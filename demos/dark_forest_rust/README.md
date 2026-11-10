@@ -1,7 +1,7 @@
 # Dark Forest in Rust
 
 A playable Rust demo of the Dark Forest level (W-122): a first-person shooter in a dim, swampy bamboo labyrinth in
-bounded Euclidean space, whose features are verticality and wormholes. Each team's base has a treehouse on a 7 m deck,
+flat Euclidean space, whose features are verticality and wormholes. Each team's base has a treehouse on a 7 m deck,
 rope ladders, plank bridges between the decks, and a 12 m lookout in the middle; five fixed wormholes, drawn as real
 lensed wormholes, are shortcuts through the maze. It is built on [`../fps_demo/`](../fps_demo/README.md) (Rust, SDL3, a
 Metal PBR rasterizer) with the UDP multiplayer of [`../hyperbolic_wormholes_rust/`](../hyperbolic_wormholes_rust/README.md).
@@ -77,9 +77,17 @@ it); leave it unset to play across computers.
 ## The level
 
 - **Map:** [`../../common/maps/dark_forest/map.json`](../../common/maps/dark_forest/map.json), written by
-  `src/forest_layout.rs` (`make export-map`, compact JSON, 8.6 MB) and read by both the game and the server. It is
-  60 m by 112 m, fenced by rock walls. Red's base is at +z and blue's is red's turned half a turn about the centre, so
-  the two sides are the same.
+  `src/forest_layout.rs` (`make export-map`, compact JSON, 11.9 MB) and read by both the game and the server. It is
+  60 m by 112 m. Red's base is at +z and blue's is red's turned half a turn about the centre, so the two sides are
+  the same.
+- **No walls at the edge** (W-145, no walls at map edges; DECISIONS.md D45): the map's `regions.boundary` is the
+  playable rectangle with a 12 m `soft_edge_m`. Past the rectangle each step outward is cut by the share of those 12 m
+  already walked (`warped_shared::map_edge`, as Lunar Surface's crater wall slows), so players slow without end and
+  never get 12 m out; walking back in is at full speed. The bamboo goes on 30 m past the edge
+  (`add_outer_forest`): clumps like the labyrinth's with a branch per culm out to 14 m, then denser clumps of bare
+  culms under one low-detail canopy each, so looking out from anywhere a player can reach shows bamboo (at eye
+  height, under 3% of the looks pass the whole outer forest: `test_looking_off_the_map_shows_forest`). Bots find their
+  way only inside the rectangle.
 - **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
   [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): every wormhole mouth, the map's
   gates and the linked thrown ones, pulls the player's middle along the ground (`Warps::get_walk_pull_m_per_s`, set as
@@ -154,10 +162,12 @@ binary. The wire protocol is the hyperbolic demo's; its wormhole fields carry th
 
 ## Tools
 
-- `--bench-views <s>`: holds seven fixed views (`spawn`, `bridge`, `lookout`, `treehouse`, `firing`, and the
-  wormhole views `gate` and `lift`) for `<s>` seconds each and prints their frame times; `make bench-views` writes
-  them to `.artifacts/bench_views/<run_id>/`. `gate` looks into the centre gate and `lift` into red's lift from the
-  ground, and each holds robot 0 just beyond the partner mouth, facing back through it.
+- `--bench-views <s>`: holds nine fixed views (`spawn`, `bridge`, `lookout`, `treehouse`, `firing`, the
+  wormhole views `gate` and `lift`, and the map-edge views `edge` and `past-edge`) for `<s>` seconds each and prints
+  their frame times; `make bench-views` writes them to `.artifacts/bench_views/<run_id>/`. `gate` looks into the
+  centre gate and `lift` into red's lift from the ground, and each holds robot 0 just beyond the partner mouth,
+  facing back through it. `edge` stands at the red end of the playable rectangle looking out, and `past-edge` 10 m
+  into the slowing band past the east side, looking further out (W-145, no walls at map edges).
 - `--robot-pose x,y,z,yaw [--robot-walk-m-per-s <speed>]`: holds robot 0 there (it doesn't think or shoot); with a
   speed it walks straight ahead, through any mouth, and starts again every 10 s. `--hold-trigger` keeps firing. For
   pictures and videos of robots and lasers through the wormholes.

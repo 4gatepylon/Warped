@@ -20,6 +20,7 @@ use crate::map::Blizzard;
 use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
+use warped_shared::map_edge::{self, SoftEdge};
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::geometry::{
@@ -333,6 +334,7 @@ pub struct VoxelWorld {
     pub surfaces: Vec<[f32; 4]>,
     pub special: SpecialMaterials,
     pub regions: Option<[f64; 3]>,
+    pub soft_edge: Option<SoftEdge>,
     pub zone_walls: Option<ZoneWalls>,
     pub terrain: Option<Terrain>,
     pub sun: DVec3,
@@ -821,6 +823,14 @@ impl VoxelWorld {
             let boundary = regions.boundary.as_ref()?;
             Some([edge_m, boundary.u_m, boundary.v_m])
         });
+        let soft_edge: Option<SoftEdge> = map
+            .regions
+            .as_ref()
+            .and_then(|regions| regions.boundary.as_ref())
+            .and_then(|b| {
+                let soft_edge_m: f64 = b.soft_edge_m?;
+                Some(SoftEdge::FromBoundary(&b.kind, b.u_m, b.v_m, soft_edge_m))
+            });
         let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
         let body_mesh: usize = meshes.len();
         meshes.push(MeshModel {
@@ -854,6 +864,7 @@ impl VoxelWorld {
             surfaces,
             special,
             regions,
+            soft_edge,
             zone_walls: match &map.regions {
                 Some(regions) => ZoneWalls::FromRegions(regions)?,
                 None => None,
@@ -1444,23 +1455,28 @@ impl VoxelWorld {
 
     /// `get_edge_frac` gives how far a point is into the map's soft edge (`map_edge` in the
     /// settings): 0 before players start to slow on the crater's wall, 1 where their speed would
-    /// reach 0; always 0 on a map without terrain.
+    /// reach 0. On a flat map whose boundary has a `soft_edge_m` (Snow Planet), it runs from 0 at
+    /// the playable ellipse to 1 that far outside it (W-145, no walls at map edges). It is always
+    /// 0 on a map with neither.
     ///
     /// Example: `let edge_frac = world.get_edge_frac(eye);`
     pub fn get_edge_frac(&self, x: DVec4) -> f64 {
-        let Some(terrain) = &self.terrain else {
-            return 0.0;
-        };
         let [u_m, v_m, _] = self.get_fermi_coordinates(x);
+        let Some(terrain) = &self.terrain else {
+            return self
+                .soft_edge
+                .map_or(0.0, |soft_edge| soft_edge.get_edge_frac(u_m, v_m));
+        };
         let edge = &self.settings.map_edge;
-        ((terrain.get_wall_frac(u_m, v_m) - edge.start_wall_frac)
-            / (edge.stop_wall_frac - edge.start_wall_frac))
-            .clamp(0.0, 1.0)
+        map_edge::get_edge_frac(
+            terrain.get_wall_frac(u_m, v_m) - edge.start_wall_frac,
+            edge.stop_wall_frac - edge.start_wall_frac,
+        )
     }
 
     /// `is_outside_boundary` says whether a point is past the map's edge: on a map with terrain,
     /// where the soft edge stops players (`get_edge_frac` reaches 1); otherwise outside the
-    /// playable ellipse (never, without one).
+    /// playable ellipse (never, without one), where walking bots and thrown mouths don't go.
     ///
     /// Example: `if world.is_outside_boundary(x) { ... }`
     fn is_outside_boundary(&self, x: DVec4) -> bool {
@@ -1484,14 +1500,18 @@ impl VoxelWorld {
         }
     }
 
-    /// `is_moving_out` says whether a step from x to y ends past the map's edge and, on a map with
-    /// a playable ellipse, further out than it started, so a player put past the ellipse (out of a
+    /// `is_moving_out` says whether a step from x to y is refused for leaving the map: on a map
+    /// with a soft edge (terrain, or a boundary's `soft_edge_m`), where it ends at the edge's far
+    /// side (`get_edge_frac` reaches 1); on a map with only a playable ellipse, where it ends
+    /// past it and further out than it started, so a player put past the ellipse (out of a
     /// wormhole) can still walk back in.
     ///
     /// Example: `if !world.is_moving_out(x, y) { ... }`
     fn is_moving_out(&self, x: DVec4, y: DVec4) -> bool {
-        self.is_outside_boundary(y)
-            && (self.terrain.is_some() || self.get_ellipse_frac(y) >= self.get_ellipse_frac(x))
+        if self.terrain.is_some() || self.soft_edge.is_some() {
+            return self.get_edge_frac(y) >= 1.0;
+        }
+        self.is_outside_boundary(y) && self.get_ellipse_frac(y) >= self.get_ellipse_frac(x)
     }
 
     /// `is_body_blocked` says whether a body standing on `body` with its eye `h_m` up touches a
@@ -2534,10 +2554,9 @@ impl VoxelPlayer {
                     )
                 };
                 let edge_frac: f64 = world.get_edge_frac(self.body.col(AXIS_W));
-                body_new = move_m(distance_m);
-                if world.get_edge_frac(body_new.col(AXIS_W)) > edge_frac {
-                    body_new = move_m(distance_m * (1.0 - edge_frac));
-                }
+                body_new = map_edge::take_step(distance_m, edge_frac, move_m, |body: &DMat4| {
+                    world.get_edge_frac(body.col(AXIS_W))
+                });
             }
         }
         let messages: Vec<String> = crossed
@@ -4084,7 +4103,7 @@ mod play_tests {
     //! | Gait | walking, sprinting, jumping, crouching | `walking_never_sticks_sinks_or_leaves` |
     //! | Wormhole | the level's pair, a thrown pair | `the_level_wormhole_carries_walkers_and_lasers`, `a_thrown_pair_carries_walkers_and_lasers` |
     //! | Way into a level mouth | each of `HEADING_COUNT`, from inside and past the edge | `the_level_wormhole_carries_walkers_and_lasers` |
-    //! | Past the edge, walking | inward (moves), outward (stays) | `a_player_past_the_edge_walks_back_in_only` |
+    //! | Walking off the map (W-145, no walls at map edges) | outward from inside (slows each second, never reaches the band's far side), back inward from deep in the band (full speed) | `walking_off_the_map_slows_without_end` |
 
     use super::*;
     use crate::map::{FLAT_CURVATURE_RADIUS_M, Map, get_map_folder};
@@ -4101,7 +4120,12 @@ mod play_tests {
     const WALK_THROUGH_STEP_COUNT: usize = 240;
     const NEAR_EXIT_M: f64 = 10.0;
     const MIN_WALK_ON_M: f64 = 3.0;
-    const PAST_EDGE_V_M: f64 = 41.0;
+    const INSIDE_EDGE_V_M: f64 = 38.0;
+    const BOUNDARY_V_M: f64 = 40.0;
+    const SOFT_EDGE_M: f64 = 12.0;
+    const STEPS_PER_S: usize = 60;
+    const OFF_EDGE_WALK_S: usize = 12;
+    const MIN_OFF_EDGE_DEPTH_M: f64 = 8.0;
     const EDGE_WALK_STEP_COUNT: usize = 30;
     const MIN_EDGE_WALK_M: f64 = 2.0;
     const PURPLE_M: [f64; 2] = [-38.0, 8.0];
@@ -4202,7 +4226,7 @@ mod play_tests {
                         "{at}: {}",
                         player.h_m
                     );
-                    assert!(!world.is_outside_boundary(player.body.col(AXIS_W)), "{at}");
+                    assert!(world.get_edge_frac(player.body.col(AXIS_W)) < 1.0, "{at}");
                     if i + 1 == GAIT_PERIOD_STEP_COUNT {
                         let [u_now_m, v_now_m] = get_place_m(&world, &player);
                         let moved_m: f64 = (u_now_m - u_m).hypot(v_now_m - v_m);
@@ -4214,23 +4238,36 @@ mod play_tests {
     }
 
     #[test]
-    fn a_player_past_the_edge_walks_back_in_only() {
+    fn walking_off_the_map_slows_without_end() {
         let world: VoxelWorld = load_snow_planet();
-        for (target_m, should_move) in [([0.0, 0.0], true), ([0.0, PAST_EDGE_V_M * 2.0], false)] {
-            let mut player: VoxelPlayer =
-                VoxelPlayer::AtView(&world, [0.0, PAST_EDGE_V_M], target_m, None, 0.0);
-            walk(&world, &mut player, EDGE_WALK_STEP_COUNT);
+        let mut player: VoxelPlayer = VoxelPlayer::AtView(
+            &world,
+            [0.0, INSIDE_EDGE_V_M],
+            [0.0, 2.0 * INSIDE_EDGE_V_M],
+            None,
+            0.0,
+        );
+        let (mut last_v_m, mut last_gain_m) = (INSIDE_EDGE_V_M, f64::INFINITY);
+        for second in 0..OFF_EDGE_WALK_S {
+            walk(&world, &mut player, STEPS_PER_S);
             let [_, v_m] = get_place_m(&world, &player);
-            assert_eq!(
-                v_m < PAST_EDGE_V_M - MIN_EDGE_WALK_M,
-                should_move,
-                "toward {target_m:?}: {v_m}"
-            );
-            assert!(
-                v_m < PAST_EDGE_V_M + STAND_TOLERANCE_M,
-                "toward {target_m:?}: {v_m}"
-            );
+            let edge_frac: f64 = world.get_edge_frac(player.body.col(AXIS_W));
+            let at: String = format!("second {second}: at {v_m} m, edge {edge_frac}");
+            assert!(v_m > last_v_m && edge_frac < 1.0, "{at}");
+            if v_m > BOUNDARY_V_M + 1.0 {
+                assert!(v_m - last_v_m < last_gain_m, "{at}: not slowing");
+            }
+            (last_v_m, last_gain_m) = (v_m, v_m - last_v_m);
         }
+        assert!(
+            last_v_m > BOUNDARY_V_M + MIN_OFF_EDGE_DEPTH_M && last_v_m < BOUNDARY_V_M + SOFT_EDGE_M,
+            "{last_v_m}"
+        );
+        let mut back: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [0.0, last_v_m], [0.0, 0.0], None, 0.0);
+        walk(&world, &mut back, EDGE_WALK_STEP_COUNT);
+        let [_, back_v_m] = get_place_m(&world, &back);
+        assert!(back_v_m < last_v_m - MIN_EDGE_WALK_M, "{back_v_m}");
     }
 
     fn find_mouth_m(world: &VoxelWorld, name: &str) -> [f64; 2] {
