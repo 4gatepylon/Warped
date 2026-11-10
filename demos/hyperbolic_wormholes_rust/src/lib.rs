@@ -3673,7 +3673,8 @@ impl Session {
                 render_px,
             );
             view.frame.set_sharp_centre(self.sharp_centre);
-            view.frame.set_visuals(self.player_settings.visuals.to_gpu());
+            view.frame
+                .set_visuals(self.player_settings.visuals.to_gpu());
             if is_firing
                 && !self.was_firing
                 && let Some(shot) = &view.shot
