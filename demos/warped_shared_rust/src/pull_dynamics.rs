@@ -9,7 +9,8 @@
 //! `ramp_legs_speed`; `step_flat_player` is the whole step on a flat floor with one wormhole, the
 //! page's `step_player`, which the tests check against a recording the page's code made.
 //!
-//! Interface: `get_pull_m_per_s_per_s`, `step_drift`, `ramp_legs_speed`, `FLAT_STEP_S`,
+//! Interface: `get_pull_m_per_s_per_s`, `get_flat_pull`, `get_hyperbolic_pull`, `turn_drift`,
+//! `step_drift`, `ramp_legs_speed`, `FLAT_STEP_S`,
 //! `FlatPlayer`, `FlatInput`, `FlatLevel`, `step_flat_player`.
 //!
 //! Example: `let drift: DVec3 = step_drift(drift, pull, gravity.brake_m_per_s_per_s, dt_s);`
@@ -21,8 +22,10 @@
 //!   - `step_flat_player` does its sums in `pull_dynamics.js`'s order, so the two agree to the
 //!     last bits; change them together.
 
-use glam::DVec3;
+use glam::{DMat4, DVec3, DVec4};
 
+use crate::geometry::{AXIS_X, AXIS_Z, get_distance, minkowski_dot};
+use crate::gravity::{FlatWarp, HyperbolicWarp};
 use crate::play_settings::{GravitySettings, MovementSettings};
 
 /// `FLAT_STEP_S` is the time step of `step_flat_player`, the page's `DT_S`.
@@ -48,6 +51,80 @@ pub fn get_pull_m_per_s_per_s(
     }
     let edge_frac: f64 = (distance_m - warp_radius_m) / (settings.radius_m - warp_radius_m);
     Some(settings.acceleration_m_per_s_per_s * settings.profile.get_frac(edge_frac))
+}
+
+/// `get_flat_pull` gives the pull of `warps` on a player at `at_m` in flat space, whose up is the
+/// unit vector `up`, as an acceleration along the ground (across `up`), or `None` out of every
+/// warp's reach. A warp above or below the player pulls by the part of its direction along the
+/// ground.
+///
+/// Example: `let pull: Option<DVec3> = get_flat_pull(&settings.gravity, middle, DVec3::Y, &warps);`
+pub fn get_flat_pull(
+    settings: &GravitySettings,
+    at_m: DVec3,
+    up: DVec3,
+    warps: &[FlatWarp],
+) -> Option<DVec3> {
+    let mut pull: Option<DVec3> = None;
+    for warp in warps {
+        let offset_m: DVec3 = warp.centre_m - at_m;
+        let distance_m: f64 = offset_m.length();
+        let Some(strength) = get_pull_m_per_s_per_s(settings, distance_m, warp.radius_m) else {
+            continue;
+        };
+        let toward: DVec3 = if strength > 0.0 {
+            let along: DVec3 = offset_m / distance_m;
+            (along - up * along.dot(up)) * strength
+        } else {
+            DVec3::ZERO
+        };
+        pull = Some(pull.unwrap_or(DVec3::ZERO) + toward);
+    }
+    pull
+}
+
+/// `get_hyperbolic_pull` gives the pull of `warps` on a player whose eye is the point `eye` of H³
+/// of curvature radius `r_m`, and whose body's frame is `body` (columns right, up, back, its
+/// foot), as an acceleration along the body's right (x) and back (z) axes, or `None` out of every
+/// warp's reach. Each warp pulls along the geodesic from the eye to its centre.
+///
+/// Example: `let pull: Option<DVec3> = get_hyperbolic_pull(&gravity, body, eye, 26.7, &warps);`
+pub fn get_hyperbolic_pull(
+    settings: &GravitySettings,
+    body: DMat4,
+    eye: DVec4,
+    r_m: f64,
+    warps: &[HyperbolicWarp],
+) -> Option<DVec3> {
+    let mut pull: Option<DVec3> = None;
+    for warp in warps {
+        let distance: f64 = get_distance(eye, warp.centre);
+        let Some(strength) = get_pull_m_per_s_per_s(settings, distance * r_m, warp.radius_m) else {
+            continue;
+        };
+        let length: f64 = distance.sinh();
+        let toward: DVec3 = if strength > 0.0 && length > MIN_LENGTH {
+            let tangent: DVec4 = warp.centre + minkowski_dot(warp.centre, eye) * eye;
+            DVec3::new(
+                minkowski_dot(tangent, body.col(AXIS_X)) / length * strength,
+                0.0,
+                minkowski_dot(tangent, body.col(AXIS_Z)) / length * strength,
+            )
+        } else {
+            DVec3::ZERO
+        };
+        pull = Some(pull.unwrap_or(DVec3::ZERO) + toward);
+    }
+    pull
+}
+
+/// `turn_drift` gives a drift kept in a body's right (x) and back (z) axes after the body has
+/// turned by `turn` (the rotation the body's frame was multiplied by on the right, as looking
+/// around does), so that the drift keeps its direction in the world.
+///
+/// Example: `self.drift_m_per_s = turn_drift(self.drift_m_per_s, make_rotation(AXIS_X, AXIS_Z, yaw_rad));`
+pub fn turn_drift(drift_m_per_s: DVec3, turn: DMat4) -> DVec3 {
+    (turn.inverse() * drift_m_per_s.extend(0.0)).truncate()
 }
 
 /// `step_drift` moves a player's drift on by `dt_s`: with a pull (`Some`, the sum of the pulls of
@@ -223,6 +300,8 @@ mod tests {
     //! | Distance from a warp | beyond the radius (out of reach), between throat and radius (the profile's share of the strength), inside the throat (0, in reach), a warp wider than the radius (0 or out of reach) | `the_pull_is_inside_the_radius_only` |
     //! | Profile | constant, stronger near the mouth, harmonic | `the_pull_is_inside_the_radius_only` |
     //! | Drift | pulled (the pull added), in reach with no pull (kept), out of reach (braked, to 0 and no further), already 0 | `drift_builds_in_reach_and_is_braked_outside` |
+    //! | Pull in a space | flat: none in reach, one (toward it along the ground, its strength), one overhead (in reach, no pull), two (added); hyperbolic: the same strength and direction in the body's axes at the same distance, none in reach | `pulls_point_at_the_warps_along_the_ground` |
+    //! | Body turned | by a quarter turn (the drift's parts swap so its direction in the world stays), then back | `a_turned_body_keeps_its_drifts_direction` |
     //! | Legs' speed | sprinting from walking speed (rises, stops at the top), not sprinting from the top (falls, stops at walking speed), below walking speed (rises to it) | `the_legs_speed_ramps_between_walking_and_sprinting` |
     //! | The page's recording (scripted keys through `pull_dynamics.js`: a swing through both mouths, sprinting in and out, walking away) | every sampled place, the times through a mouth, the energy and the legs' speed at the end | `the_flat_step_follows_the_pages_recording` |
 
@@ -275,6 +354,64 @@ mod tests {
         gravity.profile = PullProfile::StrongerNearMouth;
         let near: f64 = get_pull_m_per_s_per_s(&gravity, quarter_m, THROAT_M).unwrap();
         assert!((near - 0.75 * strength).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pulls_point_at_the_warps_along_the_ground() {
+        use crate::geometry::{AXIS_W, AXIS_Y, make_boost};
+        let gravity: GravitySettings = GravitySettings::default();
+        let strength: f64 = gravity.acceleration_m_per_s_per_s;
+        let warp = |x: f64, y: f64| FlatWarp {
+            centre_m: DVec3::new(x, y, 0.0),
+            radius_m: THROAT_M,
+            is_mouth: true,
+        };
+        let pull_of = |warps: &[FlatWarp]| get_flat_pull(&gravity, DVec3::ZERO, DVec3::Y, warps);
+        assert_eq!(pull_of(&[warp(6.0, 0.0)]), None);
+        let one: DVec3 = pull_of(&[warp(3.0, 0.0)]).expect("in reach");
+        assert!((one - DVec3::X * strength).length() < 1e-12);
+        let overhead: DVec3 = pull_of(&[warp(0.0, 3.0)]).expect("in reach");
+        assert!(overhead.length() < 1e-12);
+        let two: DVec3 = pull_of(&[warp(3.0, 0.0), warp(-4.0, 0.0), warp(9.0, 0.0)]).unwrap();
+        assert!(two.length() < 1e-12);
+        const CURVATURE_RADIUS_M: f64 = 26.7;
+        let body: DMat4 = DMat4::IDENTITY;
+        let eye: DVec4 = (body * make_boost(AXIS_Y, 1.6 / CURVATURE_RADIUS_M)).col(AXIS_W);
+        let ahead = |distance_m: f64| HyperbolicWarp {
+            centre: (make_boost(AXIS_Y, 1.6 / CURVATURE_RADIUS_M)
+                * make_boost(AXIS_Z, -distance_m / CURVATURE_RADIUS_M))
+            .col(AXIS_W),
+            radius_m: THROAT_M,
+            is_mouth: true,
+        };
+        let curved = |distance_m: f64| {
+            get_hyperbolic_pull(
+                &gravity,
+                body,
+                eye,
+                CURVATURE_RADIUS_M,
+                &[ahead(distance_m)],
+            )
+        };
+        assert_eq!(curved(6.0), None);
+        let pull: DVec3 = curved(3.0).expect("in reach");
+        assert!((pull.length() - strength).abs() < 0.05 * strength, "{pull}");
+        assert!(
+            pull.z < 0.0 && pull.x.abs() < 1e-9 && pull.y == 0.0,
+            "{pull}"
+        );
+    }
+
+    #[test]
+    fn a_turned_body_keeps_its_drifts_direction() {
+        use crate::geometry::make_rotation;
+        let drift: DVec3 = DVec3::new(2.0, 0.0, -5.0);
+        let quarter: DMat4 = make_rotation(AXIS_X, AXIS_Z, std::f64::consts::FRAC_PI_2);
+        let turned: DVec3 = turn_drift(drift, quarter);
+        assert!((turned.length() - drift.length()).abs() < 1e-12 && turned.y == 0.0);
+        assert!((quarter * turned.extend(0.0) - drift.extend(0.0)).length() < 1e-12);
+        assert!((turn_drift(turned, quarter.inverse()) - drift).length() < 1e-12);
+        assert!(turned.x.abs() > 4.9 || turned.z.abs() > 4.9);
     }
 
     #[test]

@@ -40,9 +40,10 @@ use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
-use warped_shared::gravity::{HyperbolicWarp, add_pull, get_hyperbolic_pull_m_per_s};
+use warped_shared::gravity::{HyperbolicWarp, add_pull};
 use warped_shared::laser_drop::{DROP_PIECE_M, get_drop_curvature_per_m, turn_hyperbolic};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
+use warped_shared::pull_dynamics::{get_hyperbolic_pull, ramp_legs_speed, step_drift, turn_drift};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
@@ -1812,13 +1813,13 @@ impl VoxelWorld {
             .position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
     }
 
-    /// `get_warp_pull_m_per_s` gives the pull of every warp, the map's and the linked thrown mouths
-    /// (W-144, gravity toward black holes and wormholes; `gravity::get_hyperbolic_pull_m_per_s`),
-    /// on a player whose body's frame is `body` and whose eye is `eye`, as speeds along the body's
-    /// right and back axes.
+    /// `get_warp_pull` gives the pull of every warp, the map's and the linked thrown mouths (W-202,
+    /// pull toward wormholes and black holes in the game settings; `pull_dynamics::get_hyperbolic_pull`),
+    /// on a player whose body's frame is `body` and whose eye is `eye`, as an acceleration along
+    /// the body's right (x) and back (z) axes, or `None` out of every warp's reach.
     ///
-    /// Example: `let [right_m_per_s, back_m_per_s] = world.get_warp_pull_m_per_s(player.body, eye);`
-    pub fn get_warp_pull_m_per_s(&self, body: DMat4, eye: DVec4) -> [f64; 2] {
+    /// Example: `let pull: Option<DVec3> = world.get_warp_pull(player.body, eye);`
+    pub fn get_warp_pull(&self, body: DMat4, eye: DVec4) -> Option<DVec3> {
         let warps: Vec<HyperbolicWarp> = self
             .warps
             .iter()
@@ -1828,14 +1829,7 @@ impl VoxelWorld {
                 is_mouth: warp.is_mouth,
             })
             .collect();
-        get_hyperbolic_pull_m_per_s(
-            &self.settings.gravity,
-            self.player.walk_m_per_s,
-            body,
-            eye,
-            self.r,
-            &warps,
-        )
+        get_hyperbolic_pull(&self.settings.gravity, body, eye, self.r, &warps)
     }
 
     /// `get_time_rate_frac` gives how fast time runs at x (W-107), as a share of time far from every
@@ -2228,6 +2222,12 @@ pub struct VoxelPlayer {
     pub is_on_ground: bool,
     pub energy_frac: f64,
     pub is_sprinting: bool,
+    /// `legs_m_per_s` is the speed the legs give on foot (W-202): it rises from walking speed to
+    /// the sprint's top speed while sprinting and falls back when not (0 until the first step).
+    pub legs_m_per_s: f64,
+    /// `drift_m_per_s` is the velocity the warps' pull has given the player (W-202), along the
+    /// body's right (x) and back (z) axes.
+    pub drift_m_per_s: DVec3,
     pub bob_phase_rad: f64,
     pub bob_frac: f64,
     pub slowed_s: f64,
@@ -2252,6 +2252,8 @@ impl VoxelPlayer {
             is_on_ground: true,
             energy_frac: 1.0,
             is_sprinting: false,
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2303,6 +2305,8 @@ impl VoxelPlayer {
             is_on_ground: true,
             energy_frac: 1.0,
             is_sprinting: false,
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2339,6 +2343,8 @@ impl VoxelPlayer {
             is_on_ground: h_m.is_none(),
             energy_frac: 1.0,
             is_sprinting: false,
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2372,6 +2378,8 @@ impl VoxelPlayer {
             is_on_ground: false,
             energy_frac: 1.0,
             is_sprinting: false,
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2426,7 +2434,9 @@ impl VoxelPlayer {
     ///
     /// Example: `player.look(12.0, -3.0);`
     pub fn look(&mut self, dx_px: f64, dy_px: f64) {
-        self.body *= make_rotation(AXIS_X, AXIS_Z, dx_px * LOOK_RAD_PER_PX);
+        let turn: DMat4 = make_rotation(AXIS_X, AXIS_Z, dx_px * LOOK_RAD_PER_PX);
+        self.body *= turn;
+        self.drift_m_per_s = turn_drift(self.drift_m_per_s, turn);
         self.pitch_rad =
             (self.pitch_rad - dy_px * LOOK_RAD_PER_PX).clamp(-MAX_PITCH_RAD, MAX_PITCH_RAD);
     }
@@ -2480,8 +2490,10 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying;
     /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
-    /// pulled along the ground toward black holes and wormhole mouths (`get_warp_pull_m_per_s`,
-    /// W-144: faster toward one, slower away, drifting toward one standing still),
+    /// pulled along the ground toward black holes and wormhole mouths (`get_warp_pull`, W-202: the
+    /// pull builds a drift inside a warp's radius, kept through a mouth and braked outside every
+    /// radius; a move a wall refuses ends the drift), the legs' speed rising to the sprint's top
+    /// speed and falling back (`ramp_legs_speed`),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to the spawn
     /// of index `spawn_index`, the player's team),
     /// slowing down without end on the way out up the crater's wall (`get_edge_frac`: each step
@@ -2539,8 +2551,17 @@ impl VoxelPlayer {
             * match (self.is_flying, self.is_sprinting) {
                 (true, true) => settings.fly_m_per_s * FLY_SPRINT_PER_FLY,
                 (true, false) => settings.fly_m_per_s,
-                (false, true) => settings.sprint_m_per_s,
-                (false, false) => settings.walk_m_per_s,
+                (false, _) => {
+                    self.legs_m_per_s = ramp_legs_speed(
+                        self.legs_m_per_s.max(settings.walk_m_per_s),
+                        self.is_sprinting,
+                        settings.walk_m_per_s,
+                        settings.sprint_m_per_s,
+                        &world.settings.movement,
+                        dt_s,
+                    );
+                    self.legs_m_per_s
+                }
             };
         let eye: DVec4 = (self.body * make_boost(AXIS_Y, self.h_m / r)).col(AXIS_W);
         let warp: Option<usize> = world.find_warp_inside(eye);
@@ -2556,11 +2577,17 @@ impl VoxelPlayer {
             };
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
-        let pull_m_per_s: [f64; 2] = if self.is_flying {
-            [0.0, 0.0]
+        self.drift_m_per_s = if self.is_flying {
+            DVec3::ZERO
         } else {
-            world.get_warp_pull_m_per_s(self.body, eye)
+            step_drift(
+                self.drift_m_per_s,
+                world.get_warp_pull(self.body, eye),
+                world.settings.gravity.brake_m_per_s_per_s,
+                dt_s,
+            )
         };
+        let pull_m_per_s: [f64; 2] = [self.drift_m_per_s.x, self.drift_m_per_s.z];
         let walk_dir: [f64; 2] = if len > 0.0 {
             [side / len, -forward / len]
         } else {
@@ -2665,6 +2692,9 @@ impl VoxelPlayer {
             self.h_m = h0 + dh * lo;
             self.is_on_ground = dh < 0.0;
             self.vertical_m_per_s = 0.0;
+        }
+        if has_moved && self.body != body_new {
+            self.drift_m_per_s = DVec3::ZERO;
         }
         StepReport {
             messages,
