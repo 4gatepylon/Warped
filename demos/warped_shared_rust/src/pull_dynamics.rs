@@ -9,13 +9,20 @@
 //! `ramp_legs_speed`; `step_flat_player` is the whole step on a flat floor with one wormhole, the
 //! page's `step_player`, which the tests check against a recording the page's code made.
 //!
-//! Interface: `get_pull_m_per_s_per_s`, `get_flat_pull`, `get_hyperbolic_pull`, `turn_drift`,
+//! Interface: `get_pull_m_per_s_per_s`, `get_flat_pull`, `get_hyperbolic_pull`, `WarpPulls`,
+//! `get_hyperbolic_warp_pulls`, `get_black_hole_radius_m`, `turn_drift`,
 //! `step_drift`, `ramp_legs_speed`, `FLAT_STEP_S`,
 //! `FlatPlayer`, `FlatInput`, `FlatLevel`, `step_flat_player`.
 //!
 //! Example: `let drift: DVec3 = step_drift(drift, pull, gravity.brake_m_per_s_per_s, dt_s);`
 //!
 //! Must know:
+//! - A black hole pulls differently from a mouth (`get_hyperbolic_warp_pulls`; the user's four
+//!   changes): over `black_hole_radius_per_radius` times the radius, with
+//!   `black_hole_acceleration_frac` of the strength, in all three directions (so it can lift a
+//!   player, who can still walk in the air), slowing the legs to `black_hole_speed_frac` inside
+//!   its radius, and not at all inside `black_hole_min_radius_m`, where it also stops a player
+//!   moving further in ("black holes cannot pull you in").
 //! - Gotchas:
 //!   - A warp whose throat or horizon is wider than `gravity.radius_m` doesn't pull: the radius
 //!     is from the warp's centre.
@@ -24,7 +31,7 @@
 
 use glam::{DMat4, DVec3, DVec4};
 
-use crate::geometry::{AXIS_X, AXIS_Z, get_distance, minkowski_dot};
+use crate::geometry::{AXIS_X, AXIS_Y, AXIS_Z, get_distance, minkowski_dot};
 use crate::gravity::{FlatWarp, HyperbolicWarp};
 use crate::play_settings::{GravitySettings, MovementSettings};
 
@@ -116,6 +123,115 @@ pub fn get_hyperbolic_pull(
         pull = Some(pull.unwrap_or(DVec3::ZERO) + toward);
     }
     pull
+}
+
+/// `get_black_hole_radius_m` gives how far from a black hole's centre its pull reaches.
+///
+/// Example: `let reach_m: f64 = get_black_hole_radius_m(&settings.gravity);`
+pub fn get_black_hole_radius_m(settings: &GravitySettings) -> f64 {
+    settings.radius_m * settings.black_hole_radius_per_radius
+}
+
+/// `WarpPulls` is what the warps in reach do to a player this step, in the body's axes (x right,
+/// y up, z back): the pull (`None` out of every warp's reach; mouths pull along the ground, black
+/// holes in all three directions), the share of the legs' speed a black hole leaves (1 outside
+/// every black hole's radius), how deep the player is in a black hole's radius (0 at its edge or
+/// outside, 1 at its minimum radius, for the darkening), and, inside a black hole's minimum
+/// radius, the unit direction toward it, along which the player may not be carried further in.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct WarpPulls {
+    pub pull_m_per_s_per_s: Option<DVec3>,
+    pub legs_speed_frac: f64,
+    pub black_hole_depth_frac: f64,
+    pub held_out_of: Option<DVec3>,
+}
+
+impl WarpPulls {
+    /// `NONE` is no warp in reach.
+    pub const NONE: WarpPulls = WarpPulls {
+        pull_m_per_s_per_s: None,
+        legs_speed_frac: 1.0,
+        black_hole_depth_frac: 0.0,
+        held_out_of: None,
+    };
+
+    /// `hold_out` gives `velocity` (in the body's axes) without its part toward a black hole
+    /// whose minimum radius the player is inside; elsewhere, `velocity` as it is.
+    ///
+    /// Example: `self.drift_m_per_s = pulls.hold_out(self.drift_m_per_s);`
+    pub fn hold_out(&self, velocity_m_per_s: DVec3) -> DVec3 {
+        match self.held_out_of {
+            Some(toward) => velocity_m_per_s - toward * velocity_m_per_s.dot(toward).max(0.0),
+            None => velocity_m_per_s,
+        }
+    }
+}
+
+/// `get_hyperbolic_warp_pulls` gives what `warps` do to a player whose eye is the point `eye` of
+/// H³ of curvature radius `r_m` and whose body's frame is `body` (columns right, up, back, its
+/// foot): mouths pull as `get_hyperbolic_pull` does, along the ground inside `radius_m`; black
+/// holes pull in all three directions between their minimum radius and their wider radius, more
+/// weakly, slow the legs there, and hold the player out of their minimum radius.
+///
+/// Example: `let pulls: WarpPulls = get_hyperbolic_warp_pulls(&gravity, body, eye, 26.7, &warps);`
+pub fn get_hyperbolic_warp_pulls(
+    settings: &GravitySettings,
+    body: DMat4,
+    eye: DVec4,
+    r_m: f64,
+    warps: &[HyperbolicWarp],
+) -> WarpPulls {
+    let mut pulls: WarpPulls = WarpPulls::NONE;
+    let hole_radius_m: f64 = get_black_hole_radius_m(settings);
+    let hole_strength: f64 =
+        settings.acceleration_m_per_s_per_s * settings.black_hole_acceleration_frac;
+    for warp in warps {
+        let distance: f64 = get_distance(eye, warp.centre);
+        let distance_m: f64 = distance * r_m;
+        let length: f64 = distance.sinh();
+        let toward = |is_flat: bool| -> DVec3 {
+            if length <= MIN_LENGTH {
+                return DVec3::ZERO;
+            }
+            let tangent: DVec4 = warp.centre + minkowski_dot(warp.centre, eye) * eye;
+            let part = |axis: usize| minkowski_dot(tangent, body.col(axis)) / length;
+            DVec3::new(
+                part(AXIS_X),
+                if is_flat { 0.0 } else { part(AXIS_Y) },
+                part(AXIS_Z),
+            )
+        };
+        if warp.is_mouth {
+            if let Some(strength) = get_pull_m_per_s_per_s(settings, distance_m, warp.radius_m) {
+                let pull: DVec3 = toward(true) * strength;
+                pulls.pull_m_per_s_per_s =
+                    Some(pulls.pull_m_per_s_per_s.unwrap_or(DVec3::ZERO) + pull);
+            }
+            continue;
+        }
+        if distance_m > hole_radius_m {
+            continue;
+        }
+        let min_m: f64 = settings.black_hole_min_radius_m.min(hole_radius_m);
+        let is_held_out: bool = distance_m <= min_m;
+        let pull: DVec3 = if is_held_out {
+            DVec3::ZERO
+        } else {
+            toward(false) * hole_strength
+        };
+        pulls.pull_m_per_s_per_s = Some(pulls.pull_m_per_s_per_s.unwrap_or(DVec3::ZERO) + pull);
+        pulls.legs_speed_frac = pulls.legs_speed_frac.min(settings.black_hole_speed_frac);
+        let depth_frac: f64 = if hole_radius_m > min_m {
+            ((hole_radius_m - distance_m) / (hole_radius_m - min_m)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        pulls.black_hole_depth_frac = pulls.black_hole_depth_frac.max(depth_frac);
+        if is_held_out {
+            pulls.held_out_of = Some(toward(false));
+        }
+    }
+    pulls
 }
 
 /// `turn_drift` gives a drift kept in a body's right (x) and back (z) axes after the body has
@@ -301,6 +417,7 @@ mod tests {
     //! | Profile | constant, stronger near the mouth, harmonic | `the_pull_is_inside_the_radius_only` |
     //! | Drift | pulled (the pull added), in reach with no pull (kept), out of reach (braked, to 0 and no further), already 0 | `drift_builds_in_reach_and_is_braked_outside` |
     //! | Pull in a space | flat: none in reach, one (toward it along the ground, its strength), one overhead (in reach, no pull), two (added); hyperbolic: the same strength and direction in the body's axes at the same distance, none in reach | `pulls_point_at_the_warps_along_the_ground` |
+    //! | Black hole by distance (the user's four changes) | beyond twice the radius (nothing), between its minimum radius and that (half the strength, toward it in all three directions, the legs slowed, deeper the closer), inside the minimum radius (no pull, held out of it: a velocity toward it loses that part, one away keeps all); a mouth at the same place (along the ground only, full strength, no slowing) | `black_holes_pull_wider_weaker_and_hold_players_out` |
     //! | Body turned | by a quarter turn (the drift's parts swap so its direction in the world stays), then back | `a_turned_body_keeps_its_drifts_direction` |
     //! | Legs' speed | sprinting from walking speed (rises, stops at the top), not sprinting from the top (falls, stops at walking speed), below walking speed (rises to it) | `the_legs_speed_ramps_between_walking_and_sprinting` |
     //! | The page's recording (scripted keys through `pull_dynamics.js`: a swing through both mouths, sprinting in and out, walking away) | every sampled place, the times through a mouth, the energy and the legs' speed at the end | `the_flat_step_follows_the_pages_recording` |
@@ -400,6 +517,61 @@ mod tests {
             pull.z < 0.0 && pull.x.abs() < 1e-9 && pull.y == 0.0,
             "{pull}"
         );
+    }
+
+    #[test]
+    fn black_holes_pull_wider_weaker_and_hold_players_out() {
+        use crate::geometry::{AXIS_W, AXIS_Y, make_boost};
+        const CURVATURE_RADIUS_M: f64 = 26.7;
+        let gravity: GravitySettings = GravitySettings::default();
+        let strength: f64 = gravity.acceleration_m_per_s_per_s;
+        let (body, eye) = (DMat4::IDENTITY, DMat4::IDENTITY.col(AXIS_W));
+        let warp = |ahead_m: f64, up_m: f64, is_mouth: bool| HyperbolicWarp {
+            centre: (make_boost(AXIS_Z, -ahead_m / CURVATURE_RADIUS_M)
+                * make_boost(AXIS_Y, up_m / CURVATURE_RADIUS_M))
+            .col(AXIS_W),
+            radius_m: 1.1,
+            is_mouth,
+        };
+        let pulls_of = |warp: HyperbolicWarp| {
+            get_hyperbolic_warp_pulls(&gravity, body, eye, CURVATURE_RADIUS_M, &[warp])
+        };
+        assert_eq!(pulls_of(warp(10.5, 0.0, false)), WarpPulls::NONE);
+        let far: WarpPulls = pulls_of(warp(8.0, 0.0, false));
+        let pull: DVec3 = far.pull_m_per_s_per_s.expect("in reach");
+        assert!(
+            (pull.length() - 0.5 * strength).abs() < 0.03 * strength,
+            "{pull}"
+        );
+        assert!(pull.z < 0.0 && pull.x.abs() < 1e-9);
+        assert_eq!(far.legs_speed_frac, gravity.black_hole_speed_frac);
+        assert!(far.black_hole_depth_frac > 0.2 && far.black_hole_depth_frac < 0.4);
+        assert_eq!(far.held_out_of, None);
+        let above: WarpPulls = pulls_of(warp(3.0, 4.0, false));
+        let lifted: DVec3 = above.pull_m_per_s_per_s.expect("in reach");
+        assert!(
+            lifted.y > 0.5 * lifted.length() && lifted.z < 0.0,
+            "{lifted}"
+        );
+        assert!(above.black_hole_depth_frac > far.black_hole_depth_frac);
+        let inside: WarpPulls = pulls_of(warp(2.0, 0.0, false));
+        assert_eq!(inside.pull_m_per_s_per_s, Some(DVec3::ZERO));
+        assert_eq!(inside.black_hole_depth_frac, 1.0);
+        let toward: DVec3 = inside.held_out_of.expect("held out");
+        assert!((toward - DVec3::NEG_Z).length() < 1e-6, "{toward}");
+        let held: DVec3 = inside.hold_out(DVec3::new(2.0, 0.0, -3.0));
+        assert!((held - DVec3::new(2.0, 0.0, 0.0)).length() < 1e-5, "{held}");
+        assert_eq!(
+            inside.hold_out(DVec3::new(0.0, 0.0, 3.0)),
+            DVec3::new(0.0, 0.0, 3.0)
+        );
+        assert_eq!(far.hold_out(DVec3::NEG_Z), DVec3::NEG_Z);
+        let mouth: WarpPulls = pulls_of(warp(2.0, 3.0, true));
+        let flat: DVec3 = mouth.pull_m_per_s_per_s.expect("in reach");
+        assert!(
+            flat.y == 0.0 && (mouth.legs_speed_frac, mouth.black_hole_depth_frac) == (1.0, 0.0)
+        );
+        assert_eq!(pulls_of(warp(8.0, 0.0, true)), WarpPulls::NONE);
     }
 
     #[test]

@@ -3418,11 +3418,16 @@ impl Session {
     ///
     /// Example: `let hit = self.get_hit_effect();`
     fn get_hit_effect(&self) -> render_metal::HitEffect {
-        make_hit_effect(
+        let hit: render_metal::HitEffect = make_hit_effect(
             self.hit_effect_frac,
             self.total_frame_count,
             &self.player_settings.hit_effects,
-        )
+        );
+        let darkness_frac: f64 = self.voxel.as_ref().map_or(0.0, |voxel| {
+            voxel.player.black_hole_depth_frac
+                * voxel.world.settings.gravity.black_hole_darkness_frac
+        });
+        warped_shared::hud::darken_near_black_hole(hit, darkness_frac)
     }
 
     /// `get_team` gives this player's team (an index into `net::TEAM_NAMES`): the one the server

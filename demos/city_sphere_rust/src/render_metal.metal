@@ -28,6 +28,7 @@ constant float4 OVERLAY_TITLE_COLOR = float4(1.0, 0.35, 0.3, 1.0);
 constant float4 OVERLAY_TEXT_COLOR = float4(0.92, 0.94, 0.98, 1.0);
 constant float3 HIT_RED_COLOR = float3(0.85, 0.05, 0.03);
 constant float HIT_EDGE_REACH_FRAC = 0.7;
+constant float HIT_DARK_DIM_FRAC = 0.55;
 constant int HIT_BLUR_TAP_COUNT = 8;
 constant float3 WAND_LIGHT_DIRECTION = float3(-0.42, 0.78, 0.46);
 constant float WAND_AMBIENT = 0.3;
@@ -2165,7 +2166,9 @@ static float3 blueshift_scene(float3 rgb, uint2 id, float2 size, constant Overla
 /**
  * @brief `read_hit_scene` reads a frame's pixel as a player who was just hit sees it (`hit_frac` of the effect left, 1
  * just after the hit): shifted by `shake_px`, and toward the edges blurred over `hit_blur_px` and turned red by
- * `hit_red_frac`, reaching further in the fresher the hit; with no hit left, the pixel as it is.
+ * `hit_red_frac`, reaching further in the fresher the hit; with no hit left, the pixel as it is. A `hit_red_frac`
+ * below 0 is a black hole's darkness instead (W-168, fading out into a black hole): the edges go black, and the whole
+ * picture dims by up to `HIT_DARK_DIM_FRAC`.
  * @par Example
  * @code
  * float3 scene = read_hit_scene(frame, id, p);
@@ -2178,7 +2181,9 @@ static float3 read_hit_scene(texture2d<float, access::read> frame, uint2 id, con
     if (p.hit_frac <= 0.0) return sharp;
     float corner = length((float2(id) + 0.5) / float2(size) - 0.5) * M_SQRT2_F;
     float edge = p.hit_frac * smoothstep(1.0 - HIT_EDGE_REACH_FRAC * p.hit_frac, 1.0, corner);
-    if (edge <= 0.0) return sharp;
+    bool is_dark = p.hit_red_frac < 0.0;
+    float dim = is_dark ? 1.0 - HIT_DARK_DIM_FRAC * p.hit_frac : 1.0;
+    if (edge <= 0.0) return sharp * dim;
     float3 sum = sharp;
     for (int k = 0; k < HIT_BLUR_TAP_COUNT; k++) {
         float angle = 2.0 * M_PI_F * float(k) / float(HIT_BLUR_TAP_COUNT);
@@ -2186,7 +2191,7 @@ static float3 read_hit_scene(texture2d<float, access::read> frame, uint2 id, con
         sum += frame.read(uint2(clamp(tap, int2(0), size - 1))).rgb;
     }
     float3 blurred = mix(sharp, sum / float(HIT_BLUR_TAP_COUNT + 1), edge);
-    return mix(blurred, HIT_RED_COLOR, edge * p.hit_red_frac);
+    return mix(blurred, is_dark ? float3(0.0) : HIT_RED_COLOR, edge * abs(p.hit_red_frac)) * dim;
 }
 
 /**
