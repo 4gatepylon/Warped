@@ -166,6 +166,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-197 Menus that fit the game's look.** The user, 2026-11-09: "better graphics for the menus that fit the general story and aesthetic of teh game I alldued to before". Related: W-190 (world-building), W-151 (menu layout and help tooltip).
 - [ ] **W-198 Wormholes tinted with their team's colour.** The user, 2026-11-09: "Wormholes have a slight and soft color of the team that crated them." Related: W-167 (ownership over wormholes), W-159 (tell wormhole pairs apart).
 - [ ] **W-199 One wormhole per player per level.** The user, 2026-11-09: "You only get to create a wormhole once ever in a level (I have been able to multpile times after respawn in the past, we want to avoid that)". Related: W-165 (money to buy wormholes), W-166 (clear rules for destroying thrown wormholes).
+- [ ] **W-205 Swinging fast through a wormhole looks weird.** The user, 2026-11-10, after trying the new pull (W-202, pull toward wormholes and black holes in the game settings) in the game: "add to wishlist fixing issue where if you oscillate too rapidly in a wormhole it looks weird".
 
 ## Pending user review
 
