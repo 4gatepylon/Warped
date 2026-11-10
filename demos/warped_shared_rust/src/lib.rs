@@ -9,6 +9,7 @@
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
 //! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
+//! - `map_edge`: the soft edge of every map: past the playable area players slow without end.
 //! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
@@ -41,6 +42,7 @@ pub mod hud;
 pub mod hud_bars;
 #[cfg(target_os = "macos")]
 pub mod key_bindings;
+pub mod map_edge;
 #[cfg(target_os = "macos")]
 pub mod menu_and_map;
 pub mod mesh;
