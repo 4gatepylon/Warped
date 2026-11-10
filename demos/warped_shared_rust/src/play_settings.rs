@@ -1,20 +1,23 @@
 //! `play_settings.rs` is the sections of the settings files that every level reads alike: in
 //! `server_settings.yaml`, movement, sprint energy, both guns and their beams, consoles,
 //! respawning, how a hit slows, the flashlight, aiming, thrown wormholes, the map's edge, space and
-//! the black hole; in `player_settings.yaml`, the view with its head bob, how a hit looks and the
+//! the black hole, and the warps' pull on walkers (`gravity`, which may be left out); in
+//! `player_settings.yaml`, the view with its head bob, how a hit looks and the
 //! minimap. Each level's `settings.rs` composes them into its `ServerSettings` and
 //! `PerPlayerSettings` (City Sphere adds its own `glass`) and reads and checks the files.
 //!
 //! Interface: `MovementSettings`, `SprintEnergySettings`, `HeadBobSettings`, `SniperSettings`,
 //! `RifleSettings`, `BeamSpeckleSettings`, `ConsoleSettings`, `RespawnSettings`, `WhenHitSettings`,
 //! `HitEffectSettings`, `FlashlightSettings`, `AimSettings`, `WormholeSettings`, `MapEdgeSettings`,
-//! `SpaceSettings`, `BlackHoleSettings`, `ViewSettings`, `MinimapCorner`, `MinimapSettings`.
+//! `SpaceSettings`, `BlackHoleSettings`, `GravitySettings`, `ViewSettings`, `MinimapCorner`, `MinimapSettings`.
 //!
 //! Example: `let rifle: &RifleSettings = &settings.rifle;`
 //!
 //! Must know:
 //! - Gotchas: each section's fields are its keys in the files (`deny_unknown_fields`), so renaming
 //!   a field changes the files' format (the `compatible-changes` skill).
+//! - Gotchas: `GravitySettings` alone takes its built-in values for a missing section or key, so
+//!   settings files from before W-144 (gravity toward black holes and wormholes) still load.
 
 use serde::{Deserialize, Serialize};
 
@@ -227,6 +230,61 @@ pub struct BlackHoleSettings {
     pub lens_core_per_reach: f64,
     pub time_dilation_per_general_relativity: f64,
     pub min_time_rate_frac: f64,
+}
+
+/// `MAX_PULL_PER_WALK_SPEED_EXCL` bounds `GravitySettings::max_pull_per_walk_speed`: below 1, a
+/// warp's pull never stops a player walking away from it.
+pub const MAX_PULL_PER_WALK_SPEED_EXCL: f64 = 1.0;
+const BUILTIN_MAX_PULL_PER_WALK_SPEED: f64 = 0.75;
+const BUILTIN_FULL_PULL_M: f64 = 3.0;
+const BUILTIN_PULL_REACH_M: f64 = 24.0;
+
+/// `GravitySettings` is how black holes and wormhole mouths pull a player along the ground
+/// (W-144, `gravity.rs`): the strongest pull, as a share of walking speed that it adds toward the
+/// warp or takes away from walking away (all warps' pulls together are capped at it); how far
+/// out from a warp's horizon or throat the pull stays that strong; and how far out it reaches,
+/// falling off in between. A missing section or key takes the built-in value, the same in every
+/// level (`Default`), so a level's `server_settings.yaml` overrides only what differs.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct GravitySettings {
+    pub max_pull_per_walk_speed: f64,
+    pub full_pull_m: f64,
+    pub reach_m: f64,
+}
+
+impl Default for GravitySettings {
+    /// `default` is the built-in pull: at most 0.75 of walking speed (more than crouching's 0.5,
+    /// less than walking's 1), full within 3 m of a horizon or throat, gone 24 m out.
+    ///
+    /// Example: `let gravity: GravitySettings = GravitySettings::default();`
+    fn default() -> GravitySettings {
+        GravitySettings {
+            max_pull_per_walk_speed: BUILTIN_MAX_PULL_PER_WALK_SPEED,
+            full_pull_m: BUILTIN_FULL_PULL_M,
+            reach_m: BUILTIN_PULL_REACH_M,
+        }
+    }
+}
+
+impl GravitySettings {
+    /// `check` fails, naming the keys, unless `max_pull_per_walk_speed` is from 0 (no pull) up
+    /// to but not including `MAX_PULL_PER_WALK_SPEED_EXCL`, and `full_pull_m` is above 0 and
+    /// below `reach_m`.
+    ///
+    /// Example: `settings.gravity.check()?;`
+    pub fn check(&self) -> Result<(), String> {
+        let is_max_in_range: bool = (0.0..MAX_PULL_PER_WALK_SPEED_EXCL)
+            .contains(&self.max_pull_per_walk_speed);
+        if !is_max_in_range || !(self.full_pull_m > 0.0 && self.full_pull_m < self.reach_m) {
+            return Err(format!(
+                "gravity needs 0 <= max_pull_per_walk_speed < {MAX_PULL_PER_WALK_SPEED_EXCL} and \
+                 0 < full_pull_m < reach_m, not {}, {} and {}",
+                self.max_pull_per_walk_speed, self.full_pull_m, self.reach_m
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
