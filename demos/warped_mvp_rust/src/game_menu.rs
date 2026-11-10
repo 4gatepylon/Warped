@@ -1,6 +1,7 @@
 //! `game_menu.rs` is the game's own screens between the main menu and a level: the game menu
 //! (the match's status from the shared progression page, the player's team, switching team,
-//! rejoining the round, the game master's choice of what to play, settings, leaving), the
+//! rejoining the round, the game master's choice of what to play, the game master's settings,
+//! the player's settings, leaving), the
 //! in-level menu (Escape in a level: the same match status, resuming, settings, exiting to the
 //! game menu, quitting), and the level's stand-in until the levels are libraries (W-141, one
 //! window for the whole game). They keep no window state.
@@ -55,13 +56,15 @@ pub enum GameRow {
 
 /// `GameAction` is what the app does after an input on the game menu: nothing, play for a team,
 /// rejoin the round being played, ask the match server to play `choice` (a level's index, or
-/// `None` for the match), open the player's settings, or leave to the main menu.
+/// `None` for the match), open the game master's settings or the player's, or leave to the main
+/// menu.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameAction {
     Stay,
     SetTeam(Team),
     Rejoin,
     Play(Option<usize>),
+    OpenGameSettings,
     OpenPlayerSettings,
     Leave,
 }
@@ -171,11 +174,7 @@ impl GameMenu {
             (MenuInput::Activate, GameRow::GameMasterChoice) if level_count > 0 => {
                 GameAction::Play(self.master_choice.checked_sub(1))
             }
-            (MenuInput::Activate, GameRow::GameSettings) => {
-                self.message =
-                    Some("The game master's settings come in the next update.".to_string());
-                GameAction::Stay
-            }
+            (MenuInput::Activate, GameRow::GameSettings) => GameAction::OpenGameSettings,
             (MenuInput::Activate, GameRow::PlayerSettings) => GameAction::OpenPlayerSettings,
             (MenuInput::Activate, GameRow::Leave) => GameAction::Leave,
             _ => GameAction::Stay,
@@ -228,8 +227,8 @@ impl GameMenu {
                 ),
             },
             GameRow::GameSettings => (
-                "Game settings (game master): next update".to_string(),
-                false,
+                "Game settings (game master): every level's, and each level's own".to_string(),
+                true,
             ),
             GameRow::PlayerSettings => ("Player settings (keys, mouse, look)".to_string(), true),
             GameRow::Leave => ("Leave to the main menu".to_string(), true),
@@ -389,7 +388,7 @@ mod tests {
     //! | Team | none (pick blue or red), blue (switch to red), red (switch to blue) | `teams_are_picked_and_switched` |
     //! | Rejoin | a round being played, none | `rejoining_needs_a_round` |
     //! | Game master's choice | the match, every level of the view (both ways, wrapping), no view yet | `the_game_master_can_choose_every_level` |
-    //! | Other rows and Escape | settings, game settings (not yet), leave, Escape | `the_other_rows_and_escape` |
+    //! | Other rows and Escape | settings, game settings, leave, Escape | `the_other_rows_and_escape` |
     //! | In-level menu | resume, settings, exit, quit, Escape resumes | `the_in_level_menu_resumes_exits_or_quits` |
     //! | Pages | status with a view, without one, the level's stand-in with and without the map | `pages_show_the_match_status` |
 
@@ -508,7 +507,7 @@ mod tests {
         let team: Option<Team> = Some(Team::Blue);
         for (row, action) in [
             (GameRow::PlayerSettings, GameAction::OpenPlayerSettings),
-            (GameRow::GameSettings, GameAction::Stay),
+            (GameRow::GameSettings, GameAction::OpenGameSettings),
             (GameRow::Leave, GameAction::Leave),
         ] {
             select(&mut menu, &rows, row);

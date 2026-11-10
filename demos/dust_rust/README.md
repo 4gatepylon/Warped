@@ -33,6 +33,18 @@ it); leave it unset to play across computers.
 | `--join <addr> --port <p> [--team blue\|red]` | Join that team at once instead of choosing in the lobby. |
 | `--join <addr> --port <p> --bot --exit-after-s <s> --team <t> --bot-objective consoles` | The bot walks to the other team's consoles and holds `E` on each once in reach (`console_bot.rs`; the server takes a hold only from within `consoles.reach_m`, aimed at it: `console_reach.rs`) until a team wins. |
 
+## In the one-window app
+
+W-141 (one window for the whole game): this crate is a library, `dust_level` (`src/lib.rs`), and `src/main.rs` only runs
+it. The one-window app ([`../warped_mvp_rust/`](../warped_mvp_rust/)) calls `dust_level::play_level`
+(`warped_shared::app::play_level_fn_t`) with its window and Metal device, the level server's address, the team
+(`--team`) and the player's settings file. Dust then plays in that window until the match's round ends
+(`RoundOver`), the player confirms the menu's QUIT page (`LeaveLevel`) or closes the window (`CloseWindow`), and frees
+its renderer's GPU resources before it returns. Run alone, the program plays through the same frame loop
+(`warped_shared::level_loop`) in a window of its own (`warped_shared::metal_window`), exactly as before.
+`RUN_GPU_TESTS=1 cargo test --release --test in_one_window` checks the entry point in an offscreen window (it uses the
+GPU).
+
 ## How it works
 
 - **Shared code**: the files every Rust level shares (geometry, the gun held in hand, the HUD's bars and overlay
@@ -56,6 +68,9 @@ it); leave it unset to play across computers.
   wind's gradient adds to the mouth's own. The Metal shader (`wind_gradient`, `wind_kick`) and the CPU laser
   (`WindField` in `src/voxel_world.rs`) use the same rule. Dust's `direction` is the map's x, which is the
   Fermi v axis, so the wind blows across the line between the spawns.
+- **Wind strength** (`sandstorm.wind_per_map_wind` in `server_settings.yaml`, W-158, per-map game settings): the
+  map's k times this, so the game master can calm the storm (0) or strengthen it; it also scales the drift of a
+  shot's dust.
 - **Gusts** (`atmosphere.wind.gust`): the wind keeps one direction and only its strength changes, by 1 plus
   `strength_frac` (20%) times the mean of three sine waves with phases from `seed`, periods of 5, 7 and 11 s and
   wavelengths of a few `size_m` (3000 m, so almost the same everywhere on the map). Every window and the server

@@ -93,6 +93,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         map.scale_curvature(settings.space.curvature_per_map_curvature)?;
     }
     let consoles: Vec<console_reach::ConsolePlace> = console_reach::find_console_places(&map)?;
+    let freezing: net::Freezing =
+        net::Freezing::FromMapName(map_name, settings.blizzard.radius_per_map_radius)?;
     let socket: std::net::UdpSocket = net::bind_server(arguments.port)?;
     println!("Game server for {map_name} on UDP port {}.", arguments.port);
     net::serve(
@@ -105,6 +107,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
         arguments.level_result_file.as_deref(),
         game_password,
-        net::Freezing::FromMapName(map_name)?,
+        freezing,
     )
 }

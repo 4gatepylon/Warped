@@ -126,19 +126,33 @@ For example:
   joins blue and `2` joins red. A player can't shoot until the server has let them in.
 - A game server on the internet has a password, which its operator shares with the players; the server admits only
   players who prove they know it, and the password itself never crosses the network.
-- Friendly fire is on: a shot eliminates a teammate as it would an enemy, but only an enemy counts
-  as a kill.
+- Friendly fire is a game setting, on by default (`shooting.is_friendly_fire_on`, W-156 (friendly fire, by game
+  setting); the user: "add setting in game settings to toggle whether or not friendly fire is possible"). When on, a
+  shot eliminates a teammate as it would an enemy, but only an enemy counts as a kill; when off, a shot doesn't
+  hurt teammates.
 - The game counts each player's kills and deaths, shown on the scoreboard (see [Screen](#screen)).
 
 ### Respawning
 
-A player who is eliminated sees their view darken with "YOU DIED" and a countdown, and comes back
-after the respawn time on a ring around their team's spawn, never on top of another player, with
-full health and energy. A player can't choose to respawn early.
+A player who is eliminated sees their view darken with "YOU DIED", a countdown and a bar that fills
+over the wait, and comes back after the respawn time on a ring around their team's spawn, never on
+top of another player, with full health and energy. A player can't choose to respawn early.
+
+The respawn time grows the longer a level goes on, so dying costs more later (W-142 (growing respawn
+time). In the user's words: "Respawns will happen on a cadence, and every n steps, it will increase in
+time linearly so that it takes longer to respawn as time progresses. This means that as time
+progresses, the stakes get basically higher to dying versus earlier on. The respawn rates should
+start at you being stuck dead for 20 seconds, and they should go up linearly every five minutes by 10
+seconds on a given level in the map." A player eliminated `t` seconds after the level (its round)
+started waits `start_s + step_s × floor(t / period_s)`; the level's server decides the wait and sends
+it with the elimination, so the countdown and bar show the server's wait. A new game on the level
+starts the clock again.
 
 | Parameter | Value |
 | --- | --- |
-| Respawn time | 3 s (`respawn.delay_s`) |
+| Respawn time at the level's start | 20 s (`respawn.start_s`) |
+| Added every period | 10 s (`respawn.step_s`) |
+| Period | 5 minutes (`respawn.period_s`) |
 
 ## Levels
 
@@ -284,7 +298,12 @@ which has nothing to do with the guns' heat.
 - Energy drains at a steady rate while a player sprints, and refills at a steady rate while they
   don't: as fast as it drains while crouched, and half as fast while walking or standing.
 - Energy never goes above full. A player who runs out of energy can't sprint.
-- A player can't shoot while sprinting.
+- By default a player can't shoot while jumping, walking upright or sprinting: a shot waits 0.25 s after the
+  last such move (`movement.shoot_after_moving_s`); walking crouched doesn't hold a shot. Each of the three is a
+  game setting (`shooting.can_shoot_while_jumping`, `can_shoot_while_walking`, `can_shoot_while_sprinting`; W-147
+  (shooting while moving, by game setting); the user: "the ability to toggle via game settings whether you can shoot
+  while jumping, and seperately while moving laterally (i.e. while walking) and seperately while sprinting"), and
+  bots follow the same rule.
 
 | Parameter | Value |
 | --- | --- |
@@ -432,8 +451,12 @@ What a player sees while playing:
 ## Bullets, lasers and light
 
 - Warp objects bend light, so players see the world bent around them.
-- A shot is a laser beam: a light ray from the gun's tip, with no drop. Its front flies out at
+- A shot is a laser beam: a light ray from the gun's tip, with no drop by default. Its front flies out at
   250 m/s, and each point of it fades soon after the front passes.
+- Bullet drop is a game setting, off by default (`shooting.drop_m_per_s_per_s`, W-157 (bullet drop, by game
+  setting); the user: "add setting in game settings for bullet drop"): above 0, every shot's path curves down as a
+  ball thrown at the beam's speed would fall (toward the street in City Sphere), the drawn beam follows it, and
+  every window traces it alike from the server's settings.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
 - A player moving through a wormhole's throat sees the world's colours shift for a moment, as if moving near light
@@ -520,8 +543,6 @@ time to kill.
 ## Open questions
 
 - **Consoles:** whether a hit that doesn't eliminate the player interrupts a deactivation.
-- **Respawning:** whether the respawn time should grow as a round goes on. An earlier design had
-  20 s at the start of a round plus 10 s every 5 minutes.
 - **Sprinting:** whether a kill should refill the killer's energy, as an earlier design had.
 - **Hyperbolic levels:** the topology of Dust.
 - **Warp objects:** how many black holes and wormholes each level but Lunar Surface has, and where.

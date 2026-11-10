@@ -13,7 +13,8 @@
 //! Must know:
 //! - Every key is required and unknown keys fail, so a typo can't silently keep a default. The only
 //!   exceptions are named: player keys removed since saves began (`REMOVED_PLAYER_KEYS`) are
-//!   dropped, and those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing.
+//!   dropped, those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing, and
+//!   so does the server's `surface` section (W-158), so older server settings files still load.
 //! - The built-in settings are the two files themselves, compiled in.
 //! - `PerPlayerSettings` exists only on macOS, where the game's window runs (its keys are SDL's);
 //!   the game server also builds for Linux.
@@ -31,7 +32,8 @@ use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
     GravitySettings, MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings,
-    SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
+    ShootingSettings, SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings,
+    WormholeSettings,
 };
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
@@ -46,7 +48,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 22] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 24] = [
     "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
     "sniper.reload_s",
@@ -64,7 +66,9 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 22] = [
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
-    "respawn.delay_s",
+    "respawn.start_s",
+    "respawn.step_s",
+    "shooting.drop_m_per_s_per_s",
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
@@ -123,6 +127,26 @@ pub struct PerPlayerSettings {
     pub visuals: VisualsSettings,
 }
 
+/// `SurfaceSettings` is Lunar Surface's own game setting (W-158, per-map game settings): how
+/// strongly the ground pulls players down, times the gravity the jump settings give, with the
+/// jump's launch speed kept, so 0.5 makes jumps twice as high and twice as long.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct SurfaceSettings {
+    pub gravity_per_jump_gravity: f64,
+}
+
+impl Default for SurfaceSettings {
+    /// `default` is the gravity the jump settings give, unchanged.
+    ///
+    /// Example: `let surface: SurfaceSettings = SurfaceSettings::default();`
+    fn default() -> SurfaceSettings {
+        SurfaceSettings {
+            gravity_per_jump_gravity: 1.0,
+        }
+    }
+}
+
 /// `ServerSettings` is everything in `server_settings.yaml`.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -134,6 +158,8 @@ pub struct ServerSettings {
     pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
@@ -141,6 +167,8 @@ pub struct ServerSettings {
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
     pub black_hole: BlackHoleSettings,
+    #[serde(default)]
+    pub surface: SurfaceSettings,
     #[serde(default)]
     pub gravity: GravitySettings,
 }
@@ -452,6 +480,8 @@ mod tests {
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | `gravity` section (W-144) | left out (every file before it, built in: the shared values), one key (the others shared), 0 pull (allowed: none), pull of walking speed or more, full pull past its reach, a misspelt key (each fails) | `gravity_defaults_and_overrides` |
     //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | `shooting` section | present (built in, the old rules), missing in an old file (the old rules), a misspelt key (fails) | `shooting_switches_default_to_the_old_rules` |
+    //! | Respawn section | the growing rule (built in), an old file's flat `delay_s` (loads, flat), a negative wait (fails, naming it) | `builtin_settings_read_and_survive_json`, `an_old_flat_respawn_delay_still_loads` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -465,6 +495,53 @@ mod tests {
             settings
         );
         assert!(PerPlayerSettings::Builtin().view.look_rad_per_px > 0.0);
+    }
+
+    #[test]
+    fn an_old_flat_respawn_delay_still_loads() {
+        const OLD_DELAY_S: f64 = 3.0;
+        let start: usize = BUILTIN_SERVER_YAML
+            .find("\nrespawn:")
+            .expect("a respawn section");
+        let end: usize = start + BUILTIN_SERVER_YAML[start..].find("\n\n").expect("its end");
+        let old_yaml: String = format!(
+            "{}\nrespawn:\n  delay_s: {OLD_DELAY_S}{}",
+            &BUILTIN_SERVER_YAML[..start],
+            &BUILTIN_SERVER_YAML[end..]
+        );
+        let old: ServerSettings = ServerSettings::FromYaml(&old_yaml, "old").expect("an old file");
+        assert_eq!(
+            (old.respawn.start_s, old.respawn.step_s),
+            (OLD_DELAY_S, 0.0)
+        );
+        assert_eq!(old.respawn.get_wait_s(f64::from(u16::MAX)), OLD_DELAY_S);
+        let negative_yaml: String = BUILTIN_SERVER_YAML.replace("  start_s: 20.0", "  start_s: -1");
+        let error: String = ServerSettings::FromYaml(&negative_yaml, "negative")
+            .expect_err("a negative wait fails")
+            .to_string();
+        assert!(error.contains("respawn.start_s"), "{error}");
+    }
+
+    #[test]
+    fn shooting_switches_default_to_the_old_rules() {
+        assert_eq!(
+            ServerSettings::Builtin().shooting,
+            ShootingSettings::default()
+        );
+        let start: usize = BUILTIN_SERVER_YAML
+            .find("\nshooting:")
+            .expect("a shooting section");
+        let end: usize = start + BUILTIN_SERVER_YAML[start..].find("\n\n").expect("its end");
+        let old_yaml: String = format!(
+            "{}{}",
+            &BUILTIN_SERVER_YAML[..start],
+            &BUILTIN_SERVER_YAML[end..]
+        );
+        let old: ServerSettings = ServerSettings::FromYaml(&old_yaml, "old").expect("an old file");
+        assert_eq!(old.shooting, ShootingSettings::default());
+        let typo_yaml: String =
+            BUILTIN_SERVER_YAML.replace("  is_friendly_fire_on:", "  is_friendly_fire:");
+        assert!(ServerSettings::FromYaml(&typo_yaml, "typo").is_err());
     }
 
     #[test]
@@ -641,16 +718,26 @@ mod tests {
     #[test]
     fn gravity_defaults_and_overrides() {
         let builtin: ServerSettings = ServerSettings::Builtin();
-        assert!(!BUILTIN_SERVER_YAML.contains("gravity:"));
         assert_eq!(builtin.gravity, GravitySettings::default());
+        let mut is_in_gravity: bool = false;
+        let without_gravity: String = BUILTIN_SERVER_YAML
+            .lines()
+            .filter(|line| {
+                if !line.starts_with(' ') && !line.is_empty() {
+                    is_in_gravity = line.starts_with("gravity:");
+                }
+                !is_in_gravity
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+        let left_out: ServerSettings =
+            ServerSettings::FromYaml(&without_gravity, "test").expect("no gravity section");
+        assert_eq!(left_out.gravity, GravitySettings::default());
         let json_back: ServerSettings =
             ServerSettings::FromJson(&builtin.to_json()).expect("the built-in settings as JSON");
         assert_eq!(json_back, builtin);
         let with_gravity = |section: &str| -> Result<ServerSettings> {
-            ServerSettings::FromYaml(
-                &format!("{BUILTIN_SERVER_YAML}\ngravity: {section}\n"),
-                "test",
-            )
+            ServerSettings::FromYaml(&format!("{without_gravity}\ngravity: {section}\n"), "test")
         };
         let one_key: ServerSettings = with_gravity("{reach_m: 12.0}").expect("one key");
         assert_eq!(

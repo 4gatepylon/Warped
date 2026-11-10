@@ -137,6 +137,7 @@ mod tests {
                 stand_in_for: None,
                 takes_bot_label: false,
                 map_picture: None,
+                server_settings: None,
             },
             server: SocketAddr::from(([127, 0, 0, 1], 48370)),
             team,

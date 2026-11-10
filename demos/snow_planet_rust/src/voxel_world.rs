@@ -38,6 +38,7 @@ use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
 use warped_shared::gravity::{HyperbolicWarp, add_pull, get_hyperbolic_pull_m_per_s};
+use warped_shared::laser_drop::{DROP_PIECE_M, get_drop_curvature_per_m, turn_hyperbolic};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -342,6 +343,7 @@ pub struct VoxelWorld {
     pub gravity_m_per_s2: f64,
     map_player: PlayerSettings,
     map_gravity_m_per_s2: f64,
+    map_blizzard_radii_m: Vec<f64>,
     pub settings: ServerSettings,
     pub head_bob: HeadBobSettings,
     pub spawns: Vec<DMat4>,
@@ -873,6 +875,11 @@ impl VoxelWorld {
             gravity_m_per_s2: map.gravity_m_per_s2,
             map_player: map.player,
             map_gravity_m_per_s2: map.gravity_m_per_s2,
+            map_blizzard_radii_m: map
+                .get_blizzards()
+                .iter()
+                .map(|blizzard| blizzard.radius_m)
+                .collect(),
             settings: ServerSettings::Builtin(),
             head_bob: PerPlayerSettings::Builtin().view.head_bob,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
@@ -917,10 +924,14 @@ impl VoxelWorld {
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
-    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
+    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows);
+    /// and each blizzard `blizzard.radius_per_map_radius` times as wide as the map's.
     ///
     /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
     pub fn set_settings(&mut self, settings: ServerSettings) {
+        for (blizzard, map_radius_m) in self.blizzards.iter_mut().zip(&self.map_blizzard_radii_m) {
+            blizzard.radius_m = map_radius_m * settings.blizzard.radius_per_map_radius;
+        }
         let movement = &settings.movement;
         let half_jump_s: f64 = self.map_player.jump_m_per_s / self.map_gravity_m_per_s2
             * movement.jump_time_per_map_jump_time;
@@ -1966,7 +1977,8 @@ impl VoxelWorld {
     }
 
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between the
-    /// warps, bent inside them, through throats, to a block, the ground, a horizon or
+    /// warps (falling by the server settings' `shooting.drop_m_per_s_per_s` in pieces of
+    /// `DROP_PIECE_M`, `laser_drop.rs`), bent inside them, through throats, to a block, the ground, a horizon or
     /// `LASER_MAX_LENGTH_M` (through glass). The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where
     /// the window draws the tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
@@ -1974,6 +1986,15 @@ impl VoxelWorld {
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
     pub fn trace_laser(&self, camera: DMat4) -> Shot {
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
+        let drop_per_m: f64 = get_drop_curvature_per_m(
+            self.settings.shooting.drop_m_per_s_per_s,
+            self.settings.sniper.beam_speed_m_per_s,
+        );
+        let drop_piece_s: f64 = if drop_per_m > 0.0 {
+            DROP_PIECE_M / self.r
+        } else {
+            f64::INFINITY
+        };
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
         let mut pieces: Vec<Vec<DVec4>> = vec![vec![x]];
@@ -1985,8 +2006,15 @@ impl VoxelWorld {
                 break;
             }
             let Some(w) = inside else {
-                let (s_end, entering) = self.find_warp_entry(x, v, max_s - travelled);
-                if let Some(found) = self.trace_scene(x, v, s_end, None) {
+                let s_max: f64 = (max_s - travelled).min(drop_piece_s);
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_max);
+                }
+                let (s_end, entering) = self.find_warp_entry(x, v, s_max);
+                if let Some(found) = self
+                    .trace_scene(x, v, s_end, None)
+                    .filter(|found| found.s.is_finite())
+                {
                     pieces
                         .last_mut()
                         .expect("a piece")
@@ -2000,6 +2028,12 @@ impl VoxelWorld {
                 x = xn;
                 travelled += s_end;
                 pieces.last_mut().expect("a piece").push(x);
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_end);
+                    if entering.is_none() {
+                        continue;
+                    }
+                }
                 if entering.is_none() {
                     break;
                 }
@@ -2008,6 +2042,9 @@ impl VoxelWorld {
             };
             let ds: f64 = self.choose_bend_step(self.compute_bend(w, x, v).1);
             let (v0, x1, v1, rho) = self.step_bent(w, x, v, ds);
+            if !(ds.is_finite() && rho.is_finite()) {
+                break;
+            }
             if let Some(found) = self.trace_scene(x, v0, ds, Some(w)) {
                 pieces
                     .last_mut()
@@ -3911,6 +3948,7 @@ mod parity_tests {
     const GAP_TO_PYLON_M: f64 = 1.0;
     const CONSOLE_COUNT: usize = 4;
     const LUNAR_SETTINGS_PATH: &str = "../hyperbolic_wormholes_rust/server_settings.yaml";
+    const LEVEL_OWN_SECTIONS: [&str; 2] = ["blizzard:", "surface:"];
     const SNOW_ONLY_SETTINGS: [&str; 3] = [
         "jump_time_per_map_jump_time",
         "walk_speed_per_map_speed",
@@ -3952,11 +3990,18 @@ mod parity_tests {
         let lunar_map: Map =
             Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
         let mut lunar: VoxelWorld = VoxelWorld::FromMap(&lunar_map).expect("a voxel world");
+        let text: String = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
+        )
+        .expect("Lunar Surface's server settings");
+        let mut yaml: serde_yaml::Value = serde_yaml::from_str(&text).expect("YAML");
+        yaml.as_mapping_mut()
+            .expect("sections")
+            .remove("surface")
+            .expect("Lunar Surface's own section");
         lunar.set_settings(
-            ServerSettings::Load(
-                &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
-            )
-            .expect("Lunar Surface's server settings"),
+            ServerSettings::FromJson(&serde_json::to_vec(&yaml).expect("JSON"))
+                .expect("Lunar Surface's server settings"),
         );
         let (lunar_apex_m, lunar_step_count) = measure_jump(&lunar, [-27.0, 0.0]);
         let (snow_apex_m, snow_step_count) = measure_jump(&load_snow_planet(), [-30.0, 0.0]);
@@ -4005,6 +4050,11 @@ mod parity_tests {
             std::fs::read_to_string(root.join(path))
                 .expect("a settings file")
                 .lines()
+                .take_while(|line| {
+                    !LEVEL_OWN_SECTIONS
+                        .iter()
+                        .any(|section| line.starts_with(section))
+                })
                 .filter(|line| {
                     !SNOW_ONLY_SETTINGS
                         .iter()

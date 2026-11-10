@@ -29,7 +29,9 @@ make join-game SERVER=127.0.0.1      # terminal 2: your window; press 1 (blue) o
   over the game while you keep playing.
 - The blizzard (the white column in the middle, the map's only one): inside, you walk at half speed and freeze
   (health falls 8% a second, with the same red, blur and shake as a shot), and a laser goes only 8 m into it. It is
-  in the map's `regions.blizzards` with its numbers (DECISIONS S3).
+  in the map's `regions.blizzards` with its numbers (DECISIONS S3). `blizzard.radius_per_map_radius` in
+  `server_settings.yaml` widens or narrows it (W-158, per-map game settings; 0 for none), on the server and in
+  every window.
 - Everything else plays as on Lunar Surface, W-126 (same play in every level): the same settings files, and a jump
   as high and as long (DECISIONS S12).
 
@@ -54,6 +56,18 @@ cargo run --release -- --serve --port 47820 --level-result-file /tmp/result.json
 cargo run --release -- --join 127.0.0.1 --port 47820 --team blue
 cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --team blue --bot-objective consoles
 ```
+
+## In the one-window app
+
+W-141 (one window for the whole game): this crate is a library, `snow_planet_level` (`src/lib.rs`), and `src/main.rs` only runs
+it. The one-window app ([`../warped_mvp_rust/`](../warped_mvp_rust/)) calls `snow_planet_level::play_level`
+(`warped_shared::app::play_level_fn_t`) with its window and Metal device, the level server's address, the team
+(`--team`) and the player's settings file. Snow Planet then plays in that window until the match's round ends
+(`RoundOver`), the player confirms the menu's QUIT page (`LeaveLevel`) or closes the window (`CloseWindow`), and frees
+its renderer's GPU resources before it returns. Run alone, the program plays through the same frame loop
+(`warped_shared::level_loop`) in a window of its own (`warped_shared::metal_window`), exactly as before.
+`RUN_GPU_TESTS=1 cargo test --release --test in_one_window` checks the entry point in an offscreen window (it uses the
+GPU).
 
 ## How it works
 

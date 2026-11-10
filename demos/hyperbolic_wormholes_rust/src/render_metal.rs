@@ -556,15 +556,28 @@ pub(crate) fn encode_adaptive_sampling(
 }
 
 impl MetalRenderer {
-    /// `New` opens the default GPU, compiles the ray tracer and allocates the scene buffer. With
-    /// `is_adaptive`, it traces every other pixel each way and interpolates where that is exact
-    /// enough (see `resolve_pixels` in the shader); otherwise it traces every pixel.
+    /// `New` opens the default GPU and makes the renderer on it (`OnDevice`).
     ///
     /// Example: `let renderer = MetalRenderer::New(true)?;`
     #[allow(non_snake_case)]
     pub fn New(is_adaptive: bool) -> Result<MetalRenderer> {
-        let device: Retained<ProtocolObject<dyn MTLDevice>> =
-            MTLCreateSystemDefaultDevice().ok_or("Metal: this machine has no GPU Metal can use")?;
+        MetalRenderer::OnDevice(
+            MTLCreateSystemDefaultDevice().ok_or("Metal: this machine has no GPU Metal can use")?,
+            is_adaptive,
+        )
+    }
+
+    /// `OnDevice` compiles the ray tracer and allocates the scene buffer on `device` (the window's,
+    /// in the one-window app). With `is_adaptive`, it traces every other pixel each way and
+    /// interpolates where that is exact enough (see `resolve_pixels` in the shader); otherwise it
+    /// traces every pixel.
+    ///
+    /// Example: `let renderer = MetalRenderer::OnDevice(device.retain(), true)?;`
+    #[allow(non_snake_case)]
+    pub fn OnDevice(
+        device: Retained<ProtocolObject<dyn MTLDevice>>,
+        is_adaptive: bool,
+    ) -> Result<MetalRenderer> {
         let source: Retained<NSString> = NSString::from_str(&fill_shader_constants(SHADER_SOURCE));
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&source, None)

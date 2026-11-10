@@ -61,7 +61,14 @@ through `warped_shared::app_bundle` first; the levels-as-libraries and level-def
   wins, players per team); your team and switching it; rejoining the round being played; the game
   master's choice of what everyone plays (the match, or any one level: Left/Right on its row, or
   click a level on the match's status, and "back to the match" there; no authentication yet, so
-  anyone may set it); game settings (next update); player settings; leaving to the main menu.
+  anyone may set it); game settings; player settings; leaving to the main menu.
+- **Game settings** (the game master's, W-158, per-map game settings), from the game menu: the match
+  server's settings in sections, every level's (a key at least two levels' settings files have,
+  "(levels differ)" where their defaults do) and each level's own (Lunar Surface's gravity, City
+  Sphere's glass bounces, range and reflectivity, Dust's wind, Snow Planet's blizzard size; Dark
+  Forest's section is empty). Left/Right steps a number, typing sets one, R goes back to the
+  default; each change goes to the match server at once, and each round's level plays by the
+  settings as they are when it starts. `*` marks a value off its default.
 - **Level**: a round's level. Escape opens the in-level menu (the same match status; resume, player
   settings, exit to the game menu, quit); holding Tab shows the map. **Until the levels are
   libraries, the level is a stand-in screen** that follows the match exactly as a level will.
@@ -111,7 +118,9 @@ the app hosts keeps running on the main menu until "Stop hosting" or quitting.
 
 `make test` covers the screens' navigation (every Escape and exit rule), the main menu (every
 manifest level can be chosen, each game kind and its bots), the game menu (teams, rejoining, the
-game master choosing every level, the in-level menu), the app following a match server's views into
+game master choosing every level, the in-level menu), the game master's settings page (its
+sections, every change and reset sent, a refused fraction, following the server's answer; and against a
+stand-in server on UDP 48392 and 48393), the app following a match server's views into
 and out of a round's level and sending the game master's choice until it is taken (against a stand-in
 server on UDP 48304 to 48307), the children's command lines, the player settings page (saving only
 changes, every setting has a row) and the menu keys. The shared crate tests the beacons (bytes,

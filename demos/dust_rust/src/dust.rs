@@ -460,7 +460,9 @@ impl DustBurst {
         let wind_m_per_s: DVec3 = world.wind.map_or(DVec3::ZERO, |wind| {
             let d: DVec3 =
                 get_local_direction(frame, transport_from_centre(wind.normal.truncate(), spot));
-            (d - normal * normal.dot(d)).normalize_or_zero() * PUFF_WIND_M_PER_S
+            (d - normal * normal.dot(d)).normalize_or_zero()
+                * PUFF_WIND_M_PER_S
+                * world.settings.sandstorm.wind_per_map_wind
         });
         let impact: Impact = Impact {
             frame,

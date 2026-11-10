@@ -13,7 +13,8 @@
 //! Must know:
 //! - Every key is required and unknown keys fail, so a typo can't silently keep a default. The only
 //!   exceptions are named: player keys removed since saves began (`REMOVED_PLAYER_KEYS`) are
-//!   dropped, and those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing.
+//!   dropped, those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing, and
+//!   so does the server's `sandstorm` section (W-158), so older server settings files still load.
 //! - The built-in settings are the two files themselves, compiled in.
 //! - `PerPlayerSettings` exists only on macOS, where the game's window runs (its keys are SDL's);
 //!   the game server also builds for Linux.
@@ -31,7 +32,8 @@ use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
     GravitySettings, MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings,
-    SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
+    ShootingSettings, SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings,
+    WormholeSettings,
 };
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
@@ -46,7 +48,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 22] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 25] = [
     "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
     "sniper.reload_s",
@@ -64,10 +66,13 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 22] = [
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
-    "respawn.delay_s",
+    "respawn.start_s",
+    "respawn.step_s",
+    "shooting.drop_m_per_s_per_s",
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
+    "sandstorm.wind_per_map_wind",
     "gravity.max_pull_per_walk_speed",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
@@ -123,6 +128,26 @@ pub struct PerPlayerSettings {
     pub visuals: VisualsSettings,
 }
 
+/// `SandstormSettings` is Dust's own game setting (W-158, per-map game settings): how strongly
+/// the sandstorm's wind blows, times the map's, which bends light and lasers and drifts the
+/// dust a shot raises (0 for calm air).
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct SandstormSettings {
+    pub wind_per_map_wind: f64,
+}
+
+impl Default for SandstormSettings {
+    /// `default` is the map's own wind.
+    ///
+    /// Example: `let sandstorm: SandstormSettings = SandstormSettings::default();`
+    fn default() -> SandstormSettings {
+        SandstormSettings {
+            wind_per_map_wind: 1.0,
+        }
+    }
+}
+
 /// `ServerSettings` is everything in `server_settings.yaml`.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -134,6 +159,8 @@ pub struct ServerSettings {
     pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
@@ -141,6 +168,8 @@ pub struct ServerSettings {
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
     pub black_hole: BlackHoleSettings,
+    #[serde(default)]
+    pub sandstorm: SandstormSettings,
     #[serde(default)]
     pub gravity: GravitySettings,
 }

@@ -197,6 +197,9 @@ pub struct Args {
     /// With --serve: write {"winner": "blue"|"red"} here on a win, and start no new game.
     #[arg(long)]
     pub level_result_file: Option<PathBuf>,
+    /// With --serve or --host: the server settings file (default: the built-in server_settings.yaml).
+    #[arg(long)]
+    pub server_settings: Option<PathBuf>,
     /// A name the match server gives this window or bot; accepted and ignored.
     #[arg(long)]
     pub label: Option<String>,

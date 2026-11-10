@@ -202,8 +202,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
-  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature); it sends them to every
-  player who joins.
+  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature, and Lunar Surface's own
+  `surface.gravity_per_jump_gravity`: the ground's pull times what the jump settings give, the jump's speed kept,
+  W-158); it sends them to every player who joins.
 - `GAME_PASSWORD_FILE=password.txt` (`--game-password-file`) gives a server a password, and players the same file:
   the server challenges each join and admits only players who prove they know it, without the password crossing
   the network, and refuses a game of another version with a clear message. Without it anyone can join, which
@@ -222,7 +223,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Joining opens a lobby with each team's head count; `1` joins blue and `2` joins red (bots join the smaller team).
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
-  view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
+  view darkens and says "YOU DIED" with a countdown and a bar filling over the wait, and they come back at their spawn
+  point after the server's respawn wait: 20 s, 10 s more for every 5 minutes the level has gone on (`respawn` in
+  `server_settings.yaml`, W-142 (growing respawn time)).
 - On Lunar Surface each team has three pylons, each a beacon that is its own console, and a team wins by turning off all
   three of the other team's beacons (hold `E` on one for 10 s within 3 m). The server checks that too: it takes a hold
   only from a player whose view meets the beacon within 3 m, with half a meter of slack (`console_reach.rs`), so no
@@ -267,6 +270,18 @@ make run-autopilot
   `--route warp-tour` circles the black hole and both wormhole mouths the same way, from 80% of each one's reach to
   10% (19 m to 2.4 m from the black hole, 12 m to 1.5 m from a mouth) and back, over 600 frames each.
 
+## In the one-window app
+
+W-141 (one window for the whole game): this crate is a library, `lunar_surface_level` (`src/lib.rs`), and `src/main.rs` only runs
+it. The one-window app ([`../warped_mvp_rust/`](../warped_mvp_rust/)) calls `lunar_surface_level::play_level`
+(`warped_shared::app::play_level_fn_t`) with its window and Metal device, the level server's address, the team
+(`--team`) and the player's settings file. Lunar Surface then plays in that window until the match's round ends
+(`RoundOver`), the player confirms the menu's QUIT page (`LeaveLevel`) or closes the window (`CloseWindow`), and frees
+its renderer's GPU resources before it returns. Run alone, the program plays through the same frame loop
+(`warped_shared::level_loop`) in a window of its own (`warped_shared::metal_window`), exactly as before.
+`RUN_GPU_TESTS=1 cargo test --release --test in_one_window` checks the entry point in an offscreen window (it uses the
+GPU).
+
 ## How it works
 
 - [`../warped_shared_rust/`](../warped_shared_rust/README.md): the code every Rust level shares, used as a
@@ -305,7 +320,8 @@ make run-autopilot
   skips blocks a bent step can't reach.
 - `dust.rs`: the dust and mist a shot throws up where it hits the ground, which `render_voxel.metal` draws in the
   world (D81).
-- `main.rs`: the command line, the SDL3 window and HUD, and the benchmark and autopilot runs.
+- `lib.rs`: the command line, the level's session and its frame loop (`play_level` for the one-window app),
+  the HUD, and the benchmark and autopilot runs; `main.rs` runs it alone.
 
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the
 distance itself, which saves most of the `asinh` calls that dominated the first CPU profile. And a ray only checks
