@@ -167,6 +167,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-207 Better window text UI.** The user, 2026-11-10: "Better window text UI (things spaced apart more widely, color on hover, easier to understand hitboxes, better font, ideally nice background animation etc..)". Related: W-197 (menus that fit the game's look) and W-151 (menu layout and help tooltip).
 - [ ] **W-208 Hold an arrow or use the scroll wheel to scroll through settings.** The user, 2026-11-10: "be able to click and hold down arrow to scroll through settings (also scroll wheel)".
 - [ ] **W-210 Labels on world objects while playing.** The user, 2026-11-10: "the creation of an option that lets you toggle on in-map labeling (i.e. the ability to see the labels when you are playing to test this stuff above)". The labels are the unique names the glossary gives each object of a level's world (`game_design/GLOSSARY.md`), so the names can be checked in play.
+- [ ] **W-211 Admin mode to set world labels.** The user, 2026-11-10: "the ability to set the labels in map when in an admin mode (and the general ability to set things in some admin mode; though this requires design; this way docs can be easily updated as the maps are modified". Needs a design first, as the user says. Related: W-210 (labels on world objects while playing).
 
 ## Pending user review
 
