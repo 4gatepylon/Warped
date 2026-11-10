@@ -61,10 +61,11 @@ use warped_shared::hud::{
     get_crosshair_rects, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
     make_respawn_bar_rects,
 };
+use warped_shared::menu_and_map::PlayOutcome;
 use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 use warped_shared::{
-    app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, health, hud_bars,
-    key_bindings, mesh, overlay, play_settings, render_mesh, shapes, shot_noise, spaceships,
+    app_bundle, avatar_model, fps_demo_assets, geometry, health, hud_bars, key_bindings,
+    menu_and_map, mesh, overlay, play_settings, render_mesh, shapes, shot_noise, spaceships,
     texture_arrays, viewmodel,
 };
 
@@ -164,6 +165,7 @@ const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
 const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route and --export-map.";
 const MENU_DIM_FRAC: f32 = 0.8;
+const HELD_MAP_DIM_FRAC: f32 = 0.6;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
 const PICTURE_PX_PER_MASK_PX: i32 = 2;
@@ -2023,9 +2025,8 @@ struct Session {
     settings: ServerSettings,
     player_settings: PerPlayerSettings,
     player_settings_path: Option<PathBuf>,
-    menu: Option<menu::Menu>,
+    menu_and_map: menu_and_map::MenuAndMap<menu::Menu>,
     last_connection_problem: Option<ConnectionProblem>,
-    exit_prompt: exit_prompt::ExitPrompt,
     map_layout: map_layout::MapLayout,
     weapons: Weapons,
     is_flashlight_on: bool,
@@ -2340,9 +2341,8 @@ impl Session {
             settings,
             player_settings,
             player_settings_path,
-            menu: None,
+            menu_and_map: menu_and_map::MenuAndMap::New(),
             last_connection_problem: None,
-            exit_prompt: exit_prompt::ExitPrompt::New(),
             map_layout: map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?,
             render_scale: arguments
                 .render_scale
@@ -2396,28 +2396,30 @@ impl Session {
         })
     }
 
-    /// `handle_event` reacts to one window event and returns false when the player quits: the
-    /// window's close button quits, Esc releases the mouse (or asks whether to exit if it is free,
-    /// and while it asks every pressed control answers it), a click captures it (and once captured,
-    /// a left click fires a shot), the mouse looks (more slowly while aiming zooms in, by the same
-    /// factor), `1`, `2` and the wheel switch guns, `V` switches between first and third person,
-    /// and - and = change the render scale. Players can't respawn by choice.
+    /// `handle_event` reacts to one window event and says whether to play on, leave the level (the
+    /// menu's QUIT page) or close the window (its close button): Esc opens the menu, which frees
+    /// the mouse and takes every pressed control until Esc closes it and captures the mouse again
+    /// (W-140, hold Tab for the map, Esc for the menu); a click captures a free mouse (and once
+    /// captured, a left click fires a shot), the mouse looks (more slowly while aiming zooms in, by
+    /// the same factor), `1`, `2` and the wheel switch guns, `V` switches between first and third
+    /// person, and - and = change the render scale. Players can't respawn by choice.
     ///
-    /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
+    /// Example: `if session.handle_event(event, &window, &mouse) != PlayOutcome::Play { break; }`
     fn handle_event(
         &mut self,
         event: Event,
         window: &sdl3::video::Window,
         mouse: &sdl3::mouse::MouseUtil,
-    ) -> bool {
+    ) -> PlayOutcome {
+        let is_menu_open: bool = self.menu_and_map.is_menu_open();
         match event {
-            Event::Quit { .. } => return false,
-            Event::MouseButtonDown { .. } if !self.is_captured && !self.exit_prompt.is_shown() => {
+            Event::Quit { .. } => return PlayOutcome::CloseWindow,
+            Event::MouseButtonDown { .. } if !self.is_captured && !is_menu_open => {
                 self.is_captured = true;
                 mouse.set_relative_mouse_mode(window, true);
-                return true;
+                return PlayOutcome::Play;
             }
-            Event::MouseMotion { xrel, yrel, .. } if self.is_captured && self.menu.is_none() => {
+            Event::MouseMotion { xrel, yrel, .. } if self.is_captured && !is_menu_open => {
                 let speed: f64 = self.player_settings.view.look_rad_per_px
                     / voxel_world::LOOK_RAD_PER_PX
                     / self.get_zoom();
@@ -2430,50 +2432,60 @@ impl Session {
             _ => {}
         }
         match key_bindings::get_pressed_control(&event) {
-            Some(control) if self.exit_prompt.is_shown() => {
-                self.exit_prompt.answer(control) != exit_prompt::ExitOutcome::Exit
-            }
-            Some(control) if self.menu.is_some() => {
-                self.handle_menu_control(control);
-                true
-            }
+            Some(control) if is_menu_open => self.handle_menu_control(control, window, mouse),
             Some(control) if self.player_settings.keys.matches(Action::OpenMenu, control) => {
-                self.menu = Some(menu::Menu::New());
-                true
+                self.menu_and_map.open_menu(menu::Menu::New()).apply(
+                    &mut self.is_captured,
+                    window,
+                    mouse,
+                );
+                PlayOutcome::Play
             }
             Some(control) => {
-                self.handle_control(control, window, mouse);
-                true
+                self.handle_control(control);
+                PlayOutcome::Play
             }
-            None => true,
+            None => PlayOutcome::Play,
         }
     }
 
-    /// `handle_menu_control` passes a pressed control to the open menu, closes it or saves when
-    /// the menu says so, and puts the changed head bob and Milky Way brightness into the world.
+    /// `handle_menu_control` passes a pressed control to the open menu, closes it (capturing the
+    /// mouse again), saves or leaves the level when the menu says so, and puts the changed head bob
+    /// and Milky Way brightness into the world.
     ///
-    /// Example: `self.handle_menu_control(Control::Key(Scancode::Down));`
-    fn handle_menu_control(&mut self, control: Control) {
-        let menu: &mut menu::Menu = self.menu.as_mut().expect("the menu is open");
+    /// Example: `let outcome = self.handle_menu_control(Control::Key(Scancode::Down), window, mouse);`
+    fn handle_menu_control(
+        &mut self,
+        control: Control,
+        window: &sdl3::video::Window,
+        mouse: &sdl3::mouse::MouseUtil,
+    ) -> PlayOutcome {
+        let menu: &mut menu::Menu = self.menu_and_map.get_menu_mut().expect("the menu is open");
         match menu.handle(control, &mut self.player_settings) {
             menu::MenuOutcome::Stay => {}
-            menu::MenuOutcome::Close => self.menu = None,
+            menu::MenuOutcome::Close => {
+                self.menu_and_map
+                    .close_menu()
+                    .apply(&mut self.is_captured, window, mouse);
+            }
             menu::MenuOutcome::Save => {
                 let message: String = match self.save_player_settings() {
                     Ok(path) => format!("Saved to {path}"),
                     Err(error) => format!("Couldn't save: {error}"),
                 };
-                self.menu
-                    .as_mut()
+                self.menu_and_map
+                    .get_menu_mut()
                     .expect("the menu is open")
                     .show_message(message);
             }
+            menu::MenuOutcome::LeaveLevel => return PlayOutcome::LeaveLevel,
         }
         if let Some(voxel) = &mut self.voxel {
             voxel.world.head_bob = self.player_settings.view.head_bob.clone();
             voxel.world.milky_way_brightness_frac =
                 self.player_settings.view.milky_way_brightness_frac;
         }
+        PlayOutcome::Play
     }
 
     /// `save_player_settings` writes this player's settings to their file (`--player-settings`, or
@@ -2493,27 +2505,15 @@ impl Session {
     }
 
     /// `handle_control` does what a pressed control (key, mouse button or wheel) is bound to:
-    /// releasing the mouse (or asking whether to exit when it is free), the render resolution,
+    /// the render resolution,
     /// choosing a team in the lobby (before the guns, which may share its keys), the guns, the
     /// view (first or third person), and firing the sniper.
     ///
-    /// Example: `self.handle_control(control, window, mouse);`
-    fn handle_control(
-        &mut self,
-        control: Control,
-        window: &sdl3::video::Window,
-        mouse: &sdl3::mouse::MouseUtil,
-    ) {
+    /// Example: `self.handle_control(control);`
+    fn handle_control(&mut self, control: Control) {
         let actions: Vec<Action> = self.player_settings.keys.get_actions(control);
         let is = |action: Action| actions.contains(&action);
-        if is(Action::ReleaseMouse) {
-            if self.exit_prompt.press_release_mouse(self.is_captured)
-                == exit_prompt::ExitOutcome::ReleaseMouse
-            {
-                self.is_captured = false;
-                mouse.set_relative_mouse_mode(window, false);
-            }
-        } else if is(Action::LowerResolution) || is(Action::RaiseResolution) {
+        if is(Action::LowerResolution) || is(Action::RaiseResolution) {
             self.is_auto_scale = false;
             self.render_scale = if is(Action::LowerResolution) {
                 (self.render_scale / RENDER_SCALE_STEP).max(MIN_RENDER_SCALE)
@@ -2568,6 +2568,12 @@ impl Session {
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
         let own_dt_s: f64 = dt_s * self.get_time_rate_frac();
         let blur_s: f64 = self.player_settings.view.motion_blur_s;
+        self.menu_and_map
+            .set_map_held(
+                self.player_settings
+                    .keys
+                    .is_held(Action::ShowMap, keyboard, mouse),
+            );
         self.hit_effect_frac = fade_effect_frac(
             self.hit_effect_frac,
             dt_s,
@@ -2610,7 +2616,7 @@ impl Session {
             self.hud_time_s += dt_s;
             return Ok(());
         }
-        let is_playing: bool = self.menu.is_none() && !self.exit_prompt.is_shown();
+        let is_playing: bool = !self.menu_and_map.is_menu_open();
         let held = |action: Action| {
             is_playing && self.player_settings.keys.is_held(action, keyboard, mouse)
         };
@@ -3710,8 +3716,7 @@ impl Session {
         self.last_connection_problem = problem;
     }
 
-    /// `get_banner_lines` gives the two lines shown over the view: while the exit prompt shows,
-    /// its question and keys; when this window can't play on its server
+    /// `get_banner_lines` gives the two lines shown over the view: when this window can't play on its server
     /// (`get_connection_problem`), what is wrong; in the lobby, whether it is connected to the
     /// server yet (`get_lobby_lines`); after asking to join, until welcomed, that
     /// it is joining and the server's address; once a team has won, the winner and how to start a
@@ -3720,9 +3725,6 @@ impl Session {
     ///
     /// Example: `if let Some(lines) = session.get_banner_lines() { ... }`
     fn get_banner_lines(&self) -> Option<[String; 2]> {
-        if self.exit_prompt.is_shown() {
-            return Some(exit_prompt::get_lines());
-        }
         let multiplayer: &Multiplayer = self.multiplayer.as_ref()?;
         let client: &net::Client = &multiplayer.client;
         if let Some(problem) = self.get_connection_problem() {
@@ -3884,19 +3886,22 @@ impl Session {
         }
     }
 
-    /// `is_view_covered` says whether text covers the view: the menu or a banner.
+    /// `is_view_covered` says whether text covers the view: the menu, the map while its key is
+    /// held, or a banner.
     ///
     /// Example: `if !self.is_view_covered() { ... }`
     fn is_view_covered(&self) -> bool {
-        self.menu.is_some() || self.get_banner_lines().is_some()
+        self.menu_and_map.get_cover() != menu_and_map::Cover::Nothing
+            || self.get_banner_lines().is_some()
     }
 
     /// `get_overlay_text` gives the text shown over the dimmed view: the menu while it is open,
-    /// else the banner lines (`get_banner_lines`), or `None`.
+    /// else the map with its title and legend while its key is held (W-140, hold Tab for the map,
+    /// Esc for the menu), else the banner lines (`get_banner_lines`), or `None`.
     ///
     /// Example: `if let Some(text) = session.get_overlay_text() { ... }`
     fn get_overlay_text(&self) -> Option<OverlayText> {
-        if let Some(menu) = &self.menu {
+        if let Some(menu) = self.menu_and_map.get_menu() {
             let save_path: String = match &self.player_settings_path {
                 Some(path) => path.display().to_string(),
                 None => "nowhere: HOME isn't set, pass --player-settings".to_string(),
@@ -3918,6 +3923,16 @@ impl Session {
                 is_centered: false,
                 dim_frac: MENU_DIM_FRAC,
                 picture: (menu.get_page() == menu::Page::Map).then(|| self.make_map_picture()),
+            });
+        }
+        if self.menu_and_map.get_cover() == menu_and_map::Cover::Map {
+            return Some(OverlayText {
+                lines: menu::get_held_map_lines(&self.player_settings.keys),
+                mask_px: MENU_MASK_PX,
+                height_frac: MENU_HEIGHT_FRAC,
+                is_centered: false,
+                dim_frac: HELD_MAP_DIM_FRAC,
+                picture: Some(self.make_map_picture()),
             });
         }
         let [title, detail] = self.get_banner_lines()?;
@@ -4082,7 +4097,7 @@ impl Session {
         lines.push(if self.is_captured {
             self.player_settings.keys.describe()
         } else {
-            "Click to capture the mouse; Esc to exit".to_string()
+            "Click to capture the mouse; Esc for the menu".to_string()
         });
         lines
     }
@@ -4390,7 +4405,7 @@ fn play_on_canvas(
     let mut pixels: Vec<u8> = Vec::new();
     loop {
         for event in event_pump.poll_iter() {
-            if !session.handle_event(event, canvas.window(), &mouse) {
+            if session.handle_event(event, canvas.window(), &mouse) != PlayOutcome::Play {
                 return Ok(());
             }
         }
@@ -4533,7 +4548,7 @@ fn play_on_layer(
     let mut loading_step_index: usize = 0;
     let result: Result<()> = (|| loop {
         for event in event_pump.poll_iter() {
-            if !session.handle_event(event, &window, &mouse) {
+            if session.handle_event(event, &window, &mouse) != PlayOutcome::Play {
                 return Ok(());
             }
         }
@@ -4704,7 +4719,10 @@ mod tests {
         let scores_menu: menu::Menu = menu::Menu::New();
         let mut settings_menu: menu::Menu = menu::Menu::New();
         settings_menu.handle(Control::Key(sdl3::keyboard::Scancode::E), &mut mine);
+        let mut quit_menu: menu::Menu = menu::Menu::New();
+        quit_menu.handle(Control::Key(sdl3::keyboard::Scancode::Q), &mut mine);
         let mut credits_menu: menu::Menu = menu::Menu::New();
+        credits_menu.handle(Control::Key(sdl3::keyboard::Scancode::Q), &mut mine);
         credits_menu.handle(Control::Key(sdl3::keyboard::Scancode::Q), &mut mine);
         let scores: Vec<net::Score> = (0..3 * net::MAX_PLAYER_COUNT as u32)
             .map(|id| net::Score {
@@ -4722,7 +4740,7 @@ mod tests {
         for line in scores_menu.get_lines(&mine, &long_path, scoreboard) {
             assert!(line.0.chars().count() <= max_char_count, "{}", line.0);
         }
-        for menu in [settings_menu, scores_menu, credits_menu] {
+        for menu in [settings_menu, scores_menu, credits_menu, quit_menu] {
             let menu_text: OverlayText = OverlayText {
                 lines: menu.get_lines(&mine, &long_path, scoreboard),
                 mask_px: MENU_MASK_PX,
@@ -4737,8 +4755,8 @@ mod tests {
             }
         }
         let banner_char_count: usize = (DEATH_MASK_PX.0 as f32 / DEBUG_GLYPH_PX) as usize;
-        for line in exit_prompt::get_lines() {
-            assert!(line.chars().count() <= banner_char_count, "{line}");
+        for (line, _) in menu::get_held_map_lines(&mine.keys) {
+            assert!(line.chars().count() <= max_char_count, "{line}");
         }
         let longest_server: SocketAddr = "255.255.255.255:65535".parse().expect("an address");
         let full_counts: [u32; 2] = [net::MAX_PLAYER_COUNT as u32; 2];

@@ -72,7 +72,7 @@ LAN discovery 47831.
   size from seed 121 (named in the map's `source`), and mirrors the result onto the other team's half.
 - **Laser colour**: the map's `appearance.laser_color` (Dust: golden white, [1, 0.8, 0.3]) is the one colour
   every team's laser takes; a map without it keeps the team colours.
-- **Map page** (Tab, then E) and minimap: `make make-map-picture MAP=dust` (`--make-map-picture`) renders the map
+- **Map page** (held `Tab`, or `Esc` then E) and minimap: `make make-map-picture MAP=dust` (`--make-map-picture`) renders the map
   straight down along the vertical geodesics from 60 m, with sun shadows, no fog or wind, 3×3 samples a pixel,
   into `map_pictures/dust_r50m.png` (committed, 0.8 MB). The window reads it at start-up and draws the labels and
   live marks over it, so it costs nothing a frame; without the file (or at another curvature) it falls back to the

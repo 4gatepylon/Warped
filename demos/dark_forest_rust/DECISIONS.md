@@ -265,6 +265,11 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   spawn view, two throws in the first 2 s, GPU ms, 3 alternating rounds, load 3.3-4.5): median 10.0-10.5 without
   throws and 10.5-10.6 with (two lenses in view), p99 13.0-14.4 and 11.9-13.1, worst frame 14.5-15.3 and 12.6-15.8,
   so drawing the views makes no spike above the frames' own spread.
+- **D44. Hold Tab for the map, Esc for the menu** (W-140, hold Tab for the map, Esc for the menu; Lunar's D118).
+  Holding `Tab` draws the menu's map page (`minimap.draw_map`) and its legend over the game, dimmed 60%, while play
+  goes on; `Esc` opens the menu and frees the mouse, and `Esc` again closes it. The menu's last page, QUIT, leaves with
+  `Return` or `Y` (`MenuOutcome::LeaveLevel`), replacing the settings page's Quit row and D28's exit prompt
+  (`exit_prompt.rs` removed); the state is the shared `warped_shared::menu_and_map`, as in every level.
 
 ## Follow-ups for the next agent
 
