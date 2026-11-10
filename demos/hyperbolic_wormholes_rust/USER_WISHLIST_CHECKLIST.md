@@ -132,6 +132,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-156 Friendly fire, by game setting.** The user, 2026-11-09: "add setting in game settings to toggle whether or not friendly fire is possible".
 - [ ] **W-157 Bullet drop, by game setting.** The user, 2026-11-09: "add setting in game settings for bullet drop".
 - [ ] **W-158 Per-map game settings.** The user, 2026-11-09: "settings that are custom for maps: Gravity on lunar; Reflectivity and n bounces in sphere; wind speed on dust; snowstorm size in ice planet; nothing in dark forest but it should still have that menu /(and have it be empty)". A per-level section of the game settings in the game menu, from each level's definition (W-143 (declarative levels)).
+- [ ] **W-159 Tell wormhole pairs apart.** The user, 2026-11-09: "some way to tell apart which pairs of portals go together" (portals being wormholes), "because sometimes it's highly non-obvious where will go where".
 
 ## Pending user review
 
