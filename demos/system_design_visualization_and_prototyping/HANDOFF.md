@@ -10,9 +10,28 @@ repository: it repeats what was otherwise only in that session.
    `game_design/OUTSIDE_GAME_DESIGN.md` and `game_design/WINDOW_DESIGN.md`. Done, awaiting the user's review.
 2. **A playable prototype** of those mechanics with a local backend, "the most realistic simulation of the actual
    system design", with every component visible. Part 1 of 7 is done; parts 2 to 7 are below.
-3. **The system design** in `game_design/cloud/`, as static web pages: system diagrams, the database schema drawn,
-   the API with its schemas, the protocols, plus a document mapping the design to Google Cloud. Not started, and
-   **not to be started until the user has approved the mechanics** (step 1).
+3. **A full mock of the cloud stack, run locally,** after the prototype: the real Terraform and deploy code of the
+   design, with the cloud provider's APIs mocked out (the user's example was mocking `boto3`; with Google Cloud it
+   is that provider's client libraries or emulators), so the whole deployment can be exercised on one computer
+   without a cloud account. How to do it is yours to work out and propose to the user. Not started.
+4. **The system design** in `game_design/cloud/`, as static web pages: system diagrams, the database schema drawn,
+   the API with its schemas, the protocols. Not started, and **not to be started until the user has approved the
+   mechanics** (step 1).
+
+## The rule above all others
+
+The user's words: "as much as possible has to be succinctly represented and visualized and/or documented so that
+a human with low context can validate or give feedback", and they called it super important. So, for everything
+you make:
+
+- **Show it.** A picture, a diagram, a live page or a short table before a paragraph. The system view exists for
+  this: every new component, message, table and queue must appear in it.
+- **Keep it short.** Lead with what the thing is and what the reader should check. Cut what they don't need.
+- **Assume the reader knows nothing** of this work: define each term once, name things in plain words, and never
+  point at a conversation they weren't in.
+- **Make feedback easy.** Say exactly what you want judged, give named options where there is a choice, and keep
+  the feedback bar on every mocked window.
+- **Send screenshots of one common flow after each part,** before asking for anything more involved.
 
 ## Where everything is
 
@@ -128,8 +147,10 @@ Left out on purpose: the real game, voice chat, real Google sign-in, real Stripe
 - A match that starts with bots is unranked; a bot that replaces a leaver keeps it ranked.
 - Whoever starts a custom game is its **root admin**; the **creator** is whoever made the saved map.
 - Caps: 100 matches and 1,000 players at once, with a wait queue. Two regions, US West and US East. macOS only.
-- The user picked AWS for the system design, with a document mapping it to Google Cloud. But the repository's
-  existing deploy (`infra/`) is on Google Cloud. Raise this again when the system design starts.
+- **Google Cloud, not AWS, for now.** The user first picked AWS, then changed to Google Cloud at the end of the
+  session, which also matches the repository's existing deploy (`infra/`, Terraform). The early draft, the cost
+  notes in PR 586 (a machine at $0.145 an hour is an AWS list price) and anything else that says AWS are to be
+  redone for Google Cloud; working that out is part of the job.
 - The window mock-ups copy the look of the game's own menus. The user has not yet given feedback on the windows.
 
 ## Open with the user

@@ -2,7 +2,8 @@ The system design of Warped's online side: the services, databases, APIs and pro
 [`../OUTSIDE_GAME_DESIGN.md`](../OUTSIDE_GAME_DESIGN.md).
 
 **Not written yet.** It comes after the rules of `OUTSIDE_GAME_DESIGN.md` are agreed, as web pages: system diagrams,
-the database schema, the API with its schemas, and the protocols.
+the database schema, the API with its schemas, and the protocols. It targets Google Cloud for now, which the
+repository's existing deploy ([`infra/`](../../infra/README.md)) already uses.
 
 Until then, the design can be watched at work in the prototype,
 [`demos/system_design_visualization_and_prototyping/`](../../demos/system_design_visualization_and_prototyping/README.md):
