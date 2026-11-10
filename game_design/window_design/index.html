@@ -1,0 +1,539 @@
+<!doctype html>
+<!--
+  `index.html` mocks up the windows of `../WINDOW_DESIGN.md` that aren't built yet, so that they can be clicked
+  through and judged before anyone builds them. Every player, game and number in it is made up.
+
+  Interface:
+  - The bar at the top picks a window, the role to view it as, and whether the account has the purchase.
+  - Buttons inside the mocked screen go where they would in the app.
+  - The bar at the bottom keeps a like or dislike and a note per window; "All feedback" lists them to copy.
+  - URL hash: `#play` opens the Play window.
+
+  Example: open `game_design/window_design/index.html` in a browser.
+
+  Must know:
+  - Gotchas: each window is a `section` with the id `w-<name>`; `mockup.js` explains the `data-` attributes.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warped window mock-ups</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+
+<div id="toolbar">
+  <span class="warn">MOCK-UP, NOT A GAME SCREENSHOT</span>
+  <label>Window <select id="view_window"></select></label>
+  <label>You are <select id="view_role">
+    <option value="player">a player</option>
+    <option value="admin">an admin of the game</option>
+    <option value="root">the game's root admin</option>
+  </select></label>
+  <label>Your account <select id="view_account">
+    <option value="paid">has the purchase</option>
+    <option value="unpaid">used up its free allowance</option>
+  </select></label>
+  <button class="btn small" data-go="feedback">ALL FEEDBACK</button>
+</div>
+
+<div id="stage"><div id="screen">
+
+<section class="window" id="w-signin" data-title="Sign-in">
+  <h1>Warped</h1>
+  <p class="dim">A shooter in curved space.</p>
+  <div class="cols">
+    <div class="box">
+      <h2>Returning player</h2>
+      <p><button class="btn main" data-go="home">SIGN IN WITH GOOGLE</button></p>
+      <p class="dim">Opens your browser and comes back signed in.</p>
+      <p><button class="btn" data-go="local">LOCAL GAMES, WITHOUT SIGNING IN</button></p>
+    </div>
+    <div class="box">
+      <h2>First time</h2>
+      <div class="row">Birth date <input size="12" placeholder="YYYY-MM-DD"> <span class="dim">13 or older</span></div>
+      <div class="row">Display name <input size="16" value="starling"> <span class="blue">free</span></div>
+      <div class="row">Icon <span class="icon"></span> <span class="icon b"></span> <span class="icon r"></span>
+        <span class="icon w"></span> <span class="dim">pick one</span></div>
+      <div class="row"><input type="checkbox"> I accept the terms, the privacy policy and the code of conduct</div>
+      <p><button class="btn" data-go="home">CREATE ACCOUNT</button></p>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="w-home" data-title="Home" data-side>
+  <div class="row"><h1>Warped</h1>
+    <span class="right"><span class="icon"></span> starling <span class="tag warn">GOLD</span></span>
+    <button class="btn small" data-go="profile">PROFILE</button>
+    <button class="btn small" data-go="inbox">INBOX 2</button>
+    <button class="btn small" data-go="settings">SETTINGS</button></div>
+  <div class="box"><span class="warn">ANNOUNCEMENT</span> Friday 8 pm Eastern: everyone in the queue. Bring a party.</div>
+  <p><button class="btn main" data-go="play">PLAY</button> <span class="dim">Ranked, five against five.</span></p>
+  <p><button class="btn main" data-go="custom">CUSTOM GAMES</button> <span class="dim">Join or start a game.</span></p>
+  <p><button class="btn main" data-go="maps">SAVED MAPS</button> <span class="dim">Levels and settings to start games from.</span></p>
+  <p><button class="btn main" data-go="local">LOCAL GAMES</button> <span class="dim">Tutorial, bots, this Wi-Fi. Free.</span></p>
+  <p class="dim">Also here: <a href="#end">end of match</a>, <a href="#match">the menu in a match</a>,
+    <a href="#replay">watching and replays</a>, <a href="#web">on the web</a>, <a href="#signin">sign-in</a>.</p>
+</section>
+
+<section class="window" id="w-purchase" data-title="Purchase">
+  <h1>Keep playing online</h1>
+  <div class="box">
+    <p>You have used your free allowance: 1 match or 30 minutes.</p>
+    <p class="big">$13.37 <span class="dim">once</span></p>
+    <p>Unlocks ranked matches, custom games and tournament games on this account, for good.</p>
+    <p><button class="btn main">PAY IN THE BROWSER</button></p>
+    <p class="dim">This window closes by itself when the payment is confirmed.</p>
+  </div>
+  <p><button class="btn" data-go="local">LOCAL GAMES ARE FREE</button> <button class="btn" data-go="home">HOME</button></p>
+</section>
+
+<section class="window" id="w-play" data-title="Play (matchmaking)" data-side data-online>
+  <div class="row"><h1>Play</h1><button class="btn small right" data-go="home">HOME</button></div>
+  <div class="cols">
+    <div class="box">
+      <h2>Your party <span class="dim">3 of 5</span></h2>
+      <div class="row"><span class="icon"></span> starling <span class="tag warn">GOLD</span> <span class="dim">leader</span></div>
+      <div class="row"><span class="icon b"></span> nova_k <span class="tag warn">GOLD</span></div>
+      <div class="row"><span class="icon r"></span> tachyon <span class="tag">SILVER</span></div>
+      <p><button class="btn small">INVITE</button> <span class="dim">Ratings within 500 of each other.</span></p>
+    </div>
+    <div class="box">
+      <h2>Regions</h2>
+      <div class="row">US East <span class="blue right">24 ms</span></div>
+      <div class="row">US West <span class="warn right">81 ms</span></div>
+      <p class="dim">Matchmaking picks the region that suits all ten players.</p>
+    </div>
+  </div>
+  <div data-tabs="ready">
+    <div class="tabs"><span class="dim">States of this window:</span>
+      <button class="btn" data-tab="ready">can search</button>
+      <button class="btn" data-tab="full">servers full</button>
+      <button class="btn" data-tab="cooldown">cooldown</button></div>
+    <div data-pane="ready">
+      <div id="search_idle"><button class="btn main" data-act="find_match">FIND A MATCH</button>
+        <span class="dim">Only the party's leader can.</span></div>
+      <div id="search_running" class="hidden box">
+        <p>SEARCHING <span id="search_waited">0 s</span> <span class="dim">estimated 1 min</span></p>
+        <p class="dim">In this mock-up: bots are offered after 5 s, the ready check comes after 10 s.</p>
+        <button class="btn" data-act="stop_search">STOP</button>
+      </div>
+    </div>
+    <div data-pane="full" class="box">
+      <p>Your match is confirmed. The servers are full.</p>
+      <p class="big">Place 4 <span class="dim">in the wait queue</span></p>
+    </div>
+    <div data-pane="cooldown" class="box">
+      <p class="red">You abandoned a ranked match.</p>
+      <p class="big">1:42:10 <span class="dim">until you can search again</span></p>
+      <p class="dim">Custom and local games stay open.</p>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="w-custom" data-title="Custom games" data-side data-online>
+  <div class="row"><h1>Custom games</h1><button class="btn small right" data-go="home">HOME</button></div>
+  <div data-tabs="list">
+    <div class="tabs"><button class="btn" data-tab="list">GAMES</button>
+      <button class="btn" data-tab="new">NEW GAME</button>
+      <button class="btn" data-tab="stopped">STOPPED GAMES</button></div>
+    <div data-pane="list">
+      <div class="row">Code <input size="8" placeholder="K7Q2M"> <button class="btn small">JOIN BY CODE</button>
+        <span class="right">Region <select><option>any</option><option>US East</option><option>US West</option></select></span></div>
+      <table>
+        <tr><th>Game</th><th>Saved map</th><th>Region</th><th>Players</th><th></th><th></th></tr>
+        <tr><td>Friday scrim</td><td>Official map</td><td>US East 24 ms</td><td>7 / 10</td><td></td>
+          <td><button class="btn small" data-go="lobby" data-kind="custom">JOIN</button></td></tr>
+        <tr><td>low gravity madness</td><td>Moon hops <span class="dim">by quasar9</span></td><td>US West 81 ms</td><td>4 / 12</td><td></td>
+          <td><button class="btn small" data-go="lobby" data-kind="custom">JOIN</button></td></tr>
+        <tr><td>clan practice</td><td>Official map</td><td>US East 24 ms</td><td>9 / 10</td><td class="warn">PASSWORD</td>
+          <td><button class="btn small" data-go="lobby" data-kind="custom">JOIN</button></td></tr>
+        <tr><td>city only 3v3</td><td>City Sphere x1 <span class="dim">by umbra</span></td><td>US East 24 ms</td><td>6 / 6</td><td class="dim">FULL</td><td></td></tr>
+      </table>
+    </div>
+    <div data-pane="new" class="box">
+      <div class="row">Saved map <select><option>Official map</option><option>Moon hops (reader)</option><option>My scrim rules (creator)</option></select></div>
+      <div class="row">Name <input size="24" value="starling's game"></div>
+      <div class="row">Region <select><option>US East, 24 ms</option><option>US West, 81 ms</option></select></div>
+      <div class="row">Listed <input type="checkbox" checked> <span class="dim">Shows in the list. Otherwise by link or code only.</span></div>
+      <div class="row">Password <input size="12" placeholder="none"></div>
+      <div class="row">Most players <input size="3" value="10"> <span class="dim">up to 12</span></div>
+      <p><button class="btn main" data-go="lobby" data-kind="custom">START GAME</button>
+        <span class="dim">You become its root admin. One game per account at a time.</span></p>
+    </div>
+    <div data-pane="stopped">
+      <table>
+        <tr><th>Game</th><th>Stopped</th><th>Where it stopped</th><th>Kept until</th><th></th></tr>
+        <tr><td>Sunday scrim</td><td>idle 10 min</td><td>round 3, blue attacks Dark Forest</td><td>Dec 8</td>
+          <td><button class="btn small" data-go="lobby" data-kind="custom">START AGAIN</button></td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="w-lobby" data-title="Game lobby and warm-up" data-online>
+  <div class="row"><h1>Friday scrim</h1>
+    <span class="tag" data-needs="custom">CUSTOM GAME</span><span class="tag warn" data-needs="matchmade">RANKED MATCH</span>
+    <span class="warn">WARM-UP 3:12</span>
+    <span class="dim" data-needs="custom">code K7Q2M</span> <button class="btn small" data-needs="custom">COPY LINK</button>
+    <button class="btn small right" data-go="home">LEAVE</button></div>
+  <div class="cols">
+    <div class="box blue_side"><h2 class="blue">Blue 4</h2>
+      <div class="row">starling <span class="dim">you</span></div><div class="row">nova_k</div>
+      <div class="row">tachyon</div><div class="row">lensflare</div>
+      <p data-needs="custom"><button class="btn small">JOIN BLUE (1)</button></p></div>
+    <div class="box red_side"><h2 class="red">Red 3</h2>
+      <div class="row">geodesic <span class="dim">root admin</span></div><div class="row">redshift</div><div class="row">parallax</div>
+      <p data-needs="custom"><button class="btn small">JOIN RED (2)</button></p></div>
+    <div class="box"><h2>Warm-up</h2>
+      <p class="dim">Jump to a level to try it:</p>
+      <p><button class="btn small">DUST</button> <button class="btn small">SNOW PLANET</button>
+        <button class="btn small">CITY SPHERE</button> <button class="btn small">DARK FOREST</button>
+        <button class="btn small">LUNAR SURFACE</button></p>
+      <p class="dim" data-needs="matchmade">Starts when all ten have connected.</p>
+      <p class="dim" data-needs="custom">Starts when an admin starts the match.</p>
+      <p><button class="btn" data-go="match">(MOCK-UP: GO INTO THE MATCH)</button></p></div>
+  </div>
+  <div class="cols">
+    <div class="box"><h2>Lobby chat</h2>
+      <p><span class="red">geodesic</span> two more and we start</p>
+      <p><span class="blue">nova_k</span> ok, friendly fire off?</p>
+      <input size="40" placeholder="Say something"></div>
+    <div class="box" data-needs="custom"><h2>Map and settings <span class="dim">read-only</span></h2>
+      <p>Official map: Dust, Snow Planet, City Sphere, Dark Forest, Lunar Surface</p>
+      <p class="dim">Friendly fire on. Match limit 30 min. Gravity 1.0.</p></div>
+  </div>
+  <div class="box" id="lobby_admin" data-needs="custom admin" data-tabs="players">
+    <div class="tabs"><span class="warn">ADMIN PANEL</span>
+      <button class="btn" data-tab="players">PLAYERS</button><button class="btn" data-tab="access">ACCESS</button>
+      <button class="btn" data-tab="settings">GAME SETTINGS</button><button class="btn" data-tab="watching">WATCHING</button>
+      <button class="btn" data-tab="admins">ADMINS</button><button class="btn" data-tab="match">MATCH</button></div>
+    <div data-pane="players">
+      <div class="row">parallax <button class="btn small">KICK</button> <button class="btn small danger">KICK AND BAN FROM THIS GAME</button></div>
+      <div class="row">redshift <button class="btn small">KICK</button> <button class="btn small danger">KICK AND BAN FROM THIS GAME</button></div></div>
+    <div data-pane="access">
+      <div class="row">Listed <input type="checkbox" checked></div>
+      <div class="row">Password <input size="12" placeholder="none"></div>
+      <div class="row">Most players <input size="3" value="10"></div>
+      <div class="row">Whitelist <input type="checkbox"> <span class="dim">only these accounts may join</span> <button class="btn small">EDIT</button></div>
+      <div class="row">Ban list <span class="dim">1 account</span> <button class="btn small">EDIT</button></div></div>
+    <div data-pane="settings">
+      <p class="dim">Changes apply to the matches still to come.</p>
+      <div class="row">Gravity <input size="5" value="1.0"> <span class="dim">official 1.0</span></div>
+      <div class="row">Friendly fire <input type="checkbox" checked></div>
+      <div class="row">Match time limit <input size="5" value="30"> min</div>
+      <div class="row">Time to turn off a console <input size="5" value="10"> s</div>
+      <p><button class="btn small">ALL SETTINGS</button></p></div>
+    <div data-pane="watching">
+      <div class="row">Watching <input type="checkbox"> <span class="dim">off unless you turn it on</span></div>
+      <div class="row">Delay <input size="4" value="30"> s <span class="dim">0 s to 5 min</span></div>
+      <div class="row">Who may watch <select><option>players I name</option><option>anyone with the watch link</option><option>anyone</option></select></div></div>
+    <div data-pane="admins">
+      <div class="row">geodesic <span class="dim">root admin, can't be removed</span></div>
+      <div class="row">starling <span class="dim">admin</span> <button class="btn small">REMOVE</button></div>
+      <p><button class="btn small">ADD AN ADMIN</button></p></div>
+    <div data-pane="match">
+      <p><button class="btn">START THE MATCH</button> <button class="btn">STOP THE MATCH</button>
+        <button class="btn danger" data-needs="root">CLOSE THE GAME</button></p>
+      <p class="dim">Only the root admin closes the game.</p></div>
+  </div>
+</section>
+
+<section class="window" id="w-maps" data-title="Saved maps" data-side>
+  <div class="row"><h1>Saved maps</h1><button class="btn small right" data-go="home">HOME</button></div>
+  <div data-tabs="list">
+    <div class="tabs"><button class="btn" data-tab="list">LIST</button><button class="btn" data-tab="editor">EDITOR</button>
+      <button class="btn" data-tab="sharing">SHARING</button></div>
+    <div data-pane="list">
+      <table>
+        <tr><th>Saved map</th><th>Creator</th><th>Levels</th><th>Visibility</th><th>Your role</th><th></th></tr>
+        <tr><td>Official map</td><td>Warped</td><td>5</td><td>public</td><td>reader</td>
+          <td><button class="btn small" data-go="custom">START A GAME</button> <button class="btn small">COPY</button></td></tr>
+        <tr><td>My scrim rules</td><td>starling</td><td>5</td><td>shared, 4 players</td><td class="warn">creator</td>
+          <td><button class="btn small" data-go="custom">START A GAME</button> <button class="btn small" data-tab="editor">EDIT</button></td></tr>
+        <tr><td>Moon hops</td><td>quasar9</td><td>3</td><td>public</td><td>reader</td>
+          <td><button class="btn small" data-go="custom">START A GAME</button> <button class="btn small">COPY</button></td></tr>
+      </table>
+      <p><button class="btn">NEW SAVED MAP</button></p>
+    </div>
+    <div data-pane="editor">
+      <h2>My scrim rules</h2>
+      <div class="cols">
+        <div class="box"><h3>Levels, in order</h3>
+          <div class="row"><span class="blue">1 Dust</span> <span class="dim right">drag</span></div>
+          <div class="row"><span class="blue">2 Snow Planet</span></div>
+          <div class="row"><span class="purple">3 City Sphere</span></div>
+          <div class="row"><span class="red">4 Dark Forest</span></div>
+          <div class="row"><span class="red">5 Lunar Surface</span></div>
+          <p class="dim">An odd number, one purple level in the middle.</p></div>
+        <div class="box"><h3>Settings for every level</h3>
+          <div class="row">Friendly fire <input type="checkbox"> <span class="warn">changed</span> <button class="btn small">OFFICIAL</button></div>
+          <div class="row">Match time limit <input size="4" value="30"> min</div>
+          <div class="row">Gravity <input size="4" value="1.0"></div>
+          <h3>Only Lunar Surface</h3>
+          <div class="row">Surface roughness <input size="4" value="0.4"></div></div>
+      </div>
+      <p><button class="btn">SAVE</button></p>
+    </div>
+    <div data-pane="sharing">
+      <div class="row">Visibility <select><option>shared</option><option>private</option><option>public</option></select></div>
+      <table>
+        <tr><th>Player</th><th>Role</th><th></th></tr>
+        <tr><td>starling</td><td class="warn">creator</td><td class="dim">can't be removed</td></tr>
+        <tr><td>nova_k</td><td><select><option>admin</option><option>writer</option><option>reader</option></select></td><td><button class="btn small">REMOVE</button></td></tr>
+        <tr><td>tachyon</td><td><select><option>writer</option><option>admin</option><option>reader</option></select></td><td><button class="btn small">REMOVE</button></td></tr>
+      </table>
+      <p><button class="btn small">SHARE WITH A PLAYER</button></p>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="w-local" data-title="Local games">
+  <div class="row"><h1>Local games</h1><span class="dim">Free. Nothing here is ranked.</span>
+    <button class="btn small right" data-go="home">HOME</button></div>
+  <p><button class="btn main">TUTORIAL</button> <span class="dim">Learn curved space, step by step, against bots.</span></p>
+  <p><button class="btn main">PRACTICE AGAINST BOTS</button> <span class="dim">Any level, any number of bots.</span></p>
+  <p><button class="btn main">A GAME ON THIS WI-FI</button> <span class="dim">Built today.</span></p>
+  <p><button class="btn main">JOIN A SERVER BY ITS ADDRESS</button> <span class="dim">Built today.</span></p>
+</section>
+
+<section class="window" id="w-match" data-title="In a match: the menu">
+  <div class="game_view">THE MATCH (see INSIDE_GAME_DESIGN.md)</div>
+  <div class="over_game" data-tabs="scores">
+    <div class="row"><h1>Menu</h1><button class="btn small right" data-open="rejoin">(MOCK-UP: SHOW THE REJOIN WINDOW)</button></div>
+    <div class="tabs"><button class="btn" data-tab="scores">SCORES</button><button class="btn" data-tab="settings">SETTINGS</button>
+      <button class="btn" data-tab="map">MAP</button><button class="btn" data-tab="vote">VOTE</button>
+      <button class="btn" data-tab="quit">QUIT</button></div>
+    <div data-pane="scores">
+      <table>
+        <tr><th>Player</th><th>Kills</th><th>Deaths</th><th></th></tr>
+        <tr class="is_me"><td>starling</td><td>7</td><td>3</td><td></td></tr>
+        <tr><td class="blue">nova_k</td><td>5</td><td>4</td><td><button class="btn small">MUTE</button> <button class="btn small">BLOCK</button> <button class="btn small">REPORT</button></td></tr>
+        <tr><td class="blue">BOT <span class="dim">for tachyon, who abandoned</span></td><td>1</td><td>2</td><td></td></tr>
+        <tr><td class="red">geodesic</td><td>6</td><td>5</td><td><button class="btn small">MUTE</button> <button class="btn small">BLOCK</button> <button class="btn small">REPORT</button></td></tr>
+        <tr><td class="red">redshift</td><td>4</td><td>6</td><td><button class="btn small">MUTE</button> <button class="btn small">BLOCK</button> <button class="btn small">REPORT</button></td></tr>
+      </table></div>
+    <div data-pane="settings"><p class="dim">The player's own settings, as built today.</p></div>
+    <div data-pane="map"><p class="dim">The level from above, as built today.</p></div>
+    <div data-pane="vote">
+      <p class="dim">Ranked matches only.</p>
+      <div class="row">Kick <select><option>nova_k</option><option>lensflare</option></select>
+        for <select><option>cheating</option><option>abuse</option><option>not playing</option><option>another reason</option></select>
+        <button class="btn small">CALL THE VOTE</button> <span class="dim">3 of 4 teammates. 1 vote per match.</span></div>
+      <div class="row">Surrender <button class="btn small">CALL THE VOTE</button> <span class="dim">Open because tachyon abandoned. Everyone left must agree.</span></div>
+      <div class="row">Pause <button class="btn small">PAUSE 60 S</button> <span class="dim">1 left for your team.</span></div></div>
+    <div data-pane="quit">
+      <p>Do you want to leave the match?</p>
+      <p class="blue">A teammate already abandoned, so leaving costs you nothing.</p>
+      <p class="dim">Otherwise it would say: <span class="red">Leaving counts as a loss and gives a 30 minute cooldown.</span></p>
+      <p><button class="btn danger" data-go="end">LEAVE</button> <button class="btn">BACK TO THE MATCH</button></p></div>
+  </div>
+</section>
+
+<section class="window" id="w-end" data-title="End of match">
+  <h1 class="blue">Blue team wins the match</h1>
+  <div class="cols">
+    <div class="box"><h2>Your rating</h2>
+      <p class="big">1,512 <span class="blue">+18</span></p>
+      <p><span class="tag warn">GOLD</span> <span class="dim">88 to Platinum</span></p>
+      <p class="dim">In placement this box says: Placement, match 3 of 10.</p></div>
+    <div class="box"><h2>Scores</h2>
+      <table>
+        <tr><th>Player</th><th>K</th><th>D</th><th></th></tr>
+        <tr class="is_me"><td>starling</td><td>11</td><td>6</td><td></td></tr>
+        <tr><td class="blue">nova_k</td><td>9</td><td>7</td><td><button class="btn small">COMMEND</button> <button class="btn small">REPORT</button></td></tr>
+        <tr><td class="blue">lensflare</td><td>6</td><td>8</td><td><button class="btn small">COMMEND</button> <button class="btn small">REPORT</button></td></tr>
+        <tr><td class="red">geodesic</td><td>10</td><td>9</td><td><button class="btn small">COMMEND</button> <button class="btn small">REPORT</button></td></tr>
+      </table>
+      <p class="dim">Commend for: teamwork, leading, good company. 3 per match.</p></div>
+  </div>
+  <p><button class="btn main" data-go="play">QUEUE AGAIN WITH THE PARTY</button>
+    <button class="btn" data-go="replay">WATCH THE REPLAY</button> <button class="btn" data-go="home">HOME</button></p>
+</section>
+
+<section class="window" id="w-replay" data-title="Watching and replays">
+  <div class="game_view">THE MATCH, FROM A FREE CAMERA</div>
+  <div style="position:absolute; left:24px; top:16px;">
+    <p><span class="tag">REPLAY</span> <span class="dim">A spectator sees the same view with</span> <span class="tag warn">LIVE, 30 S BEHIND</span></p>
+    <p>Follow: <button class="btn small">starling</button> <button class="btn small">nova_k</button>
+      <button class="btn small">geodesic</button> <button class="btn small is_on">FREE CAMERA</button></p>
+    <p><span class="blue">Blue 2</span> <span class="red">Red 1</span> <span class="dim">Round 4, Snow Planet</span></p>
+  </div>
+  <div style="position:absolute; left:24px; right:24px; bottom:16px;">
+    <div class="timeline"><b></b><i style="left:12%"></i><i style="left:31%"></i><i style="left:55%"></i><i style="left:78%"></i></div>
+    <div class="row">11:24 / 29:50 <button class="btn small">PLAY</button> <button class="btn small">0.5x</button>
+      <button class="btn small is_on">1x</button> <button class="btn small">2x</button>
+      <span class="dim">red marks: eliminations and round ends</span>
+      <button class="btn small right">MAKE A CLIP</button> <button class="btn small">COPY LINK</button>
+      <button class="btn small" data-go="home">CLOSE</button></div>
+  </div>
+</section>
+
+<section class="window" id="w-profile" data-title="Profile, match history and rankings" data-side>
+  <div class="row"><h1>starling</h1><span class="icon"></span> <span class="tag warn">GOLD</span>
+    <span class="dim">[ORB] Orbiters</span><button class="btn small right" data-go="home">HOME</button></div>
+  <div data-tabs="profile">
+    <div class="tabs"><button class="btn" data-tab="profile">PROFILE</button><button class="btn" data-tab="history">MATCH HISTORY</button>
+      <button class="btn" data-tab="rankings">RANKINGS</button></div>
+    <div data-pane="profile" class="cols">
+      <div class="box"><h2>This season</h2><p class="big">1,512</p>
+        <p>48 ranked matches, 56% won</p><p>Kills 412, deaths 367</p><p>Wins most on: Snow Planet</p></div>
+      <div class="box"><h2>Badges</h2><p><span class="tag">SILVER, SEASON 1</span> <span class="tag warn">GOLD, SEASON 2</span></p>
+        <h2>Commendations</h2><p>Teamwork 31, leading 9, good company 22</p></div>
+    </div>
+    <div data-pane="history">
+      <table>
+        <tr><th>When</th><th>Kind</th><th>Result</th><th>K / D</th><th>Rating</th><th></th></tr>
+        <tr><td>today 21:10</td><td>ranked</td><td class="blue">won</td><td>11 / 6</td><td class="blue">+18</td><td><button class="btn small" data-go="replay">REPLAY</button></td></tr>
+        <tr><td>today 20:31</td><td>ranked</td><td class="red">lost</td><td>5 / 9</td><td class="red">-14</td><td><button class="btn small" data-go="replay">REPLAY</button></td></tr>
+        <tr><td>yesterday</td><td>custom</td><td class="blue">won</td><td>8 / 8</td><td class="dim">not ranked</td><td><button class="btn small" data-go="replay">REPLAY</button></td></tr>
+        <tr><td>Nov 6</td><td>ranked</td><td class="dim">tie</td><td>7 / 7</td><td class="blue">+2</td><td><button class="btn small" data-go="replay">REPLAY</button></td></tr>
+      </table>
+    </div>
+    <div data-pane="rankings">
+      <p><button class="btn small is_on">EVERYONE</button> <button class="btn small">FRIENDS</button> <button class="btn small">CLAN</button></p>
+      <table>
+        <tr><th>#</th><th>Player</th><th>Tier</th><th>Rating</th><th>Matches</th><th>Won</th></tr>
+        <tr><td>1</td><td>perihelion</td><td>WARPED</td><td>2,241</td><td>131</td><td>71%</td></tr>
+        <tr><td>2</td><td>zenith</td><td>MASTER</td><td>2,118</td><td>96</td><td>66%</td></tr>
+        <tr><td>3</td><td>apogee</td><td>MASTER</td><td>2,034</td><td>102</td><td>63%</td></tr>
+        <tr><td class="dim" colspan="6">...</td></tr>
+        <tr class="is_me"><td>214</td><td>starling</td><td>GOLD</td><td>1,512</td><td>48</td><td>56%</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="w-inbox" data-title="Inbox" data-side>
+  <div class="row"><h1>Inbox</h1><button class="btn small right" data-go="home">HOME</button></div>
+  <div class="box"><span class="warn">NEW</span> A player from one of your ranked matches was banned for cheating.
+    Your rating was restored: <span class="blue">+14</span>.</div>
+  <div class="box"><span class="warn">NEW</span> A report of yours led to action. Thank you.</div>
+  <div class="box"><span class="dim">Nov 8</span> Announcement: season 3 starts on December 1.</div>
+  <div class="box dim">A ban or suspension notice would say why, for how long, and carry an APPEAL button.</div>
+</section>
+
+<section class="window" id="w-settings" data-title="Settings" data-side>
+  <div class="row"><h1>Settings</h1><button class="btn small right" data-go="home">HOME</button></div>
+  <div data-tabs="game">
+    <div class="tabs"><button class="btn" data-tab="game">GAME</button><button class="btn" data-tab="sound">SOUND AND VOICE</button>
+      <button class="btn" data-tab="account">ACCOUNT</button></div>
+    <div data-pane="game">
+      <p class="dim">The menu's SETTINGS page of today (keys, mouse, picture), plus:</p>
+      <div class="row">Your team's colour <span class="icon b"></span> <button class="btn small">CHANGE</button></div>
+      <div class="row">The other team's colour <span class="icon r"></span> <button class="btn small">CHANGE</button></div>
+      <p class="dim">Only your own screen changes. Saved to your account.</p></div>
+    <div data-pane="sound">
+      <div class="row">Microphone <select><option>MacBook microphone</option></select></div>
+      <div class="row">Voice <select><option>push to talk (V)</option><option>open microphone</option><option>off</option></select></div>
+      <div class="row">Voice volume <input size="4" value="80"> %</div>
+      <div class="row">Hide offensive words in chat <input type="checkbox" checked></div></div>
+    <div data-pane="account">
+      <div class="row">Display name <input size="16" value="starling"> <span class="dim">next change in 12 days</span></div>
+      <div class="row">Icon <span class="icon"></span> <button class="btn small">CHANGE</button></div>
+      <h3>Privacy</h3>
+      <div class="row">Friend requests from <select><option>everyone</option><option>friends of friends</option><option>nobody</option></select></div>
+      <div class="row">Direct messages from <select><option>friends</option><option>nobody</option></select></div>
+      <div class="row">Invitations from <select><option>everyone</option><option>friends</option><option>nobody</option></select></div>
+      <div class="row">Statistics and match history seen by <select><option>everyone</option><option>friends</option><option>only me</option></select></div>
+      <div class="row">Presence <select><option>shown to friends</option><option>always offline</option></select></div>
+      <p><button class="btn small" data-go="signin">SIGN OUT</button> <button class="btn small">SIGN OUT EVERYWHERE</button>
+        <button class="btn small danger">DELETE ACCOUNT</button></p></div>
+  </div>
+</section>
+
+<section class="window" id="w-web" data-title="On the web: superadmin console">
+  <div class="row"><h1>Superadmin console</h1><span class="dim">A web page, only for superadmins.</span></div>
+  <div data-tabs="settings">
+    <div class="tabs"><button class="btn" data-tab="settings">SETTINGS</button><button class="btn" data-tab="review">REVIEW</button>
+      <button class="btn" data-tab="run">RUN THE GAME</button><button class="btn" data-tab="log">LOG</button></div>
+    <div data-pane="settings">
+      <table>
+        <tr><th>Section</th><th>Setting</th><th>Value</th></tr>
+        <tr><td>Paying</td><td>Price of the purchase</td><td><input size="6" value="13.37"> $</td></tr>
+        <tr><td>Where and on what</td><td>Most matches at once</td><td><input size="6" value="100"></td></tr>
+        <tr><td>Matchmaking</td><td>Largest rating window</td><td><input size="6" value="500"></td></tr>
+        <tr><td>Fair play</td><td>Failed audits before a ban</td><td><input size="6" value="2"></td></tr>
+        <tr><td class="dim" colspan="3">... every setting marked ≈ in OUTSIDE_GAME_DESIGN.md</td></tr>
+      </table></div>
+    <div data-pane="review">
+      <table>
+        <tr><th>Account</th><th>Why it is here</th><th>Evidence</th><th></th></tr>
+        <tr><td>umbra</td><td class="warn">suspended: 91 reporters in 90 days</td><td>12 replays, 1 failed audit</td>
+          <td><button class="btn small">LIFT</button> <button class="btn small danger">BAN</button></td></tr>
+        <tr><td>parallax</td><td>appeal of a chat ban</td><td>chat log</td>
+          <td><button class="btn small">UPHOLD</button> <button class="btn small">LIFT</button></td></tr>
+      </table></div>
+    <div data-pane="run">
+      <p><button class="btn">POST AN ANNOUNCEMENT</button> <button class="btn">START A TOURNAMENT GAME</button></p>
+      <div class="row">Maintenance <input type="checkbox"> <span class="dim">stops new matches, lets running ones finish</span></div>
+      <p class="dim">Now: 37 matches, 352 players online. Caps: 100 and 1,000.</p></div>
+    <div data-pane="log">
+      <p class="dim">Nov 10 14:02 superadmin_a changed "Largest rating window" from 400 to 500</p>
+      <p class="dim">Nov 9 19:40 superadmin_b banned an account for cheating (2 failed audits)</p></div>
+  </div>
+</section>
+
+<section class="window" id="w-feedback" data-title="All feedback">
+  <div class="row"><h1>All feedback</h1><button class="btn small right" data-go="home">HOME</button></div>
+  <p class="dim">Kept in this browser only. Copy it and paste it into the chat.</p>
+  <p><button class="btn" data-act="copy_feedback">COPY ALL FEEDBACK</button>
+    <button class="btn danger" data-act="clear_feedback">CLEAR ALL FEEDBACK</button></p>
+  <pre class="box" id="all_feedback"></pre>
+</section>
+
+<aside id="side">
+  <h2>Party <span class="dim">3 of 5</span></h2>
+  <div class="row"><span class="icon"></span> starling</div>
+  <div class="row"><span class="icon b"></span> nova_k <span class="dim right">voice on</span></div>
+  <div class="row"><span class="icon r"></span> tachyon</div>
+  <h3>Friends</h3>
+  <div class="row"><span class="blue">●</span> nova_k <span class="dim right">in your party</span></div>
+  <div class="row"><span class="blue">●</span> quasar9 <span class="dim right">in a ranked match</span></div>
+  <div class="row"><span class="blue">●</span> lensflare <span class="dim right">online</span> <button class="btn small">INVITE</button></div>
+  <div class="row"><span class="dim">○</span> redshift <span class="dim right">offline</span></div>
+  <div class="row warn">1 friend request <button class="btn small">SEE</button></div>
+  <h3>Recent players</h3>
+  <div class="row">geodesic <button class="btn small right">ADD</button></div>
+  <h3>Chat</h3>
+  <p><button class="btn small is_on">PARTY</button> <button class="btn small">[ORB] CLAN</button> <button class="btn small">quasar9</button></p>
+  <p><span class="blue">nova_k</span> one more?</p>
+  <p><span class="red">tachyon</span> yes, queue</p>
+  <input size="24" placeholder="Say something">
+  <p class="dim">Clicking a player offers: profile, message, invite, add friend, mute, block, report.</p>
+</aside>
+
+<div class="modal" id="m-bots"><div class="box">
+  <h2>Not enough players right now</h2>
+  <p>Play a match with bots? It would have <span class="blue">6 human players</span> and 4 bots.</p>
+  <p class="dim">A match that starts with bots is not ranked.</p>
+  <p><button class="btn" data-close>YES, WITH BOTS</button> <button class="btn" data-close>NO, KEEP WAITING</button></p>
+</div></div>
+
+<div class="modal" id="m-ready"><div class="box">
+  <h2>Match found</h2>
+  <p class="big" id="ready_left">20 s</p>
+  <p><button class="btn main" data-act="confirm_ready">I AM READY</button></p>
+  <p class="dim">7 of 10 ready. Not answering gives a short cooldown.</p>
+</div></div>
+
+<div class="modal" id="m-rejoin"><div class="box">
+  <h2>You dropped out of a ranked match</h2>
+  <p class="big">2:14 <span class="dim">left to rejoin</span></p>
+  <p><button class="btn main" data-close>REJOIN</button> <button class="btn danger" data-close>ABANDON</button></p>
+  <p class="dim">Abandoning counts as a loss and gives a cooldown.</p>
+</div></div>
+
+</div></div>
+
+<div id="feedback">
+  <span>This window:</span>
+  <button class="btn small" data-act="verdict" data-verdict="like">I LIKE IT</button>
+  <button class="btn small" data-act="verdict" data-verdict="dislike">I DON'T LIKE IT</button>
+  <textarea id="feedback_note" placeholder="What do you like or not like about this window?"></textarea>
+</div>
+
+<script src="mockup.js"></script>
+</body>
+</html>

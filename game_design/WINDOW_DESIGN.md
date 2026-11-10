@@ -68,7 +68,8 @@ The windows a player meets, in order: the title, the loading screen, the lobby, 
 ## The windows to come
 
 **Not built yet**, all of this section. These windows carry out the rules of
-[`OUTSIDE_GAME_DESIGN.md`](OUTSIDE_GAME_DESIGN.md), and each one names the section it serves.
+[`OUTSIDE_GAME_DESIGN.md`](OUTSIDE_GAME_DESIGN.md), and each one names the section it serves. A mock-up of them to
+click through is in [`window_design/`](window_design/README.md).
 
 ### How a player moves between them
 
