@@ -2104,6 +2104,9 @@ struct Session {
     wormhole_damages: Vec<(Option<u32>, f64)>,
     wormhole_flashes: Vec<(Option<u32>, f64)>,
     has_shot_hit_wormholes: bool,
+    /// `pull_tuner` is the keys that change the pull's and the sprint's numbers while playing
+    /// (W-202), on only with `WARPED_TUNE_PULL=1`.
+    pull_tuner: Option<warped_shared::pull_tuning::PullTuner>,
 }
 
 /// `VoxelState` is a window's game on a voxel map: the map, the player, their spawn point and the
@@ -2434,6 +2437,7 @@ impl Session {
             wormhole_damages: Vec::new(),
             wormhole_flashes: Vec::new(),
             has_shot_hit_wormholes: false,
+            pull_tuner: warped_shared::pull_tuning::PullTuner::FromEnv(),
         })
     }
 
@@ -2488,6 +2492,7 @@ impl Session {
         }
         match key_bindings::get_pressed_control(&event) {
             Some(control) if is_menu_open => self.handle_menu_control(control, window, mouse),
+            Some(Control::Key(scancode)) if self.tune_pull(scancode) => PlayOutcome::Play,
             Some(control) if self.player_settings.keys.matches(Action::OpenMenu, control) => {
                 self.menu_and_map.open_menu(menu::Menu::New()).apply(
                     &mut self.is_captured,
@@ -2501,6 +2506,32 @@ impl Session {
                 PlayOutcome::Play
             }
             None => PlayOutcome::Play,
+        }
+    }
+
+    /// `tune_pull` passes a pressed key to the pull's tuning keys (W-202, on only with
+    /// `WARPED_TUNE_PULL=1` on a voxel map): a tuning key changes this window's pull or sprint
+    /// numbers, saves them under `.artifacts/tune_pull/` and shows them; it says whether the key
+    /// was one.
+    ///
+    /// Example: `if self.tune_pull(Scancode::RightBracket) { return PlayOutcome::Play; }`
+    fn tune_pull(&mut self, scancode: Scancode) -> bool {
+        let (Some(tuner), Some(voxel)) = (&mut self.pull_tuner, &mut self.voxel) else {
+            return false;
+        };
+        let settings: &mut ServerSettings = &mut voxel.world.settings;
+        let message: Option<String> = tuner.handle_key(
+            scancode,
+            &mut settings.gravity,
+            &mut settings.movement,
+            || make_run_folder("tune_pull", None),
+        );
+        match message {
+            Some(message) => {
+                self.show_message(message);
+                true
+            }
+            None => false,
         }
     }
 

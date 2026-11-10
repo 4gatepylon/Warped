@@ -92,6 +92,8 @@ mod tests {
         MovementSettings {
             walk_speed_per_map_speed: 1.0,
             sprint_speed_per_map_speed: 1.0,
+            sprint_up_m_per_s_per_s: 15.0,
+            sprint_down_m_per_s_per_s: 15.0,
             jump_height_m: 1.0,
             jump_time_per_map_jump_time: 1.0,
             crouch_speed_frac: 0.5,
