@@ -19,6 +19,10 @@ Files in this skill:
 - [`wishlist_history.py`](wishlist_history.py): the command that writes the history section.
 - [`commit-fields.md`](commit-fields.md): the subject and the trailers (kind, component, domain, area,
   wishlist, read, verify) of every commit and PR, and their allowed values. Read it before any commit.
+- [`commit-agent-traces.md`](commit-agent-traces.md): the `AGENT TRACES` section that names each agent, its
+  trace id, transcript and workspace. Read it before any commit.
+- [`chat.jq`](chat.jq): the `jq` filter that prints a transcript's chat and tool calls, for the section's `read it`
+  command.
 
 > NOTE: If you modify this skill (at the user's request), keep every file in it under 400 lines. Split a longer
 > file by topic, for progressive disclosure, and have each file name the files to read for what it leaves out,
@@ -73,6 +77,10 @@ A PR's commits follow the "Commits" section below. That is critical for a PR wit
 ## Pictures
 
 <None: <why nothing visible changes>.> or <screenshots, videos, GIFs or plots of the change, each under a caption>
+
+## Agents
+
+<one `AGENT TRACES` bullet per agent whose work the PR contains, as in `commit-agent-traces.md`>
 
 ## Stack
 
@@ -131,6 +139,8 @@ Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
   token type `gh` accepts (not a GitHub App token, `ghu_`). Keep each file under 10 MB. If `gh` is
   older (seen with gh 2.96.0 on the user's Mac, 2026-11-08), ask the user to let you upgrade it
   (`brew upgrade gh`) or to drag the files into the PR in the browser.
+- **Agents**: the union of the `AGENT TRACES` bullets of the PR's commits, one per agent, with what that
+  agent contributed to the PR as a whole.
 - **Stack**: link the PR below (and above, once it exists) by number. Layer 1's base is
   `staging/user-<username>`.
 - **Size**: the count of reviewable, hand-written code lines under the PR size rule in the root
@@ -152,6 +162,10 @@ Projects (classic) error (seen once with gh 2.55 on a Linux machine, 2026-10-30)
   message gives `Kind`, `Component`, `Domain`, `Area`, `Wishlist`, `Read` and `Verify`
   ([`commit-fields.md`](commit-fields.md)). `git log` then shows what a commit changes, where, what
   to read for it and how it was verified.
+- **Agent traces.** Below the body, an `AGENT TRACES` section lists each agent that produced the commit, with
+  its trace id, where it ran, what it contributed, its workspace and branch, its transcript and the command
+  that reads it ([`commit-agent-traces.md`](commit-agent-traces.md)). An agent that can't fill it in does not
+  commit.
 - **Wishlist commits (critical).** A commit that changes a wishlist checklist (`USER_WISHLIST_CHECKLIST.md`)
   follows [`wishlist-transitions.md`](wishlist-transitions.md) exactly. Read that file before you commit. In
   short, such a commit:
