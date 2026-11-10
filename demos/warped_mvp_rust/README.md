@@ -77,8 +77,13 @@ Dust, City Sphere and Dark Forest) go into the app only if they were downloaded 
   "(levels differ)" where their defaults do) and each level's own (Lunar Surface's gravity, City
   Sphere's glass bounces, range and reflectivity, Dust's wind, Snow Planet's blizzard size; Dark
   Forest's section is empty). Left/Right steps a number, typing sets one, R goes back to the
-  default; each change goes to the match server at once, and each round's level plays by the
-  settings as they are when it starts. `*` marks a value off its default.
+  default; `*` marks a value off its default. Changes stay on the page until SAVE SETTINGS (W-209,
+  game settings checked when saved, with the reason): it checks every level's settings against
+  the rules (`warped_shared`'s `setting_rules.rs`: each setting's kind, such as a share from 0 to
+  1 or an amount above 0, and groups such as the beam speckle's three shares that must add up to
+  1) and either says which level, which settings and why, or sends them all to the match server,
+  which checks them again. DROP UNSAVED CHANGES undoes them; Escape asks once before leaving
+  them. Each round's level plays by the settings saved when it starts.
 - **Level**: a round's level, played in this window by the level's own library
   (`src/level_library.rs`: Lunar Surface, Dust, Snow Planet, City Sphere, Dark Forest, found by
   the manifest's `folder`), joined to the round's level server on your team with your settings

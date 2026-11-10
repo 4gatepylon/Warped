@@ -934,7 +934,7 @@ mod tests {
     use super::*;
     use std::net::UdpSocket;
     use std::time::Duration;
-    use warped_shared::game_settings::{GameSettings, SettingsScope, parse_settings_message};
+    use warped_shared::game_settings::{GameSettings, Overrides, parse_settings_message};
     use warped_shared::match_protocol::{Phase, parse_play};
     use warped_shared::match_state::MatchState;
 
@@ -1149,19 +1149,25 @@ mod tests {
             app.update();
             let page: &GameSettingsPage = app.game_settings_page.as_ref().unwrap();
             if !page.is_waiting() && !has_changed {
-                app.handle(MenuInput::Down);
+                for input in [MenuInput::Down, MenuInput::Down, MenuInput::Down] {
+                    app.handle(input);
+                }
                 app.handle(MenuInput::Right);
+                for input in [MenuInput::Up, MenuInput::Up, MenuInput::Up] {
+                    app.handle(input);
+                }
+                app.handle(MenuInput::Activate);
                 has_changed = true;
             }
         }
-        assert_eq!(
-            changes,
-            [SettingsMessage::Set {
-                scope: SettingsScope::Shared,
-                key: "respawn.delay_s".to_string(),
-                value: 3.1,
-            }]
-        );
+        let mut saved: Overrides = Overrides {
+            shared: std::collections::BTreeMap::new(),
+            levels: vec![std::collections::BTreeMap::new(); 2],
+        };
+        saved
+            .shared
+            .insert("respawn.delay_s".to_string(), serde_json::json!(3.1));
+        assert_eq!(changes, [SettingsMessage::Save(saved)]);
         assert!(app.has_game_settings());
         assert!(app.describe_game().starts_with("a game joined; "));
         app.handle(MenuInput::Back);

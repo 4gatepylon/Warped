@@ -4,13 +4,18 @@
 //! per level; it answers the clients that ask, and writes each round's level its merged settings.
 //!
 //! Interface: `GameSettings` (`New`, `Load`, `get_shared_keys`, `get_level_keys`, `get_default`,
-//! `get_value`, `apply`, `get_level_settings`, `to_answer`, `FromAnswer`), `SettingsScope`,
-//! `SettingsMessage`, `make_settings_message`, `parse_settings_message`, `read_settings_file`,
-//! `parse_settings_text`.
+//! `get_value`, `apply`, `get_overrides`, `find_problem`, `to_setting_value`,
+//! `get_level_settings`, `to_answer`, `FromAnswer`), `SettingsScope`, `SettingsMessage`,
+//! `Overrides`, `Refusal`, `make_settings_message`, `parse_settings_message`,
+//! `read_settings_file`, `parse_settings_text`.
 //!
 //! Example: `settings.apply(&parse_settings_message(b"set shared respawn.delay_s 5", 5)?)?;`
 //!
 //! Must know:
+//! - The game master saves every override at once (`SettingsMessage::Save`): the match server
+//!   takes the save only if every level's settings then keep the rules of `setting_rules.rs`, and
+//!   otherwise keeps what it had and answers with the reason (`GameSettings::refusal`). `Set` and
+//!   `Reset`, one key at a time and unchecked beyond the number itself, stay for older apps.
 //! - Gotchas: a key is a dotted path to a number or a switch (`true` or `false`, set with 1 or
 //!   0) in a settings file (`movement.jump_height_m`, `shooting.is_friendly_fire_on`); a key at
 //!   least two levels' files have is shared, any other is its level's own.
@@ -27,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::match_protocol::LevelEntry;
+use crate::setting_rules::check_settings;
 use crate::settings_editor::{get_at, set_at};
 
 /// `Result` is this module's result type.
@@ -34,6 +40,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const SETTINGS_REQUEST: &str = "settings?";
 const SETTINGS_ANSWER_PREFIX: &str = "settings ";
+const SETTINGS_SAVE_PREFIX: &str = "save ";
 const SHARED_SCOPE: &str = "shared";
 const SERVER_SETTINGS_FLAG: &str = "--server-settings";
 const MIN_LEVELS_PER_SHARED_KEY: usize = 2;
@@ -60,6 +67,25 @@ pub enum SettingsMessage {
         scope: SettingsScope,
         key: String,
     },
+    Save(Overrides),
+}
+
+/// `Overrides` is every override of the game settings at once, as the game master saves them:
+/// the shared ones and each level's own, each a dotted key to its value.
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
+pub struct Overrides {
+    pub shared: BTreeMap<String, Value>,
+    pub levels: Vec<BTreeMap<String, Value>>,
+}
+
+/// `Refusal` is why the match server didn't take the last save: the overrides it refused (so a
+/// client knows the refusal is of its own save), the level whose settings would break a rule (its
+/// index in the levels file; `None` when the save itself was wrong), and the reason.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Refusal {
+    pub overrides: Overrides,
+    pub level: Option<usize>,
+    pub reason: String,
 }
 
 /// `format_scope` gives a scope as messages write it: `shared` or the level's index.
@@ -98,17 +124,33 @@ pub fn make_settings_message(message: &SettingsMessage) -> Vec<u8> {
             format!("set {} {key} {value}", format_scope(*scope))
         }
         SettingsMessage::Reset { scope, key } => format!("reset {} {key}", format_scope(*scope)),
+        SettingsMessage::Save(overrides) => format!(
+            "{SETTINGS_SAVE_PREFIX}{}",
+            serde_json::to_string(overrides).expect("overrides serialize to JSON")
+        ),
     }
     .into_bytes()
 }
 
-/// `parse_settings_message` reads a client's `settings?`, `set <scope> <key> <value>` or
-/// `reset <scope> <key>` datagram for a game of `level_count` levels; any other datagram is an
-/// error.
+/// `parse_settings_message` reads a client's `settings?`, `set <scope> <key> <value>`,
+/// `reset <scope> <key>` or `save <overrides as JSON>` datagram for a game of `level_count`
+/// levels; any other datagram is an error.
 ///
 /// Example: `let message = parse_settings_message(b"reset 4 glass.range_m", 5)?;`
 pub fn parse_settings_message(datagram: &[u8], level_count: usize) -> Result<SettingsMessage> {
     let text: &str = std::str::from_utf8(datagram).map_err(|_| "not a settings message")?;
+    if let Some(json) = text.strip_prefix(SETTINGS_SAVE_PREFIX) {
+        let overrides: Overrides =
+            serde_json::from_str(json).map_err(|error| format!("save: {error}"))?;
+        if overrides.levels.len() != level_count {
+            return Err(format!(
+                "save: overrides for {} levels, but the game has {level_count}",
+                overrides.levels.len()
+            )
+            .into());
+        }
+        return Ok(SettingsMessage::Save(overrides));
+    }
     let words: Vec<&str> = text.split(' ').collect();
     match words.as_slice() {
         [SETTINGS_REQUEST] => Ok(SettingsMessage::Request),
@@ -180,13 +222,16 @@ fn get_number_keys(value: &Value) -> Vec<String> {
 }
 
 /// `GameSettings` is the game's settings as the match server keeps them: each level's default
-/// server settings (`None` for a level without a settings file), the shared overrides, and each
-/// level's own overrides, each a dotted key to a number.
+/// server settings (`None` for a level without a settings file), the shared overrides, each
+/// level's own overrides, each a dotted key to a number, and why the last save was refused, if it
+/// was.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct GameSettings {
     pub defaults: Vec<Option<Value>>,
     pub shared: BTreeMap<String, Value>,
     pub levels: Vec<BTreeMap<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<Refusal>,
 }
 
 impl GameSettings {
@@ -200,6 +245,107 @@ impl GameSettings {
             defaults,
             shared: BTreeMap::new(),
             levels: vec![BTreeMap::new(); level_count],
+            refusal: None,
+        }
+    }
+
+    /// `get_overrides` gives every override as a save carries them.
+    ///
+    /// Example: `let overrides: Overrides = settings.get_overrides();`
+    pub fn get_overrides(&self) -> Overrides {
+        Overrides {
+            shared: self.shared.clone(),
+            levels: self.levels.clone(),
+        }
+    }
+
+    /// `find_problem` gives the first level whose settings, with the overrides laid over its
+    /// defaults, break a rule (`setting_rules::check_settings`), and the reason; `None` when
+    /// every level's settings are fine.
+    ///
+    /// Example: `if let Some((level, reason)) = settings.find_problem() { ... }`
+    pub fn find_problem(&self) -> Option<(usize, String)> {
+        (0..self.defaults.len()).find_map(|level| {
+            let defaults: &Value = self.defaults[level].as_ref()?;
+            let merged: Value = self.get_level_settings(level)?;
+            check_settings(&merged, defaults)
+                .err()
+                .map(|reason| (level, reason))
+        })
+    }
+
+    /// `to_setting_value` gives `value`, a number a client sent for `key`, as the settings hold
+    /// it beside `default`: a switch for a switch (0 or 1), a whole number where the default is
+    /// whole, else the number; it fails on a number that isn't finite and at least 0.
+    ///
+    /// Example: `let held: Value = GameSettings::to_setting_value("glass.max_bounce_count", &json!(2), 3.0)?;`
+    pub fn to_setting_value(key: &str, default: &Value, value: f64) -> Result<Value> {
+        if !value.is_finite() || value < 0.0 {
+            return Err(format!("{key} must be a number of at least 0, not {value}").into());
+        }
+        match (default.is_boolean(), default.is_u64()) {
+            (true, _) if value != 0.0 && value != 1.0 => {
+                Err(format!("{key} is a switch: 0 (off) or 1 (on), not {value}").into())
+            }
+            (true, _) => Ok(Value::Bool(value == 1.0)),
+            (false, true) if value.fract() != 0.0 => {
+                Err(format!("{key} must be a whole number, not {value}").into())
+            }
+            (false, true) => Ok(Value::from(value as u64)),
+            (false, false) => Ok(Value::from(value)),
+        }
+    }
+
+    /// `save` replaces every override with `overrides` if each names a key its scope has and
+    /// every level's settings then keep the rules; otherwise it changes nothing but `refusal`,
+    /// which says why, and fails with the reason.
+    ///
+    /// Example: `settings.save(&overrides)?;`
+    fn save(&mut self, overrides: &Overrides) -> Result<()> {
+        let mut candidate: GameSettings = self.clone();
+        candidate.shared = overrides.shared.clone();
+        candidate.levels = overrides.levels.clone();
+        candidate.refusal = None;
+        let shared_keys: Vec<String> = self.get_shared_keys();
+        let unknown: Option<String> = overrides
+            .shared
+            .keys()
+            .find(|key| !shared_keys.contains(key))
+            .cloned()
+            .or_else(|| {
+                overrides
+                    .levels
+                    .iter()
+                    .enumerate()
+                    .find_map(|(level, own)| {
+                        let keys: Vec<String> = self.defaults[level]
+                            .as_ref()
+                            .map_or(Vec::new(), get_number_keys);
+                        own.keys().find(|key| !keys.contains(key)).cloned()
+                    })
+            });
+        let refusal: Option<Refusal> = match unknown {
+            Some(key) => Some(Refusal {
+                overrides: overrides.clone(),
+                level: None,
+                reason: format!("the game settings have no {key} there"),
+            }),
+            None => candidate.find_problem().map(|(level, reason)| Refusal {
+                overrides: overrides.clone(),
+                level: Some(level),
+                reason,
+            }),
+        };
+        match refusal {
+            Some(refusal) => {
+                let reason: String = refusal.reason.clone();
+                self.refusal = Some(refusal);
+                Err(reason.into())
+            }
+            None => {
+                *self = candidate;
+                Ok(())
+            }
         }
     }
 
@@ -304,14 +450,16 @@ impl GameSettings {
         overrides.get(key).or_else(|| self.get_default(scope, key))
     }
 
-    /// `apply` carries out a `Set` or `Reset` (a `Request` changes nothing). A set must name a
-    /// key the scope has (a shared key, or any key of the level's), with a finite number of at
-    /// least 0, whole where the default is.
+    /// `apply` carries out a `Set`, a `Reset` or a `Save` (a `Request` changes nothing). A set
+    /// must name a key the scope has (a shared key, or any key of the level's), with a finite
+    /// number of at least 0, whole where the default is; a save is taken whole or not at all
+    /// (`save`).
     ///
     /// Example: `settings.apply(&SettingsMessage::Reset { scope: SettingsScope::Shared, key })?;`
     pub fn apply(&mut self, message: &SettingsMessage) -> Result<()> {
         match message {
             SettingsMessage::Request => Ok(()),
+            SettingsMessage::Save(overrides) => self.save(overrides),
             SettingsMessage::Reset { scope, key } => {
                 match scope {
                     SettingsScope::Shared => self.shared.remove(key),
@@ -330,22 +478,7 @@ impl GameSettings {
                     .get_default(*scope, key)
                     .filter(|_| is_in_scope)
                     .ok_or_else(|| format!("the game settings have no {key} there"))?;
-                if !value.is_finite() || *value < 0.0 {
-                    return Err(format!("{key} must be a number of at least 0, not {value}").into());
-                }
-                let number: Value = match (default.is_boolean(), default.is_u64()) {
-                    (true, _) if *value != 0.0 && *value != 1.0 => {
-                        return Err(
-                            format!("{key} is a switch: 0 (off) or 1 (on), not {value}").into()
-                        );
-                    }
-                    (true, _) => Value::Bool(*value == 1.0),
-                    (false, true) if value.fract() != 0.0 => {
-                        return Err(format!("{key} must be a whole number, not {value}").into());
-                    }
-                    (false, true) => Value::from(*value as u64),
-                    (false, false) => Value::from(*value),
-                };
+                let number: Value = GameSettings::to_setting_value(key, default, *value)?;
                 match scope {
                     SettingsScope::Shared => self.shared.insert(key.clone(), number),
                     SettingsScope::Level(level) => self.levels[*level].insert(key.clone(), number),
@@ -402,7 +535,8 @@ mod tests {
     //! | Shared default | levels agree, most levels agree, a tie (the first level's) | `shared_defaults_are_the_most_common_value` |
     //! | Set | shared, a level's own key, a shared key for one level, a switch off; unknown key, a level's own key as shared, negative, infinite, a fraction where the default is whole, a switch at 0.5 | `sets_are_checked` |
     //! | Merge | no overrides (the defaults), shared over a level that has the key and not one that lacks it, a level's own over the shared, a reset, no file | `levels_play_by_their_merged_settings` |
-    //! | Answer | written then read, a view isn't one | `answers_round_trip` |
+    //! | Answer | written then read, a view isn't one; with a refusal, and one from an older server without the field | `answers_round_trip` |
+    //! | Save | taken whole (overrides replaced, an earlier refusal cleared); a value breaking its kind; a group broken across the shared and a level's overrides; a key the scope lacks; overrides for another level count | `a_save_is_taken_whole_or_refused_with_the_reason` |
     //! | Files | YAML read, not a map, the same flag twice | `settings_files_load` |
 
     use super::*;
@@ -572,6 +706,77 @@ mod tests {
             settings
         );
         assert!(GameSettings::FromAnswer(b"{\"phase\": \"Over\"}").is_none());
+        settings.refusal = Some(Refusal {
+            overrides: settings.get_overrides(),
+            level: Some(1),
+            reason: "respawn.delay_s must be above 0, not 0".to_string(),
+        });
+        assert_eq!(
+            GameSettings::FromAnswer(&settings.to_answer())
+                .unwrap()
+                .unwrap(),
+            settings
+        );
+        let older: &[u8] = b"settings {\"defaults\":[null],\"shared\":{},\"levels\":[{}]}";
+        assert_eq!(
+            GameSettings::FromAnswer(older).unwrap().unwrap(),
+            GameSettings::New(vec![None])
+        );
+    }
+
+    #[test]
+    fn a_save_is_taken_whole_or_refused_with_the_reason() {
+        let speckle: Value = json!({"beam_speckle": {"black_frac": 0.1, "white_frac": 0.1, "dropout_frac": 0.8}, "respawn": {"delay_s": 3.0}});
+        let mut settings: GameSettings =
+            GameSettings::New(vec![Some(speckle.clone()), Some(speckle), None]);
+        let make_save = |shared: &[(&str, Value)], first: &[(&str, Value)]| -> SettingsMessage {
+            let to_map = |pairs: &[(&str, Value)]| -> BTreeMap<String, Value> {
+                pairs
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.clone()))
+                    .collect()
+            };
+            SettingsMessage::Save(Overrides {
+                shared: to_map(shared),
+                levels: vec![to_map(first), BTreeMap::new(), BTreeMap::new()],
+            })
+        };
+        let good: SettingsMessage = make_save(
+            &[("beam_speckle.black_frac", json!(0.3))],
+            &[("beam_speckle.dropout_frac", json!(0.6))],
+        );
+        let datagram: Vec<u8> = make_settings_message(&good);
+        assert_eq!(parse_settings_message(&datagram, 3).unwrap(), good);
+        assert!(parse_settings_message(&datagram, 5).is_err());
+        let error: String = settings.apply(&good).unwrap_err().to_string();
+        assert!(error.contains("must add up to 1"), "{error}");
+        assert!(settings.shared.is_empty());
+        assert_eq!(settings.refusal.as_ref().unwrap().level, Some(1));
+        let kind: SettingsMessage = make_save(&[("respawn.delay_s", json!(0.0))], &[]);
+        assert_eq!(
+            settings.apply(&kind).unwrap_err().to_string(),
+            "respawn.delay_s must be above 0, not 0"
+        );
+        assert_eq!(settings.refusal.as_ref().unwrap().level, Some(0));
+        let unknown: SettingsMessage = make_save(&[("glass.bounces", json!(1))], &[]);
+        assert!(settings.apply(&unknown).is_err());
+        assert_eq!(settings.refusal.as_ref().unwrap().level, None);
+        let whole: SettingsMessage = make_save(
+            &[
+                ("beam_speckle.black_frac", json!(0.3)),
+                ("beam_speckle.dropout_frac", json!(0.6)),
+            ],
+            &[("respawn.delay_s", json!(7.5))],
+        );
+        settings.apply(&whole).unwrap();
+        assert_eq!(settings.refusal, None);
+        assert_eq!(settings.shared.len(), 2);
+        assert_eq!(settings.find_problem(), None);
+        assert_eq!(
+            settings.get_level_settings(0).unwrap()["respawn"]["delay_s"],
+            7.5
+        );
+        assert_eq!(settings.get_overrides().levels[0].len(), 1);
     }
 
     #[test]

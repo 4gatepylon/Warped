@@ -350,7 +350,8 @@ impl SettingsEditor {
     }
 
     /// `get_lines` gives at most `visible_row_count` rows around the selected one, each with
-    /// whether it is selected, then the message if there is one (highlighted).
+    /// whether it is selected, then the message if there is one (highlighted), a line for each
+    /// line of it.
     ///
     /// Example: `for (line, is_highlighted) in editor.get_lines(&values, &defaults, 20) { ... }`
     pub fn get_lines(
@@ -374,7 +375,7 @@ impl SettingsEditor {
             .collect();
         if let Some(message) = &self.message {
             lines.push((String::new(), false));
-            lines.push((message.clone(), true));
+            lines.extend(message.lines().map(|line| (line.to_string(), true)));
         }
         lines
     }
@@ -392,7 +393,7 @@ mod tests {
     //! | Rebinding | a control, cancelled with Back, refused by `check` | `actions_are_rebound` |
     //! | Reset | a number, an action's keys | `rows_reset_to_their_defaults` |
     //! | Buttons and back | a button pressed, Back | `buttons_and_back_reach_the_caller` |
-    //! | Lines | a changed row marked, the window around the selection, the message | `lines_mark_changes_and_follow_the_selection` |
+    //! | Lines | a changed row marked, the window around the selection, the message, one line and two | `lines_mark_changes_and_follow_the_selection` |
     //! | Paths | nested key read and written, a missing parent | `paths_read_and_write_nested_keys` |
 
     use super::*;
@@ -572,6 +573,15 @@ mod tests {
         editor.show_message("Saved.".to_string());
         let with_message: Vec<(String, bool)> = editor.get_lines(&values, &defaults, 2);
         assert_eq!(with_message.last(), Some(&("Saved.".to_string(), true)));
+        editor.show_message("Not saved.\nIt says why.".to_string());
+        let two_lines: Vec<(String, bool)> = editor.get_lines(&values, &defaults, 2);
+        assert_eq!(
+            two_lines[two_lines.len() - 2..],
+            [
+                ("Not saved.".to_string(), true),
+                ("It says why.".to_string(), true)
+            ]
+        );
     }
 
     #[test]
