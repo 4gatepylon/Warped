@@ -34,6 +34,7 @@ use warped_shared::hud::{
     HudBars, HudPulses, PylonSquare, get_death_lines, get_lobby_lines, make_bar_rects,
     make_hit_effect, make_pylon_square_rects, make_respawn_bar_rects,
 };
+use warped_shared::laser_drop::get_drop_curvature_per_m;
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
 use warped_shared::shot_gate::ShotMoves;
 use warped_shared::shot_noise::ShotNoise;
@@ -199,6 +200,18 @@ pub fn run(arguments: &Arguments) -> Result<()> {
     let metal: &mut render_metal::MetalRenderer =
         renderer.as_metal().ok_or("City Sphere needs Metal")?;
     play(arguments, metal)
+}
+
+/// `get_shot_drop_per_m` gives how much a shot turns toward the street per meter under
+/// `settings`' bullet drop (`shooting.drop_m_per_s_per_s` at the sniper's beam speed; W-157
+/// (bullet drop, by game setting)), 0 for straight shots.
+///
+/// Example: `let drop_per_m: f64 = get_shot_drop_per_m(&self.settings);`
+fn get_shot_drop_per_m(settings: &ServerSettings) -> f64 {
+    get_drop_curvature_per_m(
+        settings.shooting.drop_m_per_s_per_s,
+        settings.sniper.beam_speed_m_per_s,
+    )
 }
 
 /// `step_respawn` counts an eliminated player's `respawn_in_s` down by `dt_s` and asks the server
@@ -1613,13 +1626,14 @@ impl CitySession {
             return eye;
         }
         let from: DVec3 = camera.w_axis.truncate();
-        let crosshair: Shot = self.world.trace_shot(
+        let crosshair: Shot = self.world.trace_falling_shot(
             from,
             -camera.z_axis.truncate(),
             self.settings.glass.range_m,
             0,
             &[],
             None,
+            get_shot_drop_per_m(&self.settings),
         );
         let at: DVec3 = eye.w_axis.truncate();
         let target: DVec3 = *crosshair.points.last().expect("a shot has an end");
@@ -1801,13 +1815,14 @@ impl CitySession {
         let (mut from, mut along, mut range_m) =
             (origin, direction.normalize(), self.settings.glass.range_m);
         loop {
-            let mut shot: Shot = self.world.trace_shot(
+            let mut shot: Shot = self.world.trace_falling_shot(
                 from,
                 along,
                 range_m,
                 self.settings.glass.max_bounce_count,
                 targets,
                 shooter_id,
+                get_shot_drop_per_m(&self.settings),
             );
             let crossing = (legs.len() < MAX_WORMHOLE_LEGS)
                 .then(|| {
@@ -3516,13 +3531,14 @@ fn find_bot_aim(
     let origin: DVec3 = player.get_eye_frame().w_axis.truncate();
     targets.iter().find_map(|target| {
         let aim: DVec3 = (target.feet + target.up - origin).normalize();
-        let shot: Shot = world.trace_shot(
+        let shot: Shot = world.trace_falling_shot(
             origin,
             aim,
             settings.glass.range_m,
             settings.glass.max_bounce_count,
             targets,
             shooter_id,
+            get_shot_drop_per_m(settings),
         );
         matches!(shot.hit, ShotHit::Player { .. }).then_some(aim)
     })
@@ -3719,13 +3735,14 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
             }
             if weapons.is_firing(can_shoot) {
                 let shot_eye: DMat4 = weapons.shot_offset.aim(player.get_eye_frame());
-                let shot: Shot = world.trace_shot(
+                let shot: Shot = world.trace_falling_shot(
                     shot_eye.w_axis.truncate(),
                     -shot_eye.z_axis.truncate(),
                     settings.glass.range_m,
                     settings.glass.max_bounce_count,
                     &targets,
                     client.id,
+                    get_shot_drop_per_m(&settings),
                 );
                 if let ShotHit::Player { id, is_head } = shot.hit
                     && let Some(hits_to_kill) = take_hit_weight(

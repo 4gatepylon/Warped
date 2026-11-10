@@ -127,8 +127,10 @@ pub struct BeamSpeckleSettings {
 /// shoot while jumping, while walking upright and while sprinting (W-147 (shooting while moving, by
 /// game setting); a move that may not shoot holds a shot until `movement.shoot_after_moving_s`
 /// after it, `ShotGate`), and whether a shot hurts teammates (W-156 (friendly fire, by game
-/// setting); when it does, it counts a death but no kill). A file without this section reads as
-/// `ShootingSettings::default()`, the rules from before the switches.
+/// setting); when it does, it counts a death but no kill); and how fast shots fall, as a ball
+/// thrown at the gun's beam speed would (W-157 (bullet drop, by game setting); 0 for straight
+/// shots, `laser_drop.rs`). A file without this section, or without `drop_m_per_s_per_s`, reads
+/// as `ShootingSettings::default()`, the rules from before the switches.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ShootingSettings {
@@ -136,11 +138,13 @@ pub struct ShootingSettings {
     pub can_shoot_while_walking: bool,
     pub can_shoot_while_sprinting: bool,
     pub is_friendly_fire_on: bool,
+    #[serde(default)]
+    pub drop_m_per_s_per_s: f64,
 }
 
 impl Default for ShootingSettings {
     /// `default` is the rules from before the switches: no shot while jumping, walking upright or
-    /// sprinting, and friendly fire on.
+    /// sprinting, friendly fire on, and shots that don't fall.
     ///
     /// Example: `let shooting = ShootingSettings::default();`
     fn default() -> ShootingSettings {
@@ -149,6 +153,7 @@ impl Default for ShootingSettings {
             can_shoot_while_walking: false,
             can_shoot_while_sprinting: false,
             is_friendly_fire_on: true,
+            drop_m_per_s_per_s: 0.0,
         }
     }
 }

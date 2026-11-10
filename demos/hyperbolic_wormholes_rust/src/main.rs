@@ -1553,13 +1553,19 @@ fn make_bench_views(world: &World) -> Vec<View> {
 }
 
 /// `bench_views` renders each benchmark view `--frame-count` times without a window, reports the
-/// median and fastest frame times, and saves each view as a PNG in the run folder.
+/// median and fastest frame times, and saves each view as a PNG in the run folder. With
+/// `--server-settings`, a voxel map's world plays by those settings (a shot's drop, say).
 ///
 /// Example: `bench_views(&arguments, renderer)?;`
 fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = load_map(arguments.map, &load_settings(arguments)?)?;
+    let settings: ServerSettings = load_settings(arguments)?;
+    let map: map::Map = load_map(arguments.map, &settings)?;
     if !map.structures.is_empty() {
-        return bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?);
+        let mut world: VoxelWorld = VoxelWorld::FromMap(&map)?;
+        if arguments.server_settings.is_some() {
+            world.set_settings(settings);
+        }
+        return bench_voxel_views(arguments, renderer, &world);
     }
     let world: World = World::FromMap(&map)?;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
