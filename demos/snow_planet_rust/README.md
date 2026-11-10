@@ -56,10 +56,14 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
   types, the maps' models and the robot body, the smooth shapes, the key bindings, finding assets) are in
   [`../warped_shared_rust/`](../warped_shared_rust/README.md), a library this crate depends on; the rest of the
   copied Lunar Surface code is still in `src/`.
-- Space: the map is Euclidean with torus periods 112 × 72 m; the loader (`Map::curve_flat`) turns it into
-  hyperbolic space of curvature radius 160 m, nearly flat, so the copied H³ ray marcher, physics, lasers and
-  black-hole and wormhole lensing work unchanged. The level ends at its edge; walking across the torus seam is not
-  done yet (DECISIONS S1).
+- Space: the map is plain Euclidean (no torus since W-145, no walls at map edges); the loader (`Map::curve_flat`)
+  turns it into hyperbolic space of curvature radius 160 m, nearly flat, so the copied H³ ray marcher, physics,
+  lasers and black-hole and wormhole lensing work unchanged.
+- Edge: no wall. Past the playable ellipse (120 × 80 m) the map's `regions.boundary.soft_edge_m` (12 m) is a band where
+  each step outward is cut by the share of it already walked (`warped_shared::map_edge`, the rule Lunar Surface's
+  crater wall uses), so players slow without end and never reach its far side, and the view stretches as on Lunar
+  Surface; walking back in is at full speed. Walking bots and thrown wormholes stay inside the ellipse (DECISIONS
+  S18).
 - Blizzards: `VoxelWorld::find_blizzard` (a point's blizzard), `get_blizzard_frac` (how much of a shot's reach a
   chord uses) and `stop_in_blizzards` (cuts the laser) in `src/voxel_world.rs`; `VoxelPlayer::step` slows the
   player; the server freezes players standing in one (`net::Server::freeze_players`, `net::Freezing`); the shader's
@@ -136,7 +140,7 @@ GPU; they should be measured on a real Mac.
 
 ## Not done yet
 
-- The torus: walking, seeing and shooting across the map's edges (DECISIONS S1).
+- The torus: walking, seeing and shooting across the map's edges (DECISIONS S1; W-161, real toroidal flat space).
 - Ice that slides, textures for snow and ice (procedural for now).
 - The blizzard slowdown is the moving window's own (like all movement in this demo); the server doesn't check it.
 - Fog of light bent into a blizzard by a black hole is only along the first straight part of the ray.

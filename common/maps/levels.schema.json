@@ -41,7 +41,8 @@
     "map_feature": {
       "enum": ["space.torus_periods_m", "ground.sphere", "ground.tiling", "ground.terrain", "structures",
         "structures.mesh", "boxes", "ladders", "warps", "shells", "lights", "lights.flicker_frac", "sky.planet",
-        "sky.milky_way", "sky.fog_m", "sky.snow_per_m3", "regions.zones", "regions.boundary", "regions.zone_walls",
+        "sky.milky_way", "sky.fog_m", "sky.snow_per_m3", "regions.zones", "regions.boundary", "regions.boundary.soft_edge_m",
+        "regions.zone_walls",
         "regions.blizzards", "atmosphere.fog", "atmosphere.sand", "atmosphere.wind", "variation", "scatter", "laser",
         "lasers", "appearance.laser_color"]
     },

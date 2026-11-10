@@ -4,9 +4,9 @@ It checks `map.json` against `map.schema.json`, then what the schema can't say: 
 material ids are unique with 0 (and only 0) empty, every material used exists, frames are isometries of the map's
 space, points lie in the space, shapes' rounding fits inside them, wormhole mouths pair up, tapered warps'
 reach spheres don't overlap, directions are unit vectors, the Milky Way's core is perpendicular to its pole, and
-only a map without terrain has a soft edge. A folder that also holds a `level.json` is a level, which it checks as `LEVELS.md` says: the level and `levels.json`
-against their schemas, and the map against the level's engine, pylons, spawns and laser colour. It prints one line
-per map (or `--json`) and exits 1 if any map is invalid.
+only a map without terrain has a soft edge. A folder that also holds a `level.json` is a level, which it checks as
+`LEVELS.md` says: the level and `levels.json` against their schemas, and the map against the level's engine,
+pylons, spawns and laser colour. It prints one line per map (or `--json`) and exits 1 if any map is invalid.
 
 Interface:
     uv run python validate_map.py <map folder>... [--json]

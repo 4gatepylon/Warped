@@ -3,8 +3,9 @@
 Decisions made without the user, with the reason for each. **Weigh in** marks the ones the user should check.
 
 - **D1. A bounded forest, no looping.** The WebGL version wraps around (T² × ℝ). The user asked for "just kind of a
-  normal first-person shooter", so the forest is ordinary flat space with rock walls at its edge. **Weigh in:** a
-  wrap-around forest is possible later, but needs every view and shot to cross the seam.
+  normal first-person shooter", so the forest is ordinary flat space, first with rock walls at its edge, and since
+  D45 with a slowing edge and forest past it. **Weigh in:** a wrap-around forest is possible later (W-161, real
+  toroidal flat space), but needs every view and shot to cross the seam.
 - **D2. Five wormholes, no black holes.** The user asked for "a bunch of wormholes" and no black hole. The map has
   five fixed pairs: three ground gates and a lift per team from the ground to its own treehouse deck, so both sides
   get the same shortcuts. The black-hole code stays, with a count of 0.
@@ -270,6 +271,35 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   goes on; `Esc` opens the menu and frees the mouse, and `Esc` again closes it. The menu's last page, QUIT, leaves with
   `Return` or `Y` (`MenuOutcome::LeaveLevel`), replacing the settings page's Quit row and D28's exit prompt
   (`exit_prompt.rs` removed); the state is the shared `warped_shared::menu_and_map`, as in every level.
+
+- **D45. No walls at the edge: a slowing band and the forest going on past it** (W-145, no walls at map edges).
+  - **Choice:** the rock walls are gone. The map's `regions.boundary` is the playable rectangle (`fermi_rectangle`,
+    56 × 30 m half sizes) with `soft_edge_m` 12: the shared rule (`warped_shared::map_edge`, Lunar Surface's crater
+    wall made one rule for every level) cuts each step outward by (1 − d / 12 m), d how far past the rectangle the
+    step starts, so walking straight out at 8 m/s reaches about 9 m in 2 s, 11.6 m in 5 s, and never 12 m.
+    `Forest::cut_at_edge` cuts each collision sub-step's horizontal part; the vertical part is whole.
+  - **The forest past the edge:** `add_outer_forest` grows its own seeded, mirrored bamboo after everything else, so
+    the forest inside the rectangle is unchanged, shape for shape: clumps like the labyrinth's (radius 0.25-0.4 m,
+    16-28 m tall) every 3.2 m (jittered 40%) with one branch per culm (`TreeDetail::Edge`) out to 14 m, then every
+    2.6 m wider clumps (radius 0.6-0.95 m, 4-5 culms) of bare culms under one flattened leaf ellipsoid each
+    (`TreeDetail::Far`) out to 30 m; the floor reaches 10 m beyond. That adds 7,904 structures (5,968 culms, 804
+    branches, 1,132 canopies; about 0.8 M triangles, a quarter more than the forest had) and grows the map from 8.6 to
+    11.9 MB.
+  - **Rationale:** the user asked that walking off the map you are slowed inside the forest and always see trees ahead,
+    never empty space. At eye height, 1.1% of the looks out from the edge and 2.2% of those from 12 m out (the stop
+    players never reach) pass the whole outer forest (`test_looking_off_the_map_shows_forest`, against the culms
+    themselves; their leaves and the fog hide more).
+  - **Heuristics, and what they give up:** the far clumps' canopy is one ellipsoid, coarse from below; the band's
+    clumps are solid as in the labyrinth, so walking out weaves between them (the edge test checks over half the
+    points just past each side are open); bots find their way only inside the rectangle (the nav grid's bounds), so
+    they never walk into the band; the minimap, map picture, sky visibility and thrown wormholes use the rectangle
+    grown by the band, the same size as before (the old floor's 12 m margin).
+  - **Not measured yet:** frame time with the outer forest (no GPU runs while the user playtests). Commands are in
+    the PR; if a view is over budget, the far band's spacing (`FAR_CLUMP_SPACING_M`) and depth trade cost against
+    see-through.
+  - **Alternatives:** a backdrop wall painted like bamboo (a wall, which the user doesn't want); the labyrinth's full
+    clumps all the way out (about three times the triangles); a narrower band (players would see the forest end
+    sooner).
 
 ## Follow-ups for the next agent
 
