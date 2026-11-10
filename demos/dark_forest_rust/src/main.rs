@@ -1464,6 +1464,11 @@ fn main() {
                 },
             };
             menu_picture.draw(&open_menu.get_lines(&menu_settings, scoreboard), false);
+            if let (menu::Page::Scores, Some((team, lines))) =
+                (open_menu.get_page(), menu::get_own_team_lines(scoreboard))
+            {
+                menu_picture.draw_team_box(team, lines);
+            }
             frame.hud_rects.push(HudRect {
                 x_px: 0.0,
                 y_px: 0.0,
