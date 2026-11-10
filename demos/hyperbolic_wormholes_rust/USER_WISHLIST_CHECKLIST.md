@@ -174,7 +174,8 @@ is in [`AGENTS.md`](AGENTS.md).
   #516: brightness, contrast, saturation and gamma of the finished picture in every level (Lunar Surface, the match,
   Dust, Snow Planet, City Sphere, Dark Forest), in screen space after tone mapping; `visuals` in
   `player_settings.yaml` (each 1 for none, leaving every pixel as before), four rows on the SETTINGS page (Dark
-  Forest: for the run, and `--brightness` and the like).
+  Forest: for the run, and `--brightness` and the like; in the one-window app it starts with the visuals of the
+  player's settings file).
 
 - [?] **W-145 No walls at map edges.** The user, 2026-11-09: "on all maps there are NOT walls on the ends and as you walk off the edges of the map you get slowd with the same efefct as dust and lunar (i.e. it should zenos paradox you basically)", "also you can get rid of the toroidal topology to have just euclidean specificalyl for dark forest and snow planet", "(so snow planet and dark forest have perma slow mechanics", "since dark forest wont have a wall it needs to be such that you are slowed in teh forest so that you see trees in front of you as you walk off the map (ie you should never see empty space", "(you an put a caveat in game design that the toroidal maps are not actually toroidal and that that is a worok in progress btw)".
   #517: no level has a wall at its edge; Lunar Surface's and Dust's crater-wall slowdown is one shared rule
