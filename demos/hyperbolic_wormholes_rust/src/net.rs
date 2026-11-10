@@ -2326,7 +2326,8 @@ mod tests {
 
     #[test]
     fn owners_learn_their_wormholes_are_destroyed() {
-        let hits_to_destroy: u8 = ServerSettings::Builtin().wormholes.sniper_hits_to_destroy;
+        const SNIPER_HITS_TO_DESTROY: u8 = 2;
+        let hits_to_destroy: u8 = SNIPER_HITS_TO_DESTROY;
         let mut server: Server = make_server();
         let mut owner: Client = connect_client(&mut server, RED);
         join(&mut server, address(50_001), BLUE);
@@ -2353,7 +2354,17 @@ mod tests {
 
     #[test]
     fn enemy_shots_destroy_wormholes() {
-        let hits_to_destroy: u8 = ServerSettings::Builtin().wormholes.rifle_hits_to_destroy;
+        const RIFLE_HITS_TO_DESTROY: u8 = 5;
+        let builtin: ServerSettings = ServerSettings::Builtin();
+        assert_eq!(
+            (
+                builtin.wormholes.sniper_hits_to_destroy,
+                builtin.wormholes.rifle_hits_to_destroy
+            ),
+            (0, 0),
+            "shots never destroy thrown wormholes by default (W-166)"
+        );
+        let hits_to_destroy: u8 = RIFLE_HITS_TO_DESTROY;
         let mut server: Server = make_server();
         for (team, port) in [(BLUE, 50_001), (RED, 50_002), (RED, 50_003)] {
             join(&mut server, address(port), team);

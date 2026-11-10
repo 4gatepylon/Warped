@@ -121,7 +121,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const BYTES_PER_PIXEL: usize = 4;
 const HIT_PICTURE_QUEUE_COUNT: usize = 2;
-const LONE_MOUTH_HITS_TO_DESTROY: u8 = 1;
+const LONE_MOUTH_HITS_TO_DESTROY: u8 = 0;
 const CPU_RENDER_SCALE: f64 = 0.35;
 const METAL_RENDER_SCALE: f64 = 1.0;
 const MIN_AUTO_RENDER_SCALE: f64 = 0.5;
@@ -3562,7 +3562,6 @@ impl Session {
                         multiplayer.disabling = None;
                         self.weapons.is_laser_on = false;
                         self.weapons.shot_time_s = 0.0;
-                        self.thrown.clear();
                     }
                     if !is_self
                         && let Some(&(_, team)) =
