@@ -4,7 +4,7 @@
 //! inputs and draws its page; once a frame, `update` polls the network and follows the match into
 //! and out of its rounds' levels.
 //!
-//! Interface: `App` (`New`, `handle`, `update`, `get_page`, `should_quit`, `set_map_held`,
+//! Interface: `App` (`New`, `handle`, `click`, `update`, `get_page`, `should_quit`, `set_map_held`,
 //! `is_rebinding`), `Ports`, `get_address_shapes`, `get_credits_shapes`, `parse_address`.
 //!
 //! Example: `app.handle(MenuInput::Down); app.update(); let (shapes, size, pictures) = app.get_page();`
@@ -18,11 +18,12 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use warped_shared::match_menu::{PageClick, get_click_target};
 use warped_shared::match_protocol::{
     LevelEntry, MATCH_PORT, MatchClient, MatchListener, MatchView,
 };
 use warped_shared::match_state::Team;
-use warped_shared::page::Shape;
+use warped_shared::page::{Shape, get_page_point};
 use warped_shared::player_settings::PerPlayerSettings;
 
 use crate::children::{GameKind, HostedGame, Programs, make_run_folder};
@@ -246,14 +247,15 @@ impl App {
     }
 
     /// `start_game` hosts a game of `kind` playing `choice` (the match, or one level) and joins
-    /// it: alone, the player is blue at once; otherwise they pick a team in the game menu.
+    /// it: alone or with bots, the player is blue at once (the allies are blue too); hosting for
+    /// others, they pick a team in the game menu.
     ///
     /// Example: `self.start_game(GameKind::Alone, Some(2))?;`
     fn start_game(&mut self, kind: GameKind, choice: Option<usize>) -> Result<(), String> {
         if self.hosted.is_some() {
             return Err("You already host a game: go back to it, or stop it first.".to_string());
         }
-        let team: Option<Team> = (kind == GameKind::Alone).then_some(Team::Blue);
+        let team: Option<Team> = (kind != GameKind::Host).then_some(Team::Blue);
         let programs: Programs =
             Programs::Find(&self.manifest_path).map_err(|error| error.to_string())?;
         let folder: PathBuf =
@@ -302,6 +304,32 @@ impl App {
             &self.player_settings_path,
         ));
         self.navigator.open(Screen::PlayerSettings);
+    }
+
+    /// `click` applies a left click at `at` in a window of `size` (both in window points): on the
+    /// game menu, a click on a level of the match's status plays it freely (the game master's
+    /// choice), and during free play the "back to the match" button goes back.
+    ///
+    /// Example: `app.click([320.0, 120.0], [1280.0, 800.0]);`
+    pub fn click(&mut self, at: [f32; 2], size: [f32; 2]) {
+        if self.navigator.get_screen() != Screen::GameMenu {
+            return;
+        }
+        let (_, page_size, _) = self.get_page();
+        let page_at: [f32; 2] = get_page_point(at, size, page_size);
+        let Some(target) = self
+            .get_view()
+            .and_then(|view| get_click_target(view, page_at))
+        else {
+            return;
+        };
+        let choice: Option<usize> = match target {
+            PageClick::Level(level) => Some(level),
+            PageClick::Match => None,
+        };
+        self.pending_play = Some((choice, None));
+        self.game_menu.message =
+            Some("Asked the match server; everyone follows after the break.".to_string());
     }
 
     /// `handle` applies one input to the screen shown.
@@ -642,6 +670,7 @@ mod tests {
     //! | Address | an IP, an IP with a port, garbage | `addresses_parse_with_the_default_port` |
     //! | Following the match | no team (stays in the game menu), a round starts (level), Escape (in-level menu), exit (game menu, not re-entered), rejoin (level), the round ends (game menu), Escape (main menu) | `the_app_follows_the_match_into_and_out_of_levels` |
     //! | Game master | a choice sent until the server's view shows it | `the_game_masters_choice_is_sent_until_taken` |
+    //! | Clicks on the game menu | elsewhere (nothing), on the first level (free play there) | `clicking_a_level_plays_it` |
     //! | Run id | the format | `run_ids_are_utc_times` |
 
     use super::*;
@@ -815,6 +844,22 @@ mod tests {
         exchange(&mut app, &server, &freely);
         app.update();
         assert!(app.pending_play.is_none());
+    }
+
+    #[test]
+    fn clicking_a_level_plays_it() {
+        let server: FakeServer = start_server(48_303);
+        let mut app: App = make_app(48_302);
+        app.join("127.0.0.1:48303".parse().unwrap(), Some(Team::Blue))
+            .unwrap();
+        let waiting: MatchView = make_view(&app, Phase::WaitingForTeams);
+        exchange(&mut app, &server, &waiting);
+        let (_, page_size, _) = app.get_page();
+        let window: [f32; 2] = [page_size[0] * 2.0, page_size[1] * 2.0];
+        app.click([1.0, 1.0], window);
+        assert!(app.pending_play.is_none());
+        app.click([2.0 * 30.0, 2.0 * 100.0], window);
+        assert_eq!(app.pending_play, Some((Some(0), None)));
     }
 
     #[test]
