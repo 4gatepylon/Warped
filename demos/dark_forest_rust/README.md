@@ -205,12 +205,15 @@ On a quieter GPU earlier the same day the 3440x1440 "before" column was 9.5-13.2
 
 With vsync on, each frame stays on screen a whole number of display refreshes, the same for every frame: one while
 frames are shown on time, two (or three) once more than a tenth of the last 30 were shown late, and one again when
-the GPU's recent frames fit well inside one refresh (`render::frame_clock::choose_refreshes_per_frame`, fed by Metal's
-presented times); the game simulates exactly that long a step per frame. So on a 100 Hz display a frame the GPU can't
+the GPU's recent frames (90th percentile) fit in 85% of one refresh (`render::frame_clock::choose_refreshes_per_frame`,
+fed by Metal's presented times; a speed-up that has to slow down again within 3 s waits 2 s before the next try, then
+4, 8 and 16 s, so it doesn't flip back and forth); the game simulates exactly that long a step per frame. So on a 100 Hz display a frame the GPU can't
 finish in 10 ms is shown for a steady 20 ms (50 fps) instead of a mix of 10 and 20 ms, which looked like constant
 jitter. While no frame reaches a display (it sleeps, or the window is hidden), frames are shown as soon as they are
 ready. The forest is cut into 8 m tiles so that each pass (four shadow
-cascades, the depth prepass and the lit pass) draws only the tiles it sees.
+cascades, the depth prepass and the lit pass) draws only the tiles it sees, and canopy tiles more than 20 m away
+(times the aim's zoom) are drawn with 16 triangles per leaf spray instead of 36 (their shadows keep all 36;
+DECISIONS.md D45).
 
 The static forest's shadows are drawn into a cache only when a shadow cascade moves (the cascades are centred on the
 camera and stay put until it walks out of their margin; DECISIONS.md D29), and only the robots and other moving

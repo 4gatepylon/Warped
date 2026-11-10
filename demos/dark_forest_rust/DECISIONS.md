@@ -270,6 +270,18 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   goes on; `Esc` opens the menu and frees the mouse, and `Esc` again closes it. The menu's last page, QUIT, leaves with
   `Return` or `Y` (`MenuOutcome::LeaveLevel`), replacing the settings page's Quit row and D28's exit prompt
   (`exit_prompt.rs` removed); the state is the shared `warped_shared::menu_and_map`, as in every level.
+- **D45. Far canopy at a lower detail, and the cadence speeds up sooner** (toward 100 FPS at 3440x1440 in `lift`
+  and `spawn`). The leaf sprays are 2.0 of the forest's 2.5 million triangles, drawn in the prepass and the lit pass.
+  A canopy tile more than 20 m from the camera (times the aim's zoom) is now drawn with 3 x 4 instead of 4 x 6
+  divisions per spray (16 instead of 36 triangles); both details put the same sprays in the same 8 m tiles (by each
+  spray's centre), and the shadow cache keeps the full detail (`FrameDescription::static_shadow_draws`), so shadows
+  and light shafts don't change. **Gives up:** far sprays' outlines are a little coarser; at 3456x1996 the bench
+  views differ from staging in 0.02-0.44% of pixels by more than 8/255, along far leaves' edges in the haze. The
+  cadence (D23) now speeds back up when the GPU's 90th percentile fits in 85% of one refresh fewer (8.5 ms at 100 Hz)
+  instead of 75%, so a level whose GPU time sits at 7.5-8.5 ms doesn't stay at 50 FPS after a slow patch; a speed-up
+  that has to slow down again within 3 s holds the next one back 2 s, then 4, 8 and 16 s, so a GPU time at the edge
+  costs one judder every 16 s at most rather than a flip each second. **Weigh in:** `FAR_LEAF_M` (20 m) and the
+  far detail trade time for the far canopy's look; `SPEED_UP_FRAC` (0.85) trades returning to 100 FPS for judder.
 
 ## Follow-ups for the next agent
 
