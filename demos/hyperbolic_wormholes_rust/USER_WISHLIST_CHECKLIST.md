@@ -137,6 +137,8 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-161 Real toroidal flat space.** The user, 2026-11-09: "actually implemneting toroidal flat space". For now Snow Planet and Dark Forest are plain euclidean with slowing edges (W-145 (no walls at map edges)); Snow Planet's looping world is parked on its stack (#423, #424, #430, #438, #446), over budget at 3440x1440 when it stopped.
 - [ ] **W-162 Shots come sideways from the crosshair.** A bug the user found playtesting, 2026-11-09: "bullets come sideways from the crosshair in dust (at least dust but unsure about toehrs)". To check: whether it is Dust's wind bend (2.4x, by design, which makes shots land off the crosshair even at 10 m), the shot's stray (sniper noise, rifle heat), the beam drawn from the gun's muzzle rather than the eye, or third person's aim.
 - [ ] **W-163 Aim through a scope.** The user, 2026-11-09: "being able to aim through a scope for both rifles". Today aiming zooms the view (2.5x sniper, 1.5x rifle) without a scope picture.
+- [ ] **W-164 More weapons.** The user, 2026-11-09: "adding more weapons". Today there are two guns, the sniper and the rifle.
+- [ ] **W-165 Money to buy wormholes.** The user, 2026-11-09: "money mechanics that allow you buy wormholes". Today each player has two thrown wormholes (Q) for free.
 
 ## Pending user review
 
