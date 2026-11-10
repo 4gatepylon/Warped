@@ -27,6 +27,7 @@ terms.
 - [Worlds](#worlds)
 - [Moving and looking](#moving-and-looking)
 - [Space and physics](#space-and-physics)
+- [Building, measuring and shipping](#building-measuring-and-shipping)
 
 ## Structure of play
 
@@ -257,3 +258,16 @@ its named objects and marked map pictures. An object's name there is its officia
 | **pull** | The acceleration that draws a player along the ground toward a black hole or a mouth. It builds a **drift**, a velocity added to the player's walk. | "gravity" toward a warp object |
 | **time dilation** | Time running slower for a player near a black hole: their movement, energy, console holds and guns slow down. | |
 | **bend** | What a warp object does to light, to lasers and to a player's path near it. | |
+
+## Building, measuring and shipping
+
+| Say | Meaning | Might be called by the user |
+| --- | --- | --- |
+| **voxel level** | A level drawn from blocks by the levels' shared code: Lunar Surface, Dust, Snow Planet and City Sphere. Dark Forest is built on the `fps_demo` engine instead. | |
+| **model**, **texture** | The files a sprite is made from: a 3D shape, and the picture on a surface. The CREDITS sub-page says where each comes from. | |
+| **render scale** | The share of the window's resolution a level's picture is drawn at. `-` and `=` lower and raise it, and the game can adjust it to hold the frame rate. | "render resolution" |
+| **frame rate**, **GPU time**, **render time** | How many pictures a second the game draws, and how long the GPU and the whole renderer take for one. The window title shows all three. | |
+| **bench view** | A fixed view of a level used to measure GPU time, such as Lunar Surface's `wormhole_exit`. | |
+| **Mac app**, **bundle** | `Warped.app`, the app packaged for macOS, and the zip of it that players download. | |
+| **download page** | The public web page where players get the bundle ([`infra/`](../infra/README.md)). | |
+| **playtest** | The user playing a build to judge it. | |
