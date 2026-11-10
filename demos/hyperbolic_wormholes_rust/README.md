@@ -215,6 +215,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
   (the Terminal, say) when asked; without it, other computers can't reach the game and `auto` finds nothing.
+- `WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it
+  listens on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for
+  network permission. Every test run uses it (`cargo test` without it); leave it unset to play across computers.
 - Joining opens a lobby with each team's head count; `1` joins blue and `2` joins red (bots join the smaller team).
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their

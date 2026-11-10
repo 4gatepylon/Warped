@@ -76,6 +76,11 @@ laser. `make play-route ROUTE=wormholes` throws both mouths, shoots and walks th
   with an error.
 - The binaries are `city-sphere` and `city_sphere_server`; `--map city-sphere` is the default.
 
+`WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it listens
+on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for network
+permission and `--join auto` finds only servers on this computer. Every test run uses it (`cargo test` without
+it); leave it unset to play across computers.
+
 ## How it works
 
 - **Shared code**: the files every Rust level shares (geometry, the gun held in hand, the HUD's bars and overlay

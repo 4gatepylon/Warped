@@ -17,7 +17,8 @@
 //! - `--label <label>`: a suffix for the run folder's name.
 //! - `--exit-after-s <s>`: close the window after that many seconds (to check it starts).
 //! - `--print-level-programs`: print the levels `make package-mac-app` puts in the app, and exit.
-//! - `--loopback-only`: listen for games on 127.0.0.1 only (checks; nothing open to the network).
+//! - `--loopback-only`: keep the app and the games it hosts on 127.0.0.1 (checks; nothing open to
+//!   the network); `WARPED_LOOPBACK_ONLY=1` does the same.
 //!
 //! Example: `warped --width-px 2560 --height-px 1440`
 //!
@@ -51,6 +52,7 @@ use warped_shared::match_protocol::{
 };
 use warped_shared::match_state::{MatchState, Team};
 use warped_shared::metal_window::{MetalWindow, WindowOptions};
+use warped_shared::network_scope;
 use warped_shared::page::Shape;
 use warped_shared::player_settings::{PerPlayerSettings, get_saved_player_settings_path};
 
@@ -110,8 +112,9 @@ struct Arguments {
     /// its map picture (`-` for none), tab-separated, one a line; and exit.
     #[arg(long)]
     print_level_programs: bool,
-    /// Listen for games on 127.0.0.1 only, with nothing open to the network (checks and tests;
-    /// hosted games still announce themselves).
+    /// Keep everything on 127.0.0.1, with nothing open to the network: listen for games there, and
+    /// host games whose match and level servers do the same (checks and tests; also
+    /// WARPED_LOOPBACK_ONLY=1).
     #[arg(long)]
     loopback_only: bool,
 }
@@ -411,7 +414,7 @@ fn main() -> Result<()> {
         match_port: arguments.match_port,
         level_port: arguments.level_port,
         discovery_port: arguments.discovery_port,
-        is_loopback_only: arguments.loopback_only,
+        is_loopback_only: arguments.loopback_only || network_scope::is_loopback_only(),
     };
     let app: App = App::New(
         levels,
