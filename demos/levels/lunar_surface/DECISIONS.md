@@ -2,7 +2,7 @@
 
 - **Question:** What could Lunar Surface (red, depth 2, hyperbolic, very large, long range, open zones) look and play
   like, rendered correctly in H³ with light bent by its warp objects?
-- **Given:** the level's row of `game_design/DESIGN.md` (red team, depth 2, lunar base theme, hyperbolic space, gravity
+- **Given:** the level's row of `game_design/INSIDE_GAME_DESIGN.md` (red team, depth 2, lunar base theme, hyperbolic space, gravity
   down onto the ground, warp objects, very large, 5 consoles per pylon, long range, open zones) and the shared brief:
   at least one black hole and one wormhole pair, the controls, HUD, laser, consoles, sprint energy (30 s / 60 s),
   10 s per console, no pull on players from black holes.

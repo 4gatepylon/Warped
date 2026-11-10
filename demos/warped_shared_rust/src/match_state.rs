@@ -1,5 +1,5 @@
-//! `match_state.rs` keeps one match's state by the rules of `game_design/DESIGN.md` (Match,
-//! Wavefront): the map's line of levels, every round played and who won it, each team's
+//! `match_state.rs` keeps one match's state by the rules of `game_design/INSIDE_GAME_DESIGN.md`
+//! (Match, Wavefront): the map's line of levels, every round played and who won it, each team's
 //! wavefront, which team attacks now, and the match's outcome. It only applies the rules; the
 //! match server (`../warped_match_rust/src/match_flow.rs`) feeds it each round's winner.
 //!
@@ -359,7 +359,7 @@ mod tests {
     //!
     //! | Behaviour | Cases | Test |
     //! | --- | --- | --- |
-    //! | Worked example of DESIGN.md | its five rounds, levels, attackers, next rounds | `the_design_docs_example_plays_out` |
+    //! | Worked example of INSIDE_GAME_DESIGN.md | its five rounds, levels, attackers, next rounds | `the_design_docs_example_plays_out` |
     //! | Start | purple first, wavefronts at depth 1, nobody attacks | `a_match_starts_on_the_purple_level` |
     //! | Attacker sweeps | blue or red wins every round: 3 rounds | `a_sweep_takes_three_rounds` |
     //! | Defender wins | roles swap, wavefront kept where it left off | `a_defender_win_swaps_roles_and_keeps_wavefronts` |
@@ -486,8 +486,8 @@ mod tests {
         assert_eq!(state.outcome(), Some(Outcome::Won(Team::Red)));
     }
 
-    /// `play_reference` plays `winners` by a direct reading of DESIGN.md's rules, kept apart from
-    /// `MatchState`: the levels of each round and the match winner, if any.
+    /// `play_reference` plays `winners` by a direct reading of INSIDE_GAME_DESIGN.md's rules, kept
+    /// apart from `MatchState`: the levels of each round and the match winner, if any.
     ///
     /// Example: `let (levels, winner) = play_reference(&[Team::Blue]);`
     fn play_reference(winners: &[Team]) -> (Vec<usize>, Option<Team>) {

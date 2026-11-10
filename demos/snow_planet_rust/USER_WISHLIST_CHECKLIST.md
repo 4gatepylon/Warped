@@ -213,11 +213,11 @@ Confirmed by the user after testing.
   seems to work".
 - [x] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
   but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
-  nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
+  nothing. Contradicts `game_design/INSIDE_GAME_DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
   again and moves it. The user, 2026-11-08: "first click throws purple wormhole, second one throws green (causing
   them to connect and transform into real wormholes) and third doesnt do anything". Fixed on branch
   `devin/wormhole-throw-fixes`, 2026-11-08: once both mouths
-  are down `Q` does nothing until death or destruction clears them; `DESIGN.md` updated to match. Confirmed by the user, 2026-11-08: "great it seems to
+  are down `Q` does nothing until death or destruction clears them; `INSIDE_GAME_DESIGN.md` updated to match. Confirmed by the user, 2026-11-08: "great it seems to
   work".
 - [x] **W-110 Team-coloured robots.** "is it possible for you to recolor the teal robot? to be other colors than
   teal?", then "yep team colors!": the players' body of W-106 (Teal robot player model) in each team's colour, blue

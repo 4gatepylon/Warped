@@ -18,7 +18,7 @@ built, is kept in [`../slides_preliminary/`](../slides_preliminary/README.md).
 16. Curved space: black holes, wormholes and the colour flash at a throat.
 17. In progress: Dark Forest's parity, the looping worlds, the match balance.
 
-Every number comes from the code and the settings files: [`../DESIGN.md`](../DESIGN.md),
+Every number comes from the code and the settings files: [`../INSIDE_GAME_DESIGN.md`](../INSIDE_GAME_DESIGN.md),
 [`../FOUR_MAPS_HANDOFF.md`](../FOUR_MAPS_HANDOFF.md), each level's `README.md`, `DECISIONS.md`,
 `server_settings.yaml` and `player_settings.yaml` in `demos/{hyperbolic_wormholes,dust,snow_planet,city_sphere,dark_forest,warped_match}_rust/`
 (Dark Forest's are built into `src/settings.rs`, `src/game/player.rs` and `src/game/weapon.rs`), and the

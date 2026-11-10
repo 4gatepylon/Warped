@@ -4,7 +4,7 @@ This is the preliminary design deck, from before the game was built, kept for hi
 and numbers have changed since. The official deck, which describes the game as it is, is
 [`../slides/`](../slides/README.md).
 
-`index.html` is a slide deck, in HTML and SVG, of the design in [`../DESIGN.md`](../DESIGN.md) at the time:
+`index.html` is a slide deck, in HTML and SVG, of the design in [`../INSIDE_GAME_DESIGN.md`](../INSIDE_GAME_DESIGN.md) at the time:
 
 1. The map: five levels and their spaces.
 2. The wavefront: which level is played after each round, with an example match.

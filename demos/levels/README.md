@@ -1,6 +1,6 @@
 # Level demos
 
-One playable demo for each level of the default map in [`game_design/DESIGN.md`](../../game_design/DESIGN.md),
+One playable demo for each level of the default map in [`game_design/INSIDE_GAME_DESIGN.md`](../../game_design/INSIDE_GAME_DESIGN.md),
 plus City Sphere with wormholes, which isn't in the design yet. Each is a first try at the README checklist's first item:
 Minecraft-like visuals on one level, with real obstacles and good physics, without multiplayer. Each level was built
 independently from the design doc, so the layouts are proposals to argue with, not decisions.

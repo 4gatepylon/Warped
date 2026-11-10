@@ -198,7 +198,7 @@ is in [`AGENTS.md`](AGENTS.md).
 
 - [?] **W-145 No walls at map edges.** The user, 2026-11-09: "on all maps there are NOT walls on the ends and as you walk off the edges of the map you get slowd with the same efefct as dust and lunar (i.e. it should zenos paradox you basically)", "also you can get rid of the toroidal topology to have just euclidean specificalyl for dark forest and snow planet", "(so snow planet and dark forest have perma slow mechanics", "since dark forest wont have a wall it needs to be such that you are slowed in teh forest so that you see trees in front of you as you walk off the map (ie you should never see empty space", "(you an put a caveat in game design that the toroidal maps are not actually toroidal and that that is a worok in progress btw)".
   #517: no level has a wall at its edge; Lunar Surface's and Dust's crater-wall slowdown is one shared rule
-  (`warped_shared::map_edge`) every level uses. Snow Planet and Dark Forest are plain Euclidean (no torus; DESIGN.md
+  (`warped_shared::map_edge`) every level uses. Snow Planet and Dark Forest are plain Euclidean (no torus; INSIDE_GAME_DESIGN.md
   says the toroidal levels aren't toroidal yet, a work in progress) with a 12 m slowing band past their playable
   area; Dark Forest's rock walls are gone and its bamboo goes on 30 m past the edge. City Sphere is a closed sphere
   with no edge, unchanged.
@@ -505,11 +505,11 @@ Confirmed by the user after testing.
   seems to work".
 - [x] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
   but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
-  nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
+  nothing. Contradicts `game_design/INSIDE_GAME_DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
   again and moves it. The user, 2026-11-08: "first click throws purple wormhole, second one throws green (causing
   them to connect and transform into real wormholes) and third doesnt do anything". Fixed on branch
   `devin/wormhole-throw-fixes`, 2026-11-08: once both mouths
-  are down `Q` does nothing until death or destruction clears them; `DESIGN.md` updated to match. Confirmed by the user, 2026-11-08: "great it seems to
+  are down `Q` does nothing until death or destruction clears them; `INSIDE_GAME_DESIGN.md` updated to match. Confirmed by the user, 2026-11-08: "great it seems to
   work".
 - [x] **W-110 Team-coloured robots.** "is it possible for you to recolor the teal robot? to be other colors than
   teal?", then "yep team colors!": the players' body of W-106 (Teal robot player model) in each team's colour, blue

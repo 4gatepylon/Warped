@@ -19,9 +19,9 @@ the user should check.
   page stays on the result 5 s after a round (round over). Both are flags
   (`--intermission-s`, `--round-over-s`).
 - **The match timer runs from the first round's start**, 30 minutes (`--match-s`), and the match
-  is a tie when it runs out, even mid-round (DESIGN.md: "If the match times out, it's a tie").
+  is a tie when it runs out, even mid-round (INSIDE_GAME_DESIGN.md: "If the match times out, it's a tie").
 - **Wavefronts never move back**: when the defender wins, roles swap and the new attacker plays
-  at its own wavefront, where it was. This is how the worked example in DESIGN.md reads (rounds 3
+  at its own wavefront, where it was. This is how the worked example in INSIDE_GAME_DESIGN.md reads (rounds 3
   to 5); `src/match_state.rs` tests that table row by row.
 - **Ownership on the page**: defensive ownership of a level is its side's team (purple has none);
   offensive ownership is the team whose wavefront it is, or that captured it (won it attacking).

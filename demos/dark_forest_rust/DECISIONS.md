@@ -17,7 +17,7 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   (you can).
 - **D5. Small map, two heights.** 60 m by 112 m, decks at 7 m and a lookout at 12 m, to have it playable quickly;
   the two bases are mirror images by a half turn so neither side is favoured.
-- **D6. Two pylons per team, one on the ground, one in the treehouse.** `game_design/DESIGN.md` gives the count; the
+- **D6. Two pylons per team, one on the ground, one in the treehouse.** `game_design/INSIDE_GAME_DESIGN.md` gives the count; the
   placement makes a team both hold its ground and climb. Holding `E` for 3 s within 2.5 m turns a console off (the
   hyperbolic demo's defaults).
 - **D7. The hyperbolic demo's network protocol, unchanged.** Copying `net.rs` as is kept multiplayer working quickly

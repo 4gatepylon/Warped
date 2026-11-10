@@ -768,7 +768,7 @@ mod tests {
     use super::*;
     use crate::match_protocol::LevelEntry;
 
-    /// `make_view` gives a view of `state` on five levels named as in DESIGN.md.
+    /// `make_view` gives a view of `state` on five levels named as in INSIDE_GAME_DESIGN.md.
     ///
     /// Example: `let view = make_view(MatchState::New(5), Phase::Over);`
     fn make_view(state: MatchState, phase: Phase) -> MatchView {
