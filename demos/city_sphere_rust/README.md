@@ -212,6 +212,7 @@ noise; the crowd view's p99 frame is over 16.7 ms in both, from posing eight rob
 - On this VM the frame interval's p99 with vsync (21 to 28 ms) is over 16.7 ms because of the display's pacing (see
   Results); not yet measured on a real Mac display.
 - Posing robots costs about 1 ms of CPU per clip each frame; a crowd of eight is the worst view's main cost.
-- No zone walls, thrown wormholes or shadows in City Sphere.
+- No thrown wormhole lenses or shadows in City Sphere. Its team boundary planes (W-148) are drawn, but what is
+  seen through them ripples in brightness rather than bending (a forward renderer can't move what is behind).
 - Thrown wormholes are portals: a ring and a dark disc, not Lunar Surface's lensed view through the mouth (DECISIONS
   30).
