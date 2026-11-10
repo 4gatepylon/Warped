@@ -2,6 +2,10 @@
 //! (`../hyperbolic_wormholes/`), to see how fast the same ray tracer runs natively. You walk in
 //! hyperbolic space (H³) with gravity, fly, go through three wormholes and fire a laser.
 //!
+//! This library (`lunar_surface_level`) is the whole level: the one-window app plays it in its own window
+//! with `play_level` (`warped_shared::app::play_level_fn_t`, W-141, one window for the whole
+//! game), and the program alone (`main.rs`) runs `run_alone`, whose command line is below.
+//!
 //! Interface:
 //! - `--renderer metal|cpu`: which renderer draws the frames: the GPU with Metal (the default) or
 //!   every CPU core.
@@ -21,6 +25,8 @@
 //!
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
+
+#![cfg(target_os = "macos")]
 
 mod avatar_animation;
 mod black_hole_growth;
@@ -56,12 +62,16 @@ mod voxel_world;
 mod world;
 mod zone_walls;
 
+use warped_shared::app::{LevelEnd, LevelJoin, LevelWindow};
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, HudBars, HudPulses, describe_gun,
     get_crosshair_rects, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
 };
+use warped_shared::level_loop::{LevelFrames, make_level_command_line, play_frames};
+use warped_shared::match_state::Team;
 use warped_shared::menu_and_map::PlayOutcome;
+use warped_shared::metal_window::{MetalWindow, NoMatchLink, WindowOptions};
 use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 use warped_shared::{
     app_bundle, avatar_model, fps_demo_assets, geometry, health, hud_bars, key_bindings,
@@ -81,8 +91,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, ValueEnum};
 use glam::{DMat4, DVec3, DVec4};
-use objc2_core_foundation::CGSize;
-use objc2_metal::MTLPixelFormat;
+use objc2::Message;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
@@ -210,6 +219,13 @@ enum Sampling {
     EveryPixel,
 }
 
+/// `TeamFlag` is a team as `--team` takes it, in `net::TEAM_NAMES`' order.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum TeamFlag {
+    Blue,
+    Red,
+}
+
 /// `RouteKind` is which route `--play-route` plays: the house's scripted legs, a tour around each
 /// of its mouths from 5 blocks to just outside its throat and back, or (on a voxel map) a tour
 /// around each warp object.
@@ -296,6 +312,9 @@ struct Arguments {
     /// optional :port).
     #[arg(long, conflicts_with_all = ["serve", "bench_views", "autopilot", "play_route"])]
     join: Option<String>,
+    /// With --join: join this team at once instead of choosing in the lobby.
+    #[arg(long, value_enum, requires = "join")]
+    team: Option<TeamFlag>,
     /// Run only a game server, without a window, until --exit-after-s (or until stopped); it
     /// prints this computer's address and the command that joins it.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route"])]
@@ -585,10 +604,11 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
     Ok(())
 }
 
-/// `main` validates the command line and runs the window, the benchmark or the autopilot.
+/// `run_alone` runs the program as its command line asks (`run`), or the title screen without
+/// arguments, and gives its exit code: 3 when a server refused the game's password.
 ///
-/// Example: `cargo run --release -- --autopilot`
-fn main() -> ExitCode {
+/// Example: `fn main() -> ExitCode { lunar_surface_level::run_alone() }`
+pub fn run_alone() -> ExitCode {
     let is_title_screen: bool = std::env::args_os().len() == 1;
     let result: Result<()> = if is_title_screen {
         run_title_screen()
@@ -624,10 +644,7 @@ fn run(arguments: Arguments) -> Result<()> {
         return serve_only(&arguments);
     }
     if arguments.renderer == RendererKind::Metal {
-        viewmodel::check_gun_models()?;
-        if arguments.map == MapName::LunarSurface {
-            voxel_textures::check_surface_textures()?;
-        }
+        check_metal_assets(arguments.map)?;
     }
     if arguments.bot {
         return run_bot(&arguments);
@@ -640,6 +657,36 @@ fn run(arguments: Arguments) -> Result<()> {
     } else {
         play(&arguments, renderer)
     }
+}
+
+/// `check_metal_assets` fails, naming the missing file, when the gun models or the surface
+/// textures `map` needs aren't where the Metal renderer loads them from.
+///
+/// Example: `check_metal_assets(MapName::LunarSurface)?;`
+fn check_metal_assets(map: MapName) -> Result<()> {
+    viewmodel::check_gun_models()?;
+    if map == MapName::LunarSurface {
+        voxel_textures::check_surface_textures()?;
+    }
+    Ok(())
+}
+
+/// `play_level` is Lunar Surface's entry point in the one-window app (`app::play_level_fn_t`): it
+/// joins `join`'s level server on its team with the player's settings file, plays in the app's
+/// window with a renderer on the window's device until the match's round ends or the player
+/// leaves or closes the window, and frees the renderer's GPU resources before it returns.
+///
+/// Example: `let end: LevelEnd = play_level(&mut level_window, &join)?;`
+pub fn play_level(window: &mut LevelWindow, join: &LevelJoin) -> Result<LevelEnd> {
+    let arguments: Arguments = Arguments::try_parse_from(make_level_command_line(join))?;
+    validate_arguments(&arguments)?;
+    check_metal_assets(arguments.map)?;
+    let mut session: Session = Session::New(&arguments)?;
+    let mut metal: render_metal::MetalRenderer = render_metal::MetalRenderer::OnDevice(
+        window.device.retain(),
+        arguments.sampling == Sampling::Adaptive,
+    )?;
+    play_on_layer(window, &mut session, &mut metal, false)
 }
 
 /// `run_title_screen` shows the title screen (`title.rs`) until the player quits, starting each
@@ -2315,7 +2362,8 @@ fn add_dust_burst(
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
 /// started with `--host`, whether this player was hit and waits to rejoin, the number of the game
-/// it plays, and the console this player holds `E` on, with the seconds held.
+/// it plays, the console this player holds `E` on, with the seconds held, and the team `--team`
+/// asked for, joined once the window has loaded (`join_after_loading`).
 struct Multiplayer {
     client: net::Client,
     server: Option<Child>,
@@ -2323,6 +2371,7 @@ struct Multiplayer {
     respawn_in_s: f64,
     game_number: u32,
     disabling: Option<(u8, f64)>,
+    team_after_loading: Option<u32>,
 }
 
 impl Drop for Multiplayer {
@@ -2420,6 +2469,7 @@ impl Session {
                 respawn_in_s: 0.0,
                 game_number: 0,
                 disabling: None,
+                team_after_loading: arguments.team.map(|team| team as u32),
             })
         } else {
             None
@@ -3274,6 +3324,20 @@ impl Session {
             .as_ref()
             .and_then(|m| m.client.team)
             .unwrap_or(0)
+    }
+
+    /// `join_after_loading` joins the team `--team` asked for, once the window has loaded its
+    /// textures, shaders and guns: joining earlier let a slow load keep this player silent past the
+    /// server's timeout, which dropped them for good.
+    ///
+    /// Example: `session.join_after_loading()?;`
+    fn join_after_loading(&mut self) -> Result<()> {
+        if let Some(multiplayer) = &mut self.multiplayer
+            && let Some(team) = multiplayer.team_after_loading.take()
+        {
+            multiplayer.client.join(Some(team))?;
+        }
+        Ok(())
     }
 
     /// `is_in_lobby` says whether this player is on a server and hasn't chosen a team yet.
@@ -4202,14 +4266,20 @@ fn scale_size(size_px: (u32, u32), scale: f64) -> (u32, u32) {
 ///
 /// Example: `play(&arguments, renderer)?;`
 fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let sdl: sdl3::Sdl = sdl3::init()?;
-    let video: sdl3::VideoSubsystem = sdl.video()?;
-    let mut session: Session = Session::New(arguments)?;
     let window_size: (u32, u32) = (arguments.width_px, arguments.height_px);
-    match renderer.as_metal() {
-        Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
-        None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
-    }
+    let Some(metal) = renderer.as_metal() else {
+        let sdl: sdl3::Sdl = sdl3::init()?;
+        let video: sdl3::VideoSubsystem = sdl.video()?;
+        let mut session: Session = Session::New(arguments)?;
+        return play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut());
+    };
+    let mut session: Session = Session::New(arguments)?;
+    let mut window: MetalWindow =
+        MetalWindow::Open(WINDOW_TITLE, window_size, WindowOptions::default())?;
+    window.get_layer().setDevice(Some(metal.get_device()));
+    let mut no_match: NoMatchLink = NoMatchLink;
+    let mut level_window: LevelWindow = window.get_level_window(&mut no_match);
+    play_on_layer(&mut level_window, &mut session, metal, true).map(drop)
 }
 
 /// `get_eyes` gives where other players' eyes are, so spawning players can keep clear of them.
@@ -4587,67 +4657,96 @@ fn draw_loading_screen(
     Ok(())
 }
 
-/// `play_on_layer` runs the window with Metal presenting straight to the window's `CAMetalLayer`:
-/// no pixels go through the CPU, MetalFX upscales the ray-traced image to the window's size, and
-/// the HUD is shown in the window's title, since SDL's renderer can't draw on the same layer.
+/// `play_on_layer` plays `session` in `window` with Metal presenting straight to the window's
+/// `CAMetalLayer` (`LayerFrames`), through the frame loop every level shares, until the match's
+/// round ends or the player leaves or closes the window. With `is_hud_in_title` (the program
+/// alone), the HUD shows in the window's title, since SDL's renderer can't draw on the same layer.
 ///
-/// Example: `play_on_layer(&sdl, &video, (1280, 800), &mut session, metal)?;`
+/// Example: `let end = play_on_layer(&mut level_window, &mut session, metal, true)?;`
 fn play_on_layer(
-    sdl: &sdl3::Sdl,
-    video: &sdl3::VideoSubsystem,
-    window_size: (u32, u32),
+    window: &mut LevelWindow,
     session: &mut Session,
     metal: &mut render_metal::MetalRenderer,
-) -> Result<()> {
-    let mut builder: sdl3::video::WindowBuilder =
-        video.window(WINDOW_TITLE, window_size.0, window_size.1);
-    builder.high_pixel_density().resizable().position_centered();
-    let flags: u32 = builder.window_flags() | sdl3::sys::video::SDL_WINDOW_METAL.0 as u32;
-    let mut window: sdl3::video::Window = builder.set_window_flags(flags).build()?;
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
-    let view: sdl3::sys::metal::SDL_MetalView =
-        unsafe { sdl3::sys::metal::SDL_Metal_CreateView(window.raw()) };
-    if view.is_null() {
-        return Err(format!("SDL: couldn't make a Metal view: {}", sdl3::get_error()).into());
+    is_hud_in_title: bool,
+) -> Result<LevelEnd> {
+    play_frames(window, &mut LayerFrames { session, metal }, is_hud_in_title)
+}
+
+/// `LayerFrames` is a session and its Metal renderer as the shared frame loop drives them: no
+/// pixels go through the CPU, and MetalFX upscales the ray-traced image to the window's size.
+struct LayerFrames<'a> {
+    session: &'a mut Session,
+    metal: &'a mut render_metal::MetalRenderer,
+}
+
+impl LevelFrames for LayerFrames<'_> {
+    /// `handle_event` passes the event to the session (`Session::handle_event`).
+    ///
+    /// Example: `let outcome = frames.handle_event(event, window, &mouse)?;`
+    fn handle_event(
+        &mut self,
+        event: Event,
+        window: &sdl3::video::Window,
+        mouse: &sdl3::mouse::MouseUtil,
+    ) -> Result<PlayOutcome> {
+        Ok(self.session.handle_event(event, window, mouse))
     }
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A LAYER POINTER THAT ISN'T A CAMetalLayer WILL HAPPEN
-    let layer: &CAMetalLayer =
-        unsafe { &*sdl3::sys::metal::SDL_Metal_GetLayer(view).cast::<CAMetalLayer>() };
-    layer.setDevice(Some(metal.get_device()));
-    layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
-    layer.setFramebufferOnly(false);
-    let mouse: sdl3::mouse::MouseUtil = sdl.mouse();
-    let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
-    let loading_steps: &[render_metal::LoadingStep] =
-        render_metal::get_loading_steps(session.voxel.is_some());
-    let mut loading_step_index: usize = 0;
-    let result: Result<()> = (|| loop {
-        for event in event_pump.poll_iter() {
-            if session.handle_event(event, &window, &mouse) != PlayOutcome::Play {
-                return Ok(());
-            }
+
+    /// `is_finished` says whether a timed run or a played route is over (`Session::is_finished`).
+    ///
+    /// Example: `if frames.is_finished() { ... }`
+    fn is_finished(&self) -> bool {
+        self.session.is_finished()
+    }
+
+    /// `update` advances the session (`Session::update`).
+    ///
+    /// Example: `frames.update(&keyboard, &mouse)?;`
+    fn update(
+        &mut self,
+        keyboard: &sdl3::keyboard::KeyboardState,
+        mouse: &sdl3::mouse::MouseState,
+    ) -> Result<()> {
+        self.session.update(keyboard, mouse)
+    }
+
+    /// `get_loading_frame_count` gives one loading screen per loading step of the renderer, and
+    /// one more for "ready".
+    ///
+    /// Example: `let loading_frame_count = frames.get_loading_frame_count();`
+    fn get_loading_frame_count(&self) -> usize {
+        render_metal::get_loading_steps(self.session.voxel.is_some()).len() + 1
+    }
+
+    /// `load_step` draws the loading screen with its bar filled to `frame_index`'s share and the
+    /// step's name, then loads that step; after the last, it shows "ready" and joins the team
+    /// `--team` asked for (`Session::join_after_loading`).
+    ///
+    /// Example: `frames.load_step(layer, 0)?;`
+    fn load_step(&mut self, layer: &CAMetalLayer, frame_index: usize) -> Result<()> {
+        let steps: &[render_metal::LoadingStep] =
+            render_metal::get_loading_steps(self.session.voxel.is_some());
+        let step: Option<render_metal::LoadingStep> = steps.get(frame_index).copied();
+        let done_frac: f32 = frame_index as f32 / steps.len() as f32;
+        let label: &str = step.map_or(LOADING_DONE_LABEL, render_metal::LoadingStep::get_label);
+        draw_loading_screen(self.metal, layer, done_frac, label)?;
+        match step {
+            Some(step) => self.metal.load(step),
+            None => self.session.join_after_loading(),
         }
-        if session.is_finished() {
-            return Ok(());
-        }
-        session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;
-        let window_px: (u32, u32) = window.size_in_pixels();
-        layer.setDrawableSize(CGSize {
-            width: f64::from(window_px.0),
-            height: f64::from(window_px.1),
-        });
-        if loading_step_index <= loading_steps.len() {
-            let step: Option<render_metal::LoadingStep> =
-                loading_steps.get(loading_step_index).copied();
-            let done_frac: f32 = loading_step_index as f32 / loading_steps.len() as f32;
-            let label: &str = step.map_or(LOADING_DONE_LABEL, render_metal::LoadingStep::get_label);
-            draw_loading_screen(metal, layer, done_frac, label)?;
-            if let Some(step) = step {
-                metal.load(step)?;
-            }
-            loading_step_index += 1;
-            continue;
-        }
+    }
+
+    /// `draw_frame` packs the session's view, draws it with its overlay (text, HUD rectangles,
+    /// the gun, the minimap, the hit effect) into `layer`, records the frame's times, and gives
+    /// the window's title with the HUD's lines every `HUD_PERIOD_S`.
+    ///
+    /// Example: `let title = frames.draw_frame(layer, (2560, 1440))?;`
+    fn draw_frame(
+        &mut self,
+        layer: &CAMetalLayer,
+        window_px: (u32, u32),
+    ) -> Result<Option<String>> {
+        let (session, metal) = (&mut *self.session, &mut *self.metal);
         let render_px: (u32, u32) = session.get_render_size(window_px);
         let render_start: Instant = Instant::now();
         let mut packed: PackedFrame = session.pack(render_px);
@@ -4703,18 +4802,33 @@ fn play_on_layer(
                 Some(metal.last_gpu_ms),
             );
         }
-        if session.hud_frame_count == 0 {
-            window.set_title(&format!(
+        Ok((session.hud_frame_count == 0).then(|| {
+            format!(
                 "{WINDOW_TITLE}: {}",
                 session
                     .get_hud_lines("metal", render_px, window_px)
                     .join("  |  ")
-            ))?;
+            )
+        }))
+    }
+
+    /// `set_match_lines` gives the open menu's MATCH page its lines (`Menu::set_match_lines`).
+    ///
+    /// Example: `frames.set_match_lines(None);`
+    fn set_match_lines(&mut self, lines: Option<Vec<(String, bool)>>) {
+        if let Some(menu) = self.session.menu_and_map.get_menu_mut() {
+            menu.set_match_lines(lines);
         }
-    })();
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
-    unsafe { sdl3::sys::metal::SDL_Metal_DestroyView(view) };
-    result
+    }
+
+    /// `get_winner` gives the team this level's server says won, if any (`net::TEAM_NAMES`'
+    /// order: blue, red).
+    ///
+    /// Example: `let winner = frames.get_winner();`
+    fn get_winner(&self) -> Option<Team> {
+        let winner: u32 = self.session.multiplayer.as_ref()?.client.game.winner?;
+        Some([Team::Blue, Team::Red][winner as usize])
+    }
 }
 
 #[cfg(test)]
@@ -4730,8 +4844,11 @@ mod tests {
     //! | Gun in hand | laser (the bolt-action rifle), rifle (the revolver) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
+    //! | The app's join | a level server's address, a team, a settings file, the level's map | `the_apps_join_is_the_levels_command_line` |
 
     use super::*;
+    use warped_shared::app::play_level_fn_t;
+    use warped_shared::level_test::make_sample_join;
 
     #[test]
     fn wormhole_shift_follows_depth_and_speed() {
@@ -4842,5 +4959,31 @@ mod tests {
         for line in connecting.iter().chain(&connected) {
             assert!(line.chars().count() <= banner_char_count, "{line}");
         }
+    }
+
+    #[test]
+    fn the_apps_join_is_the_levels_command_line() {
+        let entry: play_level_fn_t = play_level;
+        let _ = entry;
+        let join: LevelJoin = make_sample_join(
+            "level",
+            Some("lunar-surface"),
+            "192.168.1.5:47852".parse().expect("an address"),
+            Team::Red,
+            "player_settings.yaml".into(),
+        );
+        let arguments: Arguments =
+            Arguments::try_parse_from(make_level_command_line(&join)).expect("it parses");
+        validate_arguments(&arguments).expect("it is valid");
+        assert_eq!(
+            get_server_address(&arguments).expect("an address"),
+            join.server
+        );
+        assert!(arguments.team == Some(TeamFlag::Red));
+        assert!(arguments.map == MapName::LunarSurface);
+        assert_eq!(
+            arguments.player_settings,
+            Some(join.player_settings_path.clone())
+        );
     }
 }

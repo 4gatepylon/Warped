@@ -263,6 +263,18 @@ make run-autopilot
   `--route warp-tour` circles the black hole and both wormhole mouths the same way, from 80% of each one's reach to
   10% (19 m to 2.4 m from the black hole, 12 m to 1.5 m from a mouth) and back, over 600 frames each.
 
+## In the one-window app
+
+W-141 (one window for the whole game): this crate is a library, `lunar_surface_level` (`src/lib.rs`), and `src/main.rs` only runs
+it. The one-window app ([`../warped_mvp_rust/`](../warped_mvp_rust/)) calls `lunar_surface_level::play_level`
+(`warped_shared::app::play_level_fn_t`) with its window and Metal device, the level server's address, the team
+(`--team`) and the player's settings file. Lunar Surface then plays in that window until the match's round ends
+(`RoundOver`), the player confirms the menu's QUIT page (`LeaveLevel`) or closes the window (`CloseWindow`), and frees
+its renderer's GPU resources before it returns. Run alone, the program plays through the same frame loop
+(`warped_shared::level_loop`) in a window of its own (`warped_shared::metal_window`), exactly as before.
+`RUN_GPU_TESTS=1 cargo test --release --test in_one_window` checks the entry point in an offscreen window (it uses the
+GPU).
+
 ## How it works
 
 - [`../warped_shared_rust/`](../warped_shared_rust/README.md): the code every Rust level shares, used as a
@@ -296,7 +308,8 @@ make run-autopilot
   skips blocks a bent step can't reach.
 - `dust.rs`: the dust and mist a shot throws up where it hits the ground, which `render_voxel.metal` draws in the
   world (D81).
-- `main.rs`: the command line, the SDL3 window and HUD, and the benchmark and autopilot runs.
+- `lib.rs`: the command line, the level's session and its frame loop (`play_level` for the one-window app),
+  the HUD, and the benchmark and autopilot runs; `main.rs` runs it alone.
 
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the
 distance itself, which saves most of the `asinh` calls that dominated the first CPU profile. And a ray only checks
