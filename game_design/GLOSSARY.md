@@ -29,6 +29,7 @@ terms.
 - [Space and physics](#space-and-physics)
 - [Building, measuring and shipping](#building-measuring-and-shipping)
 - [Tracking work](#tracking-work)
+- [Words we retired on 20261110](#words-we-retired-on-20261110)
 
 ## Structure of play
 
@@ -280,3 +281,32 @@ its named objects and marked map pictures. An object's name there is its officia
 | **wishlist**, **item** | The checklist of what the user has asked for ([`USER_WISHLIST_CHECKLIST.md`](../demos/hyperbolic_wormholes_rust/USER_WISHLIST_CHECKLIST.md)), and one request on it, with an id such as `W-85` and a short name. | |
 | **open**, **claimed**, **pending user review**, **done** | An item's four statuses: nobody has started it; an agent is working on it; it is merged into a `staging/user-<username>` branch and waits for the user to test it; the user tested it and confirmed it works. An item is done only once the user confirms it. | "done" for merged but unconfirmed |
 | **WIP** | Work in progress: a commit that saves unfinished work so another agent can pick it up. | |
+
+## Words we retired on 20261110
+
+Older docs and commit messages, including parts of [`DESIGN.md`](DESIGN.md), still use these words. Use the new
+term in anything new, and fix the old text when you edit it. The user may still say an old word; read it as the new
+term.
+
+| Old | New |
+| --- | --- |
+| map demo, four map demos | level, the levels |
+| per-map settings | game settings |
+| map edge | level edge |
+| zone plane, zone wall | boundary plane |
+| mini map | minimap |
+| match server | game server |
+| server settings (the menu's) | game settings |
+| title screen | main menu |
+| team screen | lobby |
+| screen | page |
+| in-game menu, in-level menu | level menu |
+| in-game map | main map |
+| level view | scene |
+| robot, robot sprite, bot skin | bot sprite, or bot for the entity |
+| speckle | beam noise (the user may still say speckle) |
+| kazemat, bunker (as a term) | object; each one has its own name in its world, such as blue bunker |
+| curvature (alone) | curvature type or curvature amount |
+| gravity toward a warp object | pull |
+| capture a flag, disable a pylon | deactivate a console |
+| run, jog | sprint, walk |
