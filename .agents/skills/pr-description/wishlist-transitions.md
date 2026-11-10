@@ -4,7 +4,8 @@ Every commit that changes an item's status in a wishlist checklist (`USER_WISHLI
 change in one line of the form below, so the user sees what moved by reading the commit message, not the
 diff. The statuses and the checklist's sections are defined in "The user's wishlist" in the `AGENTS.md` of
 the demo that owns the checklist (for example `demos/hyperbolic_wormholes_rust/AGENTS.md`). The rest of the
-commit rules are in the "Commits" section of [`SKILL.md`](SKILL.md).
+commit rules are in the "Commits" section of [`SKILL.md`](SKILL.md). The history that goes below the line
+is in [`wishlist-history.md`](wishlist-history.md).
 
 ## The line
 
@@ -47,6 +48,7 @@ wishlist(demos/hyperbolic_wormholes_rust): add W-203 (pull toward black holes)
 | `[x] -> [ ]` | `REOPEN ON WISHLIST` | the user's words on what broke | `reopen W-NN (<short name>)` |
 | `[<s>] -> null` | `FOLD INTO ANOTHER ON WISHLIST` | the id and short name it folds into | `fold W-NN (<short name>) into W-MM (<short name>)` |
 | `[<s>] -> [<s>]` | `RENUMBER ON WISHLIST` | the old and the new id, after two items took the same id | `renumber W-NN (<short name>) to W-MM` |
+| `[<s>] -> [<s>]` | `REVERT ON WISHLIST` | `reverts <hash>`, the commit it undoes; `<to>` is the status before that commit | `revert W-NN (<short name>)` |
 
 ## Rules
 
