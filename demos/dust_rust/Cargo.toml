@@ -3,13 +3,14 @@
 # Interface:
 #     dust_level: the level as a library (src/lib.rs, macOS only: Metal and SDL), whose
 #         play_level the one-window app (../warped_mvp_rust/) calls.
-#     hyperbolic-wormholes: the game alone (src/main.rs, which runs the library), what `cargo run` runs.
+#     hyperbolic-wormholes: the game alone (src/main.rs, which runs the library), what `cargo run` runs
+#         (the package is named dust, so the one-window app can depend on it beside Lunar Surface).
 #     wormholes_server: a game server alone (src/bin/wormholes_server.rs), which also builds for Linux.
 #
 # Example:
 #     cargo run --release
 [package]
-name = "hyperbolic-wormholes"
+name = "dust"
 version = "0.1.0"
 edition = "2024"
 default-run = "hyperbolic-wormholes"
@@ -40,6 +41,10 @@ sdl3 = { version = "0.22", features = ["build-from-source-static"] }
 
 [lib]
 name = "dust_level"
+
+[[bin]]
+name = "hyperbolic-wormholes"
+path = "src/main.rs"
 
 [[bin]]
 name = "wormholes_server"

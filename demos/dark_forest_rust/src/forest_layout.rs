@@ -21,8 +21,8 @@ use glam::{Mat4, Quat, Vec2, Vec3};
 
 use crate::map::{
     Appearance, Boundary, Ground, Ladder, LaserLook, Light, MapBox, MapFile, Material, PlayerSpec,
-    Regions, Scatter, Shape, Sky, Space, Spawn, Structure, StructureMesh, Sun, Warp, Zone, ZoneWalls,
-    translation_frame, yaw_frame,
+    Regions, Scatter, Shape, Sky, Space, Spawn, Structure, StructureMesh, Sun, Warp, Zone,
+    ZoneWalls, translation_frame, yaw_frame,
 };
 
 /// `HALF_WIDTH_M` is half the forest's extent along x.

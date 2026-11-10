@@ -955,8 +955,9 @@ static float4 find_boundary_planes(constant BoundaryPlanes& boundary, float3 eye
 /**
  * @brief `tonemap_fragment` adds bloom, exposes, tone maps with ACES, grades, draws the team boundary planes over
  * the picture and makes what is seen through them shimmer like heat haze, soft in the forest (`find_boundary_planes`,
- * `get_boundary_haze_px` in `FOREST_HAZE_STYLE`, W-148, W-149; not while capturing the lens atlas), and stores luma
- * in alpha for FXAA.
+ * `get_boundary_haze_px` in `FOREST_HAZE_STYLE`, W-148, W-149), shows the result in the player's `visuals`
+ * (`apply_player_visuals`, W-51, basic visuals), neither while capturing the lens atlas, and stores luma in alpha
+ * for FXAA.
  * @par Interface
  * `frame.effect_params.x` turns the color grade on, and `frame.effect_params.w` is the number of
  * bloom levels summed into `bloom`.
@@ -973,6 +974,7 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
                                  depth2d<float> depth [[texture(2)]],
                                  texture2d<float> lens_picture [[texture(3)]],
                                  constant rasterization_rate_map_data& rate_map [[buffer(9)]],
+                                 constant PlayerVisuals& visuals [[buffer(3)]],
                                  constant BoundaryPlanes& boundary [[buffer(4)]]) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float2 screen_px = get_screen_px(frame, rate_map, in.position.xy);
@@ -1023,6 +1025,7 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
         }
     }
     encoded = mix(encoded, lensed.rgb, lensed.a);
+    if (is_kept_plain < 0.5) encoded = apply_player_visuals(encoded, visuals);
     float luma = dot(encoded, float3(0.299, 0.587, 0.114));
     return float4(encoded, luma);
 }

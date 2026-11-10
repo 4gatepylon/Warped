@@ -3188,13 +3188,16 @@ static float3 get_hazed_color(constant VoxelUniforms &u, texture2d<float> hdr, u
 /**
  * @brief `tonemap_voxel` finishes the HDR image (texture 1) like the fps_demo: mixes in the bloom levels, adds the
  * bloom's bright parts as a glow, exposes, grades, tone maps with ACES, vignettes and encodes sRGB into texture 0,
- * with its luma in alpha for `fxaa_voxel`; where a team boundary plane covers the screen it shimmers (`get_hazed_color`). It reads each pixel through `get_soft_color`.
+ * with its luma in alpha for `fxaa_voxel`, in the player's `visuals` (`apply_player_visuals`, W-51, basic visuals);
+ * where a team boundary plane covers the screen it shimmers (`get_hazed_color`). It reads each pixel through
+ * `get_soft_color`.
  * @par Example
  * @code
  * dispatched by render_voxel.rs after tracing, one thread per pixel.
  * @endcode
  */
-kernel void tonemap_voxel(constant VoxelUniforms &u [[buffer(16)]], texture2d<float> hdr [[texture(1)]],
+kernel void tonemap_voxel(constant VoxelUniforms &u [[buffer(16)]], constant PlayerVisuals &visuals [[buffer(15)]],
+                          texture2d<float> hdr [[texture(1)]],
                           array<texture2d<float>, BLOOM_LEVELS> bloom [[texture(7)]], texture2d<float, access::write> image [[texture(0)]],
                           uint2 id [[thread_position_in_grid]]) {
     if (id.x >= hdr.get_width() || id.y >= hdr.get_height()) return;
@@ -3207,7 +3210,7 @@ kernel void tonemap_voxel(constant VoxelUniforms &u [[buffer(16)]], texture2d<fl
     float3 color = (mix(get_hazed_color(u, hdr, id), bloom_mean, BLOOM_STRENGTH) + BLOOM_GLOW * glow) * EXPOSURE;
     color = grade_display(aces_fitted(grade_scene(color)));
     color *= 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length((uv - 0.5) * float2(1.1, 1.0)));
-    float3 encoded = linear_to_srgb(saturate(color));
+    float3 encoded = apply_player_visuals(linear_to_srgb(saturate(color)), visuals);
     image.write(float4(encoded, dot(encoded, LUMA)), id);
 }
 

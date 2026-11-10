@@ -2,8 +2,9 @@
 //! space, so no ray marching is needed): the street sphere and buildings, textured with the
 //! fps_demo's CC0 Poly Haven textures and lit by the glowing core; consoles, pylons and robots
 //! (per frame); the see-through glass shell with its lift holes; the team boundary planes, which
-//! glow faintly (W-148); laser beams; and a last pass that makes the picture shimmer like heat
-//! haze where those planes cover the screen (W-149, `encode_haze`).
+//! glow faintly (W-148); laser beams; a pass that makes the picture shimmer like heat haze where
+//! those planes cover the screen (W-149, `encode_haze`); and a last pass that shows the finished
+//! frame in the player's visuals (W-51, basic visuals) when they aren't the identity.
 //!
 //! Interface: `CityVertex`, `CityScene`, `build_scene`, `CityFrame`, `CityGpu`, `push_rounded_box`,
 //! `push_mesh`, `push_beam`, `MAX_HOLE_COUNT`.
@@ -32,6 +33,7 @@ use crate::fps_demo_assets::get_asset_path;
 use crate::mesh::{MeshMaterial, MeshModel};
 use crate::texture_arrays::{make_array, make_mips};
 use warped_shared::boundary_planes::{BOUNDARY_PLANES_METAL, get_shimmer_clock_s};
+use warped_shared::visuals::{GpuPlayerVisuals, PLAYER_VISUALS_METAL};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
@@ -179,6 +181,9 @@ pub struct CityFrame {
     /// then the cosines of its cone's inner and outer edges, the distance at which it falls to half
     /// and its brightness (0 when off).
     pub flashlight: [[f32; 4]; 3],
+    /// `visuals` is the player's brightness, contrast, saturation and gamma for the finished frame
+    /// (W-51, basic visuals); `GpuPlayerVisuals::IDENTITY` skips that pass.
+    pub visuals: GpuPlayerVisuals,
 }
 
 impl CityFrame {
@@ -1174,6 +1179,7 @@ pub struct CityGpu {
     boundary: Pipeline,
     haze: Pipeline,
     haze_copy: Option<Texture>,
+    visuals: Pipeline,
     depth_write: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     depth_test: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     albedo: Texture,
@@ -1316,6 +1322,66 @@ fn make_haze_pipeline(
         })?)
 }
 
+/// `make_visuals_pipeline` makes the pipeline of the visuals pass (`visuals_vertex`,
+/// `visuals_fragment`): one sample, no depth, drawing over the resolved frame.
+///
+/// Example: `let visuals = make_visuals_pipeline(device, &library)?;`
+fn make_visuals_pipeline(
+    device: &ProtocolObject<dyn MTLDevice>,
+    library: &ProtocolObject<dyn MTLLibrary>,
+) -> Result<Pipeline> {
+    let function = |name: &str| {
+        library
+            .newFunctionWithName(&NSString::from_str(name))
+            .ok_or(format!("Metal: no {name}"))
+    };
+    let descriptor: Retained<MTLRenderPipelineDescriptor> = MTLRenderPipelineDescriptor::new();
+    descriptor.setVertexFunction(Some(&*function("visuals_vertex")?));
+    descriptor.setFragmentFunction(Some(&*function("visuals_fragment")?));
+    let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
+    attachment.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+    Ok(device
+        .newRenderPipelineStateWithDescriptor_error(&descriptor)
+        .map_err(|e| {
+            format!(
+                "Metal: the City Sphere visuals pipeline failed: {}",
+                e.localizedDescription()
+            )
+        })?)
+}
+
+/// `set_render_area` limits `encoder` to the top-left `render_px` of a target of `target_px`.
+///
+/// Example: `set_render_area(&encoder, frame.render_px, target_px);`
+fn set_render_area(
+    encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+    render_px: (usize, usize),
+    target_px: (usize, usize),
+) {
+    encoder.setViewport(MTLViewport {
+        originX: 0.0,
+        originY: 0.0,
+        width: render_px.0 as f64,
+        height: render_px.1 as f64,
+        znear: 0.0,
+        zfar: 1.0,
+    });
+    encoder.setScissorRect(MTLScissorRect {
+        x: 0,
+        y: 0,
+        width: render_px.0.min(target_px.0),
+        height: render_px.1.min(target_px.1),
+    });
+}
+
+/// `get_shader_source` gives `render_city.metal` with the shared shaders it uses before it:
+/// `boundary_planes.metal` (W-148) and `visuals.metal` (W-51, basic visuals).
+///
+/// Example: `let source: String = get_shader_source();`
+fn get_shader_source() -> String {
+    format!("{BOUNDARY_PLANES_METAL}\n{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}")
+}
+
 /// `make_sample_texture` makes a memoryless `MSAA_SAMPLE_COUNT`-sample render target of `format`
 /// and `size_px` (W-138, no aliasing): its samples live only in tile memory while the pass draws,
 /// and the colour pass resolves them into the target.
@@ -1361,7 +1427,7 @@ impl CityGpu {
     /// Example: `let gpu = CityGpu::New(&device)?;`
     #[allow(non_snake_case)]
     pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<CityGpu> {
-        let source: String = format!("{BOUNDARY_PLANES_METAL}\n{SHADER_SOURCE}");
+        let source: String = get_shader_source();
         let library = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|e| {
@@ -1393,6 +1459,7 @@ impl CityGpu {
             boundary: make_pipeline(device, &library, "boundary_fragment", None)?,
             haze: make_haze_pipeline(device, &library)?,
             haze_copy: None,
+            visuals: make_visuals_pipeline(device, &library)?,
             depth_write: make_depth_state(device, true)?,
             depth_test: make_depth_state(device, false)?,
             albedo: make_array(device, MTLPixelFormat::RGBA8Unorm_sRGB, 4, &layers)?,
@@ -1402,7 +1469,9 @@ impl CityGpu {
         })
     }
 
-    /// `encode` draws `frame` into the top-left `frame.render_px` of `target`.
+    /// `encode` draws `frame` into the top-left `frame.render_px` of `target`, makes it shimmer
+    /// where a team boundary plane covers the screen (`encode_haze`), then shows it in
+    /// `frame.visuals` (`encode_visuals`) unless they are the identity.
     ///
     /// Example: `gpu.encode(&device, &command_buffer, &frame, &render_texture)?;`
     pub fn encode(
@@ -1504,20 +1573,7 @@ impl CityGpu {
             .renderCommandEncoderWithDescriptor(&pass)
             .ok_or("Metal: no render encoder")?;
         encoder.setCullMode(MTLCullMode::None);
-        encoder.setViewport(MTLViewport {
-            originX: 0.0,
-            originY: 0.0,
-            width: frame.render_px.0 as f64,
-            height: frame.render_px.1 as f64,
-            znear: 0.0,
-            zfar: 1.0,
-        });
-        encoder.setScissorRect(MTLScissorRect {
-            x: 0,
-            y: 0,
-            width: frame.render_px.0.min(target_px.0),
-            height: frame.render_px.1.min(target_px.1),
-        });
+        set_render_area(&encoder, frame.render_px, target_px);
         let [
             (opaque, opaque_count),
             (glass, glass_count),
@@ -1564,6 +1620,9 @@ impl CityGpu {
         encoder.endEncoding();
         if !frame.scene.haze_planes.is_empty() {
             self.encode_haze(device, command_buffer, frame, target)?;
+        }
+        if frame.visuals != GpuPlayerVisuals::IDENTITY {
+            self.encode_visuals(command_buffer, frame, target)?;
         }
         Ok(())
     }
@@ -1645,6 +1704,40 @@ impl CityGpu {
         encoder.endEncoding();
         Ok(())
     }
+
+    /// `encode_visuals` redraws the top-left `frame.render_px` of `target` in `frame.visuals`
+    /// (W-51, basic visuals): a full-screen triangle whose fragments read back the pixel under
+    /// them (programmable blending) and write it through `apply_player_visuals`.
+    ///
+    /// Example: `self.encode_visuals(command_buffer, frame, target)?;`
+    fn encode_visuals(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        frame: &CityFrame,
+        target: &ProtocolObject<dyn MTLTexture>,
+    ) -> Result<()> {
+        let pass: Retained<MTLRenderPassDescriptor> = MTLRenderPassDescriptor::new();
+        let color = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+        color.setTexture(Some(target));
+        color.setLoadAction(MTLLoadAction::Load);
+        color.setStoreAction(MTLStoreAction::Store);
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&pass)
+            .ok_or("Metal: no render encoder for the visuals")?;
+        set_render_area(&encoder, frame.render_px, (target.width(), target.height()));
+        encoder.setRenderPipelineState(&self.visuals);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG VISUALS WILL HAPPEN
+        unsafe {
+            encoder.setFragmentBytes_length_atIndex(
+                NonNull::from(&frame.visuals).cast(),
+                std::mem::size_of::<GpuPlayerVisuals>(),
+                0,
+            );
+            encoder.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+        }
+        encoder.endEncoding();
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1654,6 +1747,7 @@ mod tests {
     //! | The vertex layout matches the shader's (13 floats) | `vertex_is_13_floats` |
     //! | The scene has the street, boxes, core, hexagonal glass, glowing details, and the lifts' holes (round) before the stairs' (as wide as their stairs) | `scene_has_every_part` |
     //! | The team boundary planes (W-148): a ring per plane in its plane, from the glass level's height to the street; the shaders with `boundary_planes.metal` compile into its pipeline | `boundary_planes_are_rings_in_their_planes` |
+    //! | The shaders, with `visuals.metal` before them, compile into the opaque and visuals pipelines (W-51, basic visuals) | `the_visuals_pass_compiles` |
 
     use super::*;
 
@@ -1679,12 +1773,23 @@ mod tests {
             }
         }
         let device = objc2_metal::MTLCreateSystemDefaultDevice().expect("a Metal GPU");
-        let source: String = format!("{BOUNDARY_PLANES_METAL}\n{SHADER_SOURCE}");
+        let source: String = get_shader_source();
         let library = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .expect("render_city.metal compiles");
         make_pipeline(&device, &library, "boundary_fragment", None).expect("the boundary pipeline");
         make_haze_pipeline(&device, &library).expect("the haze pipeline");
+    }
+
+    #[test]
+    fn the_visuals_pass_compiles() {
+        let device = objc2_metal::MTLCreateSystemDefaultDevice().expect("a Metal GPU");
+        let source: String = get_shader_source();
+        let library = device
+            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
+            .expect("render_city.metal compiles");
+        make_pipeline(&device, &library, "city_fragment", None).expect("the opaque pipeline");
+        make_visuals_pipeline(&device, &library).expect("the visuals pipeline");
     }
 
     #[test]

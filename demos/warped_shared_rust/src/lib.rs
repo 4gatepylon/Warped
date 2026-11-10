@@ -28,6 +28,8 @@
 //! - `third_person`: the third-person view's switch, and its boom in flat space.
 //! - `boundary_planes`: how the team boundary planes look and how what is seen through them
 //!   shimmers (W-148, W-149), with their shaders' code.
+//! - `visuals`: a player's brightness, contrast, saturation and gamma, applied to the finished
+//!   picture (W-51, basic visuals), with the shaders' colour maths.
 //! - `app`: the interface between the one-window app (`../warped_mvp_rust/`) and a level.
 //! - `match_state`, `match_protocol`, `match_menu`: the match's rules, what its server and clients
 //!   share (levels file, view, client, network beacon) and its progression page.
@@ -100,5 +102,6 @@ pub mod texture_arrays;
 pub mod third_person;
 #[cfg(target_os = "macos")]
 pub mod viewmodel;
+pub mod visuals;
 #[cfg(target_os = "macos")]
 pub mod weapons;

@@ -265,8 +265,9 @@ Every level follows these rules:
 - The blue and red zones are easy to cross widthwise, so a team can rotate quickly between routes.
 - Each team zone's edge is a team boundary plane in every level (W-148, team boundary planes in every level): a
   faint see-through wall that glows slightly in the team's colour, brightest at its foot, and stops neither
-  players nor lasers. What is seen through one shimmers a little (W-149, shimmer through boundary planes), so it
-  stops once you have crossed it; in City Sphere the shimmer is a ripple of light rather than a bend.
+  players nor lasers. What is seen through one shimmers like air over hot ground (W-149, shimmer through boundary
+  planes): the picture behind it wobbles a little, rising and changing all the time, in every level alike. The
+  shimmer is only where a wall covers the view, so it stops once you have crossed the wall and look away from it.
 
 | Zone layout | Shape |
 | --- | --- |
@@ -446,7 +447,9 @@ What a player sees while playing:
   - SETTINGS: the player's own settings, one row each: every key binding (`Return`, then the new
     key, button or wheel; `Esc` cancels), then numbers changed with `Left` and `Right` (mouse look
     speed, motion blur, head bob walking and sprinting, how red, shaky and blurred a hit looks,
-    the wormhole colour's strength and the Milky Way's brightness), then a row that saves them to
+    the wormhole colour's strength, the Milky Way's brightness, and the picture's brightness,
+    contrast, saturation and gamma, which change only how the finished picture looks on that
+    player's screen, W-51, basic visuals), then a row that saves them to
     `~/.config/warped/player_settings.yaml` (or the `--player-settings` file), which later games
     load. A line below says what changed or went wrong.
   - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole

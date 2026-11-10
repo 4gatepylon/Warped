@@ -102,8 +102,8 @@ it); leave it unset to play across computers.
 - **Team boundary planes** (W-148, team boundary planes in every level; W-149, shimmer through boundary planes): the
   map's `regions` give the zones, blue beyond 24 m toward −z and red beyond 24 m toward +z, and a wall on each team
   zone's edge, 10 m high (above the decks), faintly glowing in the team's colour. The tone map draws them over the
-  picture and bends what is seen through them a little (`post.metal`'s `find_boundary_planes`; the shared look and
-  shimmer are `../warped_shared_rust/src/boundary_planes.metal`). They stop neither players nor shots, and the lens
+  picture and shimmers what is seen through them like heat haze (`post.metal`'s `find_boundary_planes`; the shared
+  look and haze are `../warped_shared_rust/src/boundary_planes.metal`). They stop neither players nor shots, and the lens
   atlas is captured without them.
 - **Heights:** the ground; decks at 7 m (each team's treehouse, a middle deck and a flank deck, joined by bridges with
   rope rails), held up by bundles of thick culms; the lookout at 12 m in the centre.
@@ -179,6 +179,9 @@ binary. The wire protocol is the hyperbolic demo's; its wormhole fields carry th
 - `--photo <png> [--photo-width-px <px>] [--camera-pose x,y,z,yaw,pitch] [--fov-deg <deg>] [--hide-canopy]`: saves
   one frame without the HUD and quits; `--photo-map-page` opens the menu's map page.
 - `--map-picture <png>` (`make map-picture`): renders the map page's picture.
+- `--brightness`, `--contrast`, `--saturation`, `--gamma` (each 1 for none): the picture's visuals at the start (W-51,
+  basic visuals), which the menu's SETTINGS page changes for this run; they change only the finished picture. In the
+  one-window app the forest starts with the `visuals` of the player's settings file instead.
 - `--camera-view <view>`, `--autopilot`, `--show-frame-time`, `--benchmark-seconds <s>`: as in `../fps_demo/`.
 - `--export-map <path>`: writes the map and quits.
 - `--throw-yaws-rad <purple>,<green>`: throws both wormhole mouths by script, turned to those yaws, at 0.5 s and 1.5 s
