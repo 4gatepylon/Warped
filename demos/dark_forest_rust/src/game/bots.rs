@@ -65,9 +65,11 @@ pub struct BotShot {
     pub did_hit_player: bool,
 }
 
-/// `BotContext` is what a bot knows about the world this frame.
+/// `BotContext` is what a bot knows about the world this frame, with the warps' pull along the
+/// ground on a body whose middle is at a point (W-144, `Warps::get_walk_pull_m_per_s`).
 pub struct BotContext<'a> {
     pub solids: &'a [Aabb],
+    pub get_warp_pull_m_per_s: &'a dyn Fn(Vec3) -> Vec3,
     pub nav: &'a NavGraph,
     pub ladders: &'a [LadderVolume],
     pub player_eye_m: Vec3,
@@ -389,7 +391,13 @@ impl Bot {
             desired = self.avoid_direction;
         }
         let desired: Vec3 = desired.normalize_or_zero();
-        let target_velocity: Vec3 = desired * speed_m_s;
+        let target_velocity: Vec3 = match climb_m_s {
+            Some(_) => desired * speed_m_s,
+            None => {
+                desired * speed_m_s
+                    + (context.get_warp_pull_m_per_s)(self.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M)
+            }
+        };
         let blend_frac: f32 = 1.0 - (-8.0 * dt_s).exp();
         let horizontal: Vec3 = self
             .velocity_m_s
