@@ -31,7 +31,8 @@ use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
     GravitySettings, MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings,
-    SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
+    ShootingSettings, SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings,
+    WormholeSettings,
 };
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
@@ -44,7 +45,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 23] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 25] = [
     "glass.max_bounce_count",
     "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
@@ -63,7 +64,9 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 23] = [
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
-    "respawn.delay_s",
+    "respawn.start_s",
+    "respawn.step_s",
+    "shooting.drop_m_per_s_per_s",
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
@@ -139,6 +142,8 @@ pub struct ServerSettings {
     pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,

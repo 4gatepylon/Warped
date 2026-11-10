@@ -32,6 +32,10 @@
 //!   fails rather than playing on.
 //! - An elimination counts a death for the player hit and a kill for the shooter, unless they are on
 //!   the same team. Scores go back to 0 when a new game starts.
+//! - An elimination carries its victim's respawn wait (`RespawnSettings::get_wait_s` on the time
+//!   since this game on the level started) as an `f32` after the two ids, which older windows
+//!   don't read; a window reads a message without it, from an older server, as that server's flat
+//!   wait (`respawn.start_s`).
 
 use std::cell::Cell;
 use std::error::Error;
@@ -195,13 +199,15 @@ pub struct Score {
     pub deaths: u32,
 }
 
-/// `NetEvent` is something the server told this client.
+/// `NetEvent` is something the server told this client; an elimination carries how long its victim
+/// waits before coming back (`RespawnSettings::get_wait_s` on the server's level clock).
 pub enum NetEvent {
     Joined(u32),
     Eliminated {
         victim_id: u32,
         shooter_id: u32,
         is_self: bool,
+        respawn_wait_s: f64,
     },
 }
 
@@ -230,6 +236,15 @@ impl Message {
     /// Example: `let message = Message::New(Kind::Leave).token(token).id(3);`
     fn token(mut self, token: u64) -> Message {
         self.0.extend_from_slice(&token.to_le_bytes());
+        self
+    }
+
+    /// `seconds` appends a time in seconds as an `f32`, such as an elimination's respawn wait
+    /// (older windows stop reading before it).
+    ///
+    /// Example: `let message = Message::New(Kind::Eliminated).id(2).id(1).seconds(20.0);`
+    fn seconds(mut self, time_s: f64) -> Message {
+        self.0.extend_from_slice(&(time_s as f32).to_le_bytes());
         self
     }
 
@@ -361,6 +376,15 @@ impl Reader<'_> {
     /// Example: `let token = reader.token()?;`
     fn token(&mut self) -> Option<u64> {
         Some(u64::from_le_bytes(self.array::<BYTES_PER_TOKEN>()?))
+    }
+
+    /// `seconds` reads a time written by `Message::seconds`.
+    ///
+    /// Example: `let wait_s = reader.seconds()?;`
+    fn seconds(&mut self) -> Option<f64> {
+        Some(f64::from(f32::from_le_bytes(
+            self.array::<BYTES_PER_F32>()?,
+        )))
     }
 
     /// `player` reads a player written by `Message::player`.
@@ -510,17 +534,19 @@ struct Slot {
 }
 
 /// `Tally` is a player's score in this game on the server, their address, and since when they wait
-/// to respawn after being eliminated, if they do.
+/// to respawn after being eliminated, if they do, and for how long (their last elimination's).
 struct Tally {
     score: Score,
     address: SocketAddr,
     eliminated_at: Option<Instant>,
+    respawn_wait_s: f64,
 }
 
 /// `Server` is the server's state: its socket, its map's name, the joined players, the next id to
-/// give, the id each address had, each console's team and place, the game, and the tally of every
-/// player who joined this game.
+/// give, the id each address had, each console's team and place, the game, the tally of every
+/// player who joined this game, and when this game on the level started (its respawn clock).
 struct Server {
+    level_started_at: Instant,
     socket: UdpSocket,
     secret: [u8; BYTES_PER_SECRET],
     password: Vec<u8>,
@@ -666,6 +692,11 @@ impl Server {
                 if shooter_team.is_none() || self.game.winner.is_some() || hits_to_kill == 0 {
                     return Ok(());
                 }
+                if !self.settings.shooting.is_friendly_fire_on
+                    && shooter_team == Some(self.slots[victim].player.team)
+                {
+                    return Ok(());
+                }
                 if !add_damage(
                     &mut self.slots[victim].damage_frac,
                     get_hit_damage_frac(hits_to_kill),
@@ -675,9 +706,12 @@ impl Server {
                 let victim_slot: Slot = self.slots.remove(victim);
                 let victim_address: SocketAddr = victim_slot.address;
                 let is_enemy: bool = shooter_team != Some(victim_slot.player.team);
-                self.count_elimination(victim_id, shooter_id, is_enemy);
                 println!("player {victim_id} was hit by player {shooter_id}");
-                let message: Message = Message::New(Kind::Eliminated).id(victim_id).id(shooter_id);
+                let wait_s: f64 = self.count_elimination(victim_id, shooter_id, is_enemy);
+                let message: Message = Message::New(Kind::Eliminated)
+                    .id(victim_id)
+                    .id(shooter_id)
+                    .seconds(wait_s);
                 for target in self
                     .slots
                     .iter()
@@ -776,6 +810,7 @@ impl Server {
                 },
                 address,
                 eliminated_at: None,
+                respawn_wait_s: 0.0,
             }),
         }
     }
@@ -790,25 +825,38 @@ impl Server {
             .unwrap_or_else(|| panic!("get_tally_mut: player {id} never joined this game"))
     }
 
-    /// `count_elimination` counts a death for player `victim_id`, who now waits to respawn, and a
-    /// kill for player `shooter_id` if `is_enemy` (they are on different teams).
+    /// `get_level_s` gives the seconds since this game on the level started (the server's start,
+    /// or `start_new_game`), the clock the respawn wait grows by.
     ///
-    /// Example: `server.count_elimination(2, 1, true);`
-    fn count_elimination(&mut self, victim_id: u32, shooter_id: u32, is_enemy: bool) {
+    /// Example: `let level_s: f64 = server.get_level_s();`
+    fn get_level_s(&self) -> f64 {
+        self.level_started_at.elapsed().as_secs_f64()
+    }
+
+    /// `count_elimination` counts a death for player `victim_id`, who now waits to respawn for the
+    /// time it gives (`RespawnSettings::get_wait_s` at `get_level_s`, logged), and a kill for player
+    /// `shooter_id` if `is_enemy` (they are on different teams).
+    ///
+    /// Example: `let wait_s: f64 = server.count_elimination(2, 1, true);`
+    fn count_elimination(&mut self, victim_id: u32, shooter_id: u32, is_enemy: bool) -> f64 {
+        let level_s: f64 = self.get_level_s();
+        let wait_s: f64 = self.settings.respawn.get_wait_s(level_s);
+        println!("player {victim_id} respawns in {wait_s:.1} s ({level_s:.1} s into the level)");
         let victim: &mut Tally = self.get_tally_mut(victim_id);
         victim.score.deaths += 1;
-        victim.eliminated_at = Some(Instant::now());
+        (victim.eliminated_at, victim.respawn_wait_s) = (Some(Instant::now()), wait_s);
         if is_enemy {
             self.get_tally_mut(shooter_id).score.kills += 1;
         }
+        wait_s
     }
 
     /// `is_waiting_to_respawn` says whether `tally`'s player was eliminated and may still rejoin:
-    /// less than the settings' `respawn.delay_s` and `PLAYER_TIMEOUT_S` ago.
+    /// less than their respawn wait and `PLAYER_TIMEOUT_S` ago.
     ///
     /// Example: `if server.is_waiting_to_respawn(tally) { ... }`
     fn is_waiting_to_respawn(&self, tally: &Tally) -> bool {
-        let wait_s: f64 = self.settings.respawn.delay_s + PLAYER_TIMEOUT_S;
+        let wait_s: f64 = tally.respawn_wait_s + PLAYER_TIMEOUT_S;
         tally
             .eliminated_at
             .is_some_and(|time| time.elapsed().as_secs_f64() < wait_s)
@@ -921,8 +969,9 @@ impl Server {
         }
     }
 
-    /// `start_new_game` turns every console back on, clears the winner and sets every player's kills
-    /// and deaths back to 0; clients see the game's number change and go back to their spawn.
+    /// `start_new_game` turns every console back on, clears the winner, sets every player's kills
+    /// and deaths back to 0 and restarts the level's respawn clock; clients see the game's number
+    /// change and go back to their spawn.
     ///
     /// Example: `server.start_new_game();`
     fn start_new_game(&mut self) {
@@ -930,6 +979,7 @@ impl Server {
             number: self.game.number + 1,
             ..GameState::default()
         };
+        self.level_started_at = Instant::now();
         for slot in &mut self.slots {
             (slot.player.disabling_console, slot.disabling_since) = (None, None);
         }
@@ -1065,6 +1115,7 @@ pub fn serve(
     beacon.extend_from_slice(BEACON_MAGIC);
     beacon.extend_from_slice(&port.to_le_bytes());
     let mut server: Server = Server {
+        level_started_at: Instant::now(),
         socket,
         secret: make_random_bytes(),
         password: game_password,
@@ -1407,7 +1458,13 @@ impl Client {
                         .collect();
                 }
                 Some(Kind::Eliminated) => {
-                    if let (Some(victim_id), Some(shooter_id)) = (reader.id(), reader.id()) {
+                    let old_server_wait_s: Option<f64> =
+                        self.settings.as_ref().map(|s| s.respawn.start_s);
+                    if let (Some(victim_id), Some(shooter_id), Some(respawn_wait_s)) = (
+                        reader.id(),
+                        reader.id(),
+                        reader.seconds().or(old_server_wait_s),
+                    ) {
                         let is_self: bool = Some(victim_id) == self.id;
                         if is_self {
                             self.id = None;
@@ -1419,6 +1476,7 @@ impl Client {
                             victim_id,
                             shooter_id,
                             is_self,
+                            respawn_wait_s,
                         });
                     }
                 }
@@ -1660,8 +1718,10 @@ mod tests {
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
     //! | Scores datagram | complete (several players, none), cut short, too long, an unknown team | `scores_survive_encoding` |
     //! | Who a hit eliminates | nobody (a hit short of the limit), the other team's player (a kill and a death), a teammate (a death only) | `eliminations_count_kills_and_deaths` |
+    //! | Friendly fire (`shooting.is_friendly_fire_on`) | on (a teammate falls), off (a teammate's hit does nothing, an enemy's still counts) | `eliminations_count_kills_and_deaths`, `friendly_fire_can_be_turned_off` |
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
+    //! | Respawn wait an elimination carries | at the level's start, a period in (one step more), from a server older than the wait (its settings' flat wait) | `eliminations_carry_the_respawn_wait_of_the_levels_time` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
     //! | Server silent to a welcomed client | shorter than its timeout (stays), longer (the server dropped it: joins the same team again) | `clients_the_server_dropped_join_again` |
     //! | Server socket in tests | bound on 127.0.0.1 (`is_loopback_only`) | `tests_listen_on_loopback_only` |
@@ -1669,6 +1729,7 @@ mod tests {
     use super::*;
     use crate::geometry::{AXIS_X, AXIS_Z, make_boost, make_rotation};
     use crate::health::DAMAGE_TOLERANCE_FRAC;
+    use crate::settings::RespawnSettings;
     use crate::shapes::{Shape, ShapeKind};
     use glam::DVec3;
 
@@ -1780,6 +1841,7 @@ mod tests {
     /// Example: `let mut server = make_server();`
     fn make_server() -> Server {
         Server {
+            level_started_at: Instant::now(),
             socket: UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port"),
             secret: make_random_bytes(),
             password: TEST_PASSWORD.to_vec(),
@@ -2346,6 +2408,25 @@ mod tests {
     }
 
     #[test]
+    fn friendly_fire_can_be_turned_off() {
+        let mut server: Server = make_server();
+        server.settings.shooting.is_friendly_fire_on = false;
+        let (red_one, red_two, blue_three) = (address(50_001), address(50_002), address(50_003));
+        join(&mut server, red_one, RED);
+        join(&mut server, red_two, RED);
+        join(&mut server, blue_three, BLUE);
+        let token: u64 = get_token(&server, red_one);
+        server
+            .handle(&make_hit(token, 1, 2, 1), red_one)
+            .expect("a hit on a teammate");
+        assert_eq!(server.slots.len(), 3);
+        server
+            .handle(&make_hit(token, 1, 3, 1), red_one)
+            .expect("a hit on an enemy");
+        assert_eq!(server.slots.len(), 2);
+    }
+
+    #[test]
     fn eliminations_count_kills_and_deaths() {
         const RIFLE_HITS_TO_KILL: u8 = 2;
         let mut server: Server = make_server();
@@ -2382,12 +2463,60 @@ mod tests {
             vec![(1, 1, 0), (2, 0, 1), (3, 0, 1)]
         );
         join(&mut server, blue_two, BLUE);
-        let wait_s: f64 = server.settings.respawn.delay_s + PLAYER_TIMEOUT_S;
+        let wait_s: f64 = server.get_tally_mut(3).respawn_wait_s + PLAYER_TIMEOUT_S;
         server.get_tally_mut(3).eliminated_at =
             Some(Instant::now() - Duration::from_secs_f64(wait_s));
         assert_eq!(get_kills_and_deaths(&server), vec![(1, 1, 0), (2, 0, 1)]);
         server.start_new_game();
         assert_eq!(get_kills_and_deaths(&server), vec![(1, 0, 0), (2, 0, 0)]);
+    }
+
+    #[test]
+    fn eliminations_carry_the_respawn_wait_of_the_levels_time() {
+        let mut server: Server = make_server();
+        let respawn: RespawnSettings = server.settings.respawn.clone();
+        let shooter: SocketAddr = address(50_001);
+        join(&mut server, shooter, RED);
+        for (level_s, is_old_server, expected_wait_s) in [
+            (0.0, false, respawn.start_s),
+            (respawn.period_s, false, respawn.start_s + respawn.step_s),
+            (respawn.period_s, true, respawn.start_s),
+        ] {
+            let mut victim: Client = connect_client(&mut server, BLUE);
+            let victim_id: u32 = server.slots.last().expect("the victim").player.id;
+            server.level_started_at = Instant::now() - Duration::from_secs_f64(level_s);
+            if is_old_server {
+                poll_until(&mut victim, |client| client.id.is_some());
+                let old: Message = Message::New(Kind::Eliminated).id(victim_id).id(1);
+                let victim_port: u16 = victim.socket.local_addr().expect("an address").port();
+                let victim_address: SocketAddr =
+                    SocketAddr::from((Ipv4Addr::LOCALHOST, victim_port));
+                server.send(&old.0, victim_address);
+            } else {
+                let hit: Vec<u8> = make_hit(get_token(&server, shooter), 1, victim_id, 1);
+                server.handle(&hit, shooter).expect("a hit");
+                assert_eq!(
+                    server.get_tally_mut(victim_id).respawn_wait_s,
+                    expected_wait_s
+                );
+            }
+            let deadline: Instant = Instant::now() + Duration::from_secs(1);
+            let wait_s: f64 = loop {
+                assert!(Instant::now() < deadline, "the elimination never arrived");
+                let events: Vec<NetEvent> = victim.poll().expect("the welcome and the elimination");
+                if let Some(wait_s) = events.into_iter().find_map(|event| match event {
+                    NetEvent::Eliminated {
+                        is_self: true,
+                        respawn_wait_s,
+                        ..
+                    } => Some(respawn_wait_s),
+                    _ => None,
+                }) {
+                    break wait_s;
+                }
+            };
+            assert_eq!(wait_s, expected_wait_s);
+        }
     }
 
     #[test]
