@@ -143,6 +143,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-167 Ownership over wormholes.** The user, 2026-11-09: "being having ownership over wormholes". Related: W-159 (tell wormhole pairs apart), W-165 (money to buy wormholes) and W-166 (clear rules for destroying thrown wormholes).
 - [ ] **W-168 Fading out into a black hole.** The user, 2026-11-09: "a graphical effect where the world gets darker and arker from outside in (and dims broadly, blurring) when you are pulled into a dark hole (NOT worm hole))". Related: W-144 (gravity toward black holes and wormholes).
 - [ ] **W-169 Better sounds.** The user, 2026-11-09: "getting sounds for all the guns etc.. and that the sounds should be better than what they are right now". New sounds come through the adding-assets skill (approval and credits).
+- [ ] **W-170 Wishlist to GitHub issues.** The user, 2026-11-09: "switching from wishlist markdown to github issues". Issues follow the github-issue skill (title format, template, labels); the agents' rules about the wishlist (in each demo's AGENTS.md) would move with it.
 
 ## Pending user review
 
