@@ -48,11 +48,34 @@ pub struct MapFile {
     pub appearance: Appearance,
 }
 
-/// `Regions` is the part of the map's regions this demo uses: the playable area's boundary.
+/// `Regions` is the part of the map's regions this demo uses: the team zones with their walls (the
+/// team boundary planes stand on the zones' finite edges, W-148, team boundary planes in every
+/// level) and the playable area's boundary.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Regions {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zones: Vec<Zone>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundary: Option<Boundary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone_walls: Option<ZoneWalls>,
+}
+
+/// `Zone` is a team's band of the world's Fermi u (along −z), `None` for no edge on that side.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Zone {
+    pub team: String,
+    pub u_min_m: Option<f32>,
+    pub u_max_m: Option<f32>,
+}
+
+/// `ZoneWalls` is how the walls on the zones' edges look: their height over the ground, their
+/// thickness and how opaque they are at their foot.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ZoneWalls {
+    pub height_m: f32,
+    pub thickness_m: f32,
+    pub opacity_frac: f32,
 }
 
 /// `Boundary` is the playable area, a rectangle or an ellipse (`kind`) with half sizes `u_m`

@@ -16,10 +16,12 @@ use objc2_metal::{
     MTLFunctionConstantValues, MTLLibrary, MTLPixelFormat, MTLRenderPipelineDescriptor,
     MTLRenderPipelineState,
 };
+use warped_shared::boundary_planes::BOUNDARY_PLANES_METAL;
 use warped_shared::visuals::PLAYER_VISUALS_METAL;
 
 /// `SHADER_SOURCE` is every shader file, in dependency order, as one MSL translation unit;
-/// `Pipelines::new` puts `PLAYER_VISUALS_METAL` (W-51, basic visuals) before it.
+/// `Pipelines::new` puts `BOUNDARY_PLANES_METAL` (W-148) and `PLAYER_VISUALS_METAL` (W-51, basic
+/// visuals) before it.
 const SHADER_SOURCE: &str = concat!(
     include_str!("../../shaders/common.metal"),
     include_str!("../../shaders/ibl.metal"),
@@ -270,7 +272,8 @@ impl Pipelines {
     /// Example:
     ///     let pipelines: Pipelines = Pipelines::new(&device);
     pub fn new(device: &ProtocolObject<dyn MTLDevice>) -> Pipelines {
-        let source: String = format!("{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}");
+        let source: String =
+            format!("{BOUNDARY_PLANES_METAL}\n{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}");
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .unwrap_or_else(|error| panic!("shader compilation failed: {error}"));

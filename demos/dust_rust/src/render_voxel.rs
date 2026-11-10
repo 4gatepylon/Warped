@@ -48,6 +48,7 @@ use crate::voxel_world::{
     BeamSegment, FOG_DEPTHS, MAX_MATERIAL_COUNT, VoxelWarp, VoxelWorld, clip_beam_to_map,
 };
 use crate::zone_walls::{GpuZoneWalls, MAX_ZONE_WALL_COUNT};
+use warped_shared::boundary_planes::{BOUNDARY_PLANES_METAL, get_shimmer_clock_s};
 use warped_shared::visuals::{GpuPlayerVisuals, PLAYER_VISUALS_METAL};
 
 /// `Result` is this module's result type.
@@ -719,7 +720,7 @@ impl VoxelFrame {
             .collect();
         gpu_beams.extend(get_beacon_beams(world));
         let (dust_bursts, dust_particles) = pack_dust(dust);
-        let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
+        let mut zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
             GpuZoneWalls {
                 walls: [[0.0; 4]; MAX_ZONE_WALL_COUNT],
                 look: [0.0; 4],
@@ -728,6 +729,7 @@ impl VoxelFrame {
             },
             |walls| walls.to_gpu(r),
         );
+        zone_walls.look[3] = get_shimmer_clock_s(world.sky_time_s);
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
         let (planet, e1, e2) = match world.planet {
             Some((d, radius_rad)) => {
@@ -1052,27 +1054,28 @@ fn make_hdr_texture(
 fn make_library(
     device: &ProtocolObject<dyn MTLDevice>,
 ) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
-    let source: String = format!("{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}")
-        .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
-        .replace(
-            "__BYTES_PER_RAY_END__",
-            &VOXEL_BYTES_PER_RAY_END.to_string(),
-        )
-        .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
-        .replace(
-            "__TERRAIN_CEILING_CELLS__",
-            &TERRAIN_CEILING_CELLS.to_string(),
-        )
-        .replace("__LIGHT_CUTOFF_FRAC__", &format!("{LIGHT_CUTOFF_FRAC:?}"))
-        .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
-        .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
-        .replace(
-            "__BYTES_PER_VOXEL_UNIFORMS__",
-            &std::mem::size_of::<VoxelUniforms>().to_string(),
-        )
-        .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
-        .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
-        .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR));
+    let source: String =
+        format!("{BOUNDARY_PLANES_METAL}\n{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}")
+            .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
+            .replace(
+                "__BYTES_PER_RAY_END__",
+                &VOXEL_BYTES_PER_RAY_END.to_string(),
+            )
+            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
+            .replace(
+                "__TERRAIN_CEILING_CELLS__",
+                &TERRAIN_CEILING_CELLS.to_string(),
+            )
+            .replace("__LIGHT_CUTOFF_FRAC__", &format!("{LIGHT_CUTOFF_FRAC:?}"))
+            .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+            .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
+            .replace(
+                "__BYTES_PER_VOXEL_UNIFORMS__",
+                &std::mem::size_of::<VoxelUniforms>().to_string(),
+            )
+            .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
+            .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
+            .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR));
     Ok(device
         .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
         .map_err(|error| {

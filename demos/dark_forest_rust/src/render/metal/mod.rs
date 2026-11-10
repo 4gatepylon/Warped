@@ -63,6 +63,7 @@ use crate::render::{
     TextureHandle, get_glow_segments, get_segment_distance_m, overlay::get_overlay_regions_px,
     pick_live_lens_mouths,
 };
+use warped_shared::boundary_planes::get_shimmer_clock_s;
 
 /// `FRAMES_IN_FLIGHT` is how many frames the CPU may encode ahead of the GPU.
 const FRAMES_IN_FLIGHT: usize = 3;
@@ -94,6 +95,8 @@ const MAX_BEAM_COUNT: usize = 60;
 const RATE_MAP_PLACEHOLDER_BYTES: usize = 256;
 /// `RATE_MAP_BUFFER_INDEX` is where the fragment shaders read the rate map's parameters.
 const RATE_MAP_BUFFER_INDEX: usize = 9;
+/// `BOUNDARY_PLANES_BUFFER_INDEX` is where the tone map reads the team boundary planes (W-148).
+const BOUNDARY_PLANES_BUFFER_INDEX: usize = 4;
 /// `VISUALS_BUFFER_INDEX` is where the tone map reads the player's visuals (W-51, basic visuals).
 const VISUALS_BUFFER_INDEX: usize = 3;
 /// `QUAD_VERTEX_COUNT` is the vertex count of a triangle-strip quad.
@@ -325,6 +328,7 @@ pub struct MetalRenderer {
     previous_cascades: Option<Cascades>,
     environment: Option<EnvironmentState>,
     sky_visibility: Option<SkyVisibility>,
+    boundary_planes: crate::render::GpuBoundaryPlanes,
     targets: Option<Targets>,
     dynamic_buffers: Vec<DynamicBuffer>,
     frame_index: usize,
@@ -596,6 +600,7 @@ impl MetalRenderer {
             previous_cascades: None,
             environment: None,
             sky_visibility: None,
+            boundary_planes: crate::render::GpuBoundaryPlanes::default(),
             targets: None,
             dynamic_buffers,
             frame_index: 0,
@@ -1399,6 +1404,10 @@ impl Renderer for MetalRenderer {
         });
     }
 
+    fn set_boundary_planes(&mut self, planes: crate::render::GpuBoundaryPlanes) {
+        self.boundary_planes = planes;
+    }
+
     fn set_occluders(&mut self, occluders: &[OccluderBox], bounds_min_m: Vec3, bounds_max_m: Vec3) {
         self.sky_visibility = Some(bake_sky_visibility(
             &self.device,
@@ -2026,6 +2035,13 @@ impl MetalRenderer {
                     lens_uniforms.params.x = 0.0;
                 }
                 set_fragment_bytes(encoder, as_bytes(&lens_uniforms), 2);
+                let mut boundary_planes: crate::render::GpuBoundaryPlanes = self.boundary_planes;
+                boundary_planes.look[2] = get_shimmer_clock_s(f64::from(frame.time_s));
+                set_fragment_bytes(
+                    encoder,
+                    as_bytes(&boundary_planes),
+                    BOUNDARY_PLANES_BUFFER_INDEX,
+                );
                 set_fragment_bytes(encoder, as_bytes(&settings.visuals), VISUALS_BUFFER_INDEX);
                 unsafe {
                     encoder.setFragmentBuffer_offset_atIndex(

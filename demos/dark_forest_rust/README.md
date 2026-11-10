@@ -99,6 +99,12 @@ it); leave it unset to play across computers.
   and cell size are in the map's `scatter` field. A walk-grid flood test checks that every spawn, ground pylon,
   ladder foot and wormhole mouth can be reached. Each culm forks at the top into leafy branches whose shadows keep
   the forest dark, with light shafts through the gaps.
+- **Team boundary planes** (W-148, team boundary planes in every level; W-149, shimmer through boundary planes): the
+  map's `regions` give the zones, blue beyond 24 m toward −z and red beyond 24 m toward +z, and a wall on each team
+  zone's edge, 10 m high (above the decks), faintly glowing in the team's colour. The tone map draws them over the
+  picture and shimmers what is seen through them like heat haze (`post.metal`'s `find_boundary_planes`; the shared
+  look and haze are `../warped_shared_rust/src/boundary_planes.metal`). They stop neither players nor shots, and the lens
+  atlas is captured without them.
 - **Heights:** the ground; decks at 7 m (each team's treehouse, a middle deck and a flank deck, joined by bridges with
   rope rails), held up by bundles of thick culms; the lookout at 12 m in the centre.
 - **Ladders:** the optional `ladders` field of the map format: a volume that isn't solid. A player inside one who

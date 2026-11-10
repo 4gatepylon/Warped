@@ -306,12 +306,14 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["team", "u_min_m", "u_max_m"],
+            "oneOf": [{"required": ["team", "u_min_m", "u_max_m"]}, {"required": ["team", "v_min_m", "v_max_m"]}],
             "additionalProperties": false,
             "properties": {
               "team": {"enum": ["blue", "red", "middle"]},
               "u_min_m": {"type": ["number", "null"]},
-              "u_max_m": {"type": ["number", "null"]}
+              "u_max_m": {"type": ["number", "null"]},
+              "v_min_m": {"type": ["number", "null"]},
+              "v_max_m": {"type": ["number", "null"]}
             }
           }
         },

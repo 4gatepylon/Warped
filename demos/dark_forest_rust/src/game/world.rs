@@ -175,6 +175,55 @@ pub struct Arena {
     pub playable_min_m: Vec3,
     pub playable_max_m: Vec3,
     pub soft_edge: Option<SoftEdge>,
+    /// `boundary_planes` are the team boundary planes (W-148), from the map's zones.
+    pub boundary_planes: Vec<BoundaryPlane>,
+}
+
+/// `BoundaryPlane` is one team boundary plane (W-148, team boundary planes in every level): the
+/// plane z = `z_m` (Fermi u = −z) on a finite edge of team `team`'s zone (0 blue, 1 red),
+/// `height_m` tall over the ground and `opacity_frac` opaque at its foot. It stops neither players
+/// nor shots.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoundaryPlane {
+    pub z_m: f32,
+    pub team: usize,
+    pub height_m: f32,
+    pub opacity_frac: f32,
+}
+
+/// `get_boundary_planes` gives a plane on each finite edge of the blue and red zones of the map's
+/// regions, if it has zone walls; a zone of another team panics (the map is the forest's own).
+///
+/// Example: `let planes: Vec<BoundaryPlane> = get_boundary_planes(map.regions.as_ref());`
+fn get_boundary_planes(regions: Option<&crate::map::Regions>) -> Vec<BoundaryPlane> {
+    let Some(crate::map::Regions {
+        zones,
+        zone_walls: Some(walls),
+        ..
+    }) = regions
+    else {
+        return Vec::new();
+    };
+    zones
+        .iter()
+        .filter(|zone| zone.team != "middle")
+        .flat_map(|zone| {
+            let team: usize = match zone.team.as_str() {
+                "blue" => 0,
+                "red" => 1,
+                other => panic!("map: zone team {other:?} isn't blue, red or middle"),
+            };
+            [zone.u_min_m, zone.u_max_m]
+                .into_iter()
+                .flatten()
+                .map(move |u_m| BoundaryPlane {
+                    z_m: -u_m,
+                    team,
+                    height_m: walls.height_m,
+                    opacity_frac: walls.opacity_frac,
+                })
+        })
+        .collect()
 }
 
 /// `CYLINDER_SEGMENT_COUNT` is how many sides a trunk or log mesh has.
@@ -424,6 +473,7 @@ impl Arena {
             soft_edge,
             warps,
             pylons,
+            boundary_planes: get_boundary_planes(map.regions.as_ref()),
         }
     }
 
@@ -709,10 +759,28 @@ fn append_box(mesh: &mut MeshData, aabb: &Aabb, tile_size_m: f32) {
 /// | --- | --- | --- |
 /// | box face | each of the six faces | `test_box_faces_wind_outward` |
 /// | spawn | each of both teams' (on the ground, the body clear, facing open forest) | `test_every_spawn_stands_clear_facing_open_forest` |
+/// | team boundary planes (W-148) | the map's (one per team, each between the middle and its team's spawns) | `test_each_team_has_a_boundary_plane_before_its_spawns` |
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::game::collision::cast_ray;
+
+    /// `test_each_team_has_a_boundary_plane_before_its_spawns` checks the forest's map gives one
+    /// boundary plane per team, between the middle and that team's spawns.
+    #[test]
+    fn test_each_team_has_a_boundary_plane_before_its_spawns() {
+        let map = crate::map::load(&crate::map::default_map_path()).expect("the map loads");
+        let arena: Arena = Arena::from_map(&map);
+        assert_eq!(arena.boundary_planes.len(), 2);
+        for plane in &arena.boundary_planes {
+            let spawns: &[(Vec3, f32)] = &arena.team_spawns[plane.team];
+            assert!(!spawns.is_empty());
+            for z_m in spawns.iter().map(|(at, _)| at.z) {
+                assert!(z_m * plane.z_m > plane.z_m * plane.z_m, "{plane:?}: {z_m}");
+            }
+            assert!(plane.height_m > 0.0 && plane.opacity_frac > 0.0 && plane.opacity_frac < 1.0);
+        }
+    }
 
     const BODY_RADIUS_M: f32 = 0.3;
     const BODY_HEIGHT_M: f32 = 1.8;

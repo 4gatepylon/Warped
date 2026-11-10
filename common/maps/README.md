@@ -232,7 +232,9 @@ ground or on a structure) and their eye `player.eye_height_m` above it, facing t
 `{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind", "u_m", "v_m", "soft_edge_m"},
 "zone_walls": {"height_m", "thickness_m", "opacity_frac"}}`, in the world's Fermi coordinates: a team's zone is a band
 of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1 for the boundary `kind` `fermi_ellipse`, or |u| ≤ u_m and
-|v| ≤ v_m for `fermi_rectangle`.
+|v| ≤ v_m for `fermi_rectangle`. A zone may instead be a band of v (`"v_min_m"`, `"v_max_m"`, optional since
+version 1, for a map whose teams face each other across v, such as City Sphere); its walls then stand on its v
+edges, and below the u edges read v.
 
 No map has a wall at its edge (W-145, no walls at map edges); players slow without end past it instead
 (`demos/warped_shared_rust/src/map_edge.rs`): each step that would take them further into the edge is cut by

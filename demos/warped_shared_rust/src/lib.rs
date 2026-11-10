@@ -26,6 +26,8 @@
 //!   crosshair, the hit effect and the banner's lobby and "YOU DIED" lines.
 //! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
 //! - `third_person`: the third-person view's switch, and its boom in flat space.
+//! - `boundary_planes`: how the team boundary planes look and how what is seen through them
+//!   shimmers (W-148, W-149), with their shaders' code.
 //! - `visuals`: a player's brightness, contrast, saturation and gamma, applied to the finished
 //!   picture (W-51, basic visuals), with the shaders' colour maths.
 //! - `app`: the interface between the one-window app (`../warped_mvp_rust/`) and a level.
@@ -53,6 +55,7 @@
 pub mod app;
 pub mod app_bundle;
 pub mod avatar_model;
+pub mod boundary_planes;
 pub mod fps_demo_assets;
 pub mod gait;
 pub mod game_settings;

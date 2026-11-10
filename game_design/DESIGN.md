@@ -263,6 +263,13 @@ Every level follows these rules:
   with corners to defend.
 - On most levels, one route is a big open area, joined to at least one other route by a connector.
 - The blue and red zones are easy to cross widthwise, so a team can rotate quickly between routes.
+- Each team zone's edge is a team boundary plane in every level (W-148, team boundary planes in every level): a
+  faint see-through wall that glows slightly in the team's colour, brightest at its foot, and stops neither
+  players nor lasers. What is seen through one shimmers like air over hot ground (W-149, shimmer through boundary
+  planes): the picture behind it wobbles a little, rising and changing all the time, in every level alike. The
+  shimmer is only where a wall covers the view, so it stops once you have crossed the wall and look away from it.
+  City Sphere's teams each have a hemisphere, so its one wall is a disc through the centre, blue from blue's side
+  and red from red's.
 
 | Zone layout | Shape |
 | --- | --- |

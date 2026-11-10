@@ -326,6 +326,29 @@ fn get_muzzle_from_model(muzzle_m: Vec3, scale: f32) -> Mat4 {
         * Mat4::from_translation(-muzzle_m)
 }
 
+/// `make_gpu_boundary_planes` gives the arena's team boundary planes as the tone map reads them
+/// (W-148), across the playable area's width on its floor; the clock is set each frame.
+///
+/// Example: `renderer.set_boundary_planes(make_gpu_boundary_planes(&arena));`
+fn make_gpu_boundary_planes(arena: &Arena) -> crate::render::GpuBoundaryPlanes {
+    let planes: &[crate::game::world::BoundaryPlane] = &arena.boundary_planes;
+    assert!(
+        planes.len() <= crate::render::MAX_BOUNDARY_PLANE_COUNT,
+        "the forest has {} boundary planes, more than the tone map draws",
+        planes.len()
+    );
+    let mut gpu: crate::render::GpuBoundaryPlanes = crate::render::GpuBoundaryPlanes::default();
+    for (slot, plane) in gpu.planes.iter_mut().zip(planes) {
+        *slot = [plane.z_m, plane.team as f32, 0.0, 0.0];
+    }
+    if let Some(first) = planes.first() {
+        gpu.look = [first.height_m, first.opacity_frac, 0.0, 0.0];
+    }
+    gpu.extent = [arena.playable_min_m.x, arena.playable_max_m.x, 0.0, 0.0];
+    gpu.counts = [planes.len() as i32, 0, 0, 0];
+    gpu
+}
+
 /// `load_gun_viewmodel` loads `gun_model` from the fps_demo's assets and finds its muzzle, as
 /// Lunar Surface's `Viewmodel::Load` does: the revolver's railgun parts drawn 1.6 times their size,
 /// or the whole bolt-action rifle, turned, at 0.28 times.
@@ -441,6 +464,7 @@ impl Scene {
             })
             .collect();
         renderer.set_occluders(&occluders, arena.bounds_min_m, arena.bounds_max_m);
+        renderer.set_boundary_planes(make_gpu_boundary_planes(arena));
         println!("arena ready in {:.1}s", start.elapsed().as_secs_f32());
 
         let robot_path: PathBuf = get_model_path(BODY_MODEL);
