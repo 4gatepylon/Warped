@@ -74,12 +74,13 @@ pub struct GunViewmodel {
     pub muzzle_from_gltf: Mat4,
 }
 
-/// `Scene` is everything loaded into the renderer; `far_leaf_meshes` pairs each leaf tile's index
-/// in `static_draws` with its mesh at `FAR_LEAF_DETAIL`, to draw from afar.
+/// `Scene` is everything loaded into the renderer; `far_leaf_meshes` gives, by the number of each
+/// leaf tile's mesh (at `NEAR_LEAF_DETAIL`), that tile's mesh at `FAR_LEAF_DETAIL`, to draw from
+/// afar (by mesh, so leaving draws out of `static_draws`, as `--hide-canopy` does, keeps it right).
 pub struct Scene {
     pub static_draws: Vec<DrawItem>,
     pub static_surfaces: Vec<Surface>,
-    pub far_leaf_meshes: Vec<(usize, MeshHandle)>,
+    pub far_leaf_meshes: HashMap<u32, MeshHandle>,
     pub solids: Vec<Aabb>,
     pub robot: Model,
     pub robot_scale: f32,
@@ -417,7 +418,7 @@ impl Scene {
             create_surface_materials(renderer, textures_dir, emissive_scale);
         let mut static_draws: Vec<DrawItem> = Vec::new();
         let mut static_surfaces: Vec<Surface> = Vec::new();
-        let mut far_leaf_meshes: Vec<(usize, MeshHandle)> = Vec::new();
+        let mut far_leaf_meshes: HashMap<u32, MeshHandle> = HashMap::new();
         for (surface, mesh_data) in arena.surface_meshes() {
             if surface == Surface::Leaves {
                 let near_tiles: Vec<MeshData> =
@@ -426,10 +427,11 @@ impl Scene {
                     arena.leaf_tile_meshes(STATIC_TILE_M, FAR_LEAF_DETAIL);
                 for (near, far) in near_tiles.into_iter().zip(far_tiles) {
                     let tile: MeshTile = MeshTile::Bounding(near);
-                    far_leaf_meshes.push((static_draws.len(), renderer.create_mesh(&far)));
+                    let mesh: MeshHandle = renderer.create_mesh(&tile.mesh);
+                    far_leaf_meshes.insert(mesh.0, renderer.create_mesh(&far));
                     static_surfaces.push(surface);
                     static_draws.push(DrawItem {
-                        mesh: renderer.create_mesh(&tile.mesh),
+                        mesh,
                         material: surface_materials[&surface],
                         model: Mat4::IDENTITY,
                         tint: Vec4::ONE,

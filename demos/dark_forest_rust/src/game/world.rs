@@ -725,6 +725,7 @@ fn append_box(mesh: &mut MeshData, aabb: &Aabb, tile_size_m: f32) {
 /// | --- | --- | --- |
 /// | box face | each of the six faces | `test_box_faces_wind_outward` |
 /// | spawn | each of both teams' (on the ground, the body clear, facing open forest) | `test_every_spawn_stands_clear_facing_open_forest` |
+/// | leaf detail | near, far (the same sprays per tile; every spray) | `test_leaf_tiles_hold_the_same_sprays_at_both_details` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,6 +737,9 @@ mod tests {
     const LIFT_M: f32 = 0.05;
     const GROUND_PROBE_M: f32 = 0.2;
     const MIN_OPEN_VIEW_M: f32 = 3.0;
+    const TILE_M: f32 = 8.0;
+    const NEAR_SPRAY_TRIANGLE_COUNT: usize = 36;
+    const FAR_SPRAY_TRIANGLE_COUNT: usize = 16;
 
     /// `test_every_spawn_stands_clear_facing_open_forest` checks each team spawn of the Dark Forest
     /// map stands on something solid, with room for a body, and faces at least `MIN_OPEN_VIEW_M`
@@ -789,5 +793,31 @@ mod tests {
             let normal: Vec3 = Vec3::from(mesh.vertices[triangle[0] as usize].normal);
             assert!(face_normal.dot(normal) > 0.0);
         }
+    }
+
+    /// `test_leaf_tiles_hold_the_same_sprays_at_both_details` checks the Dark Forest's leaf tiles
+    /// come in the same number at the near and the far detail, each pair holding the same sprays
+    /// (36 and 16 triangles each), and together every spray `surface_meshes` draws.
+    #[test]
+    fn test_leaf_tiles_hold_the_same_sprays_at_both_details() {
+        let map = crate::map::load(&crate::map::default_map_path()).expect("the map loads");
+        let arena: Arena = Arena::from_map(&map);
+        let near: Vec<MeshData> = arena.leaf_tile_meshes(TILE_M, NEAR_LEAF_DETAIL);
+        let far: Vec<MeshData> = arena.leaf_tile_meshes(TILE_M, FAR_LEAF_DETAIL);
+        assert_eq!(near.len(), far.len());
+        let triangle_count = |mesh: &MeshData| mesh.indices.len() / 3;
+        for (near_tile, far_tile) in near.iter().zip(&far) {
+            assert_eq!(
+                triangle_count(near_tile) / NEAR_SPRAY_TRIANGLE_COUNT,
+                triangle_count(far_tile) / FAR_SPRAY_TRIANGLE_COUNT
+            );
+        }
+        let (_, all_leaves) = arena
+            .surface_meshes()
+            .into_iter()
+            .find(|(surface, _)| *surface == Surface::Leaves)
+            .expect("the forest has leaves");
+        let near_total: usize = near.iter().map(triangle_count).sum();
+        assert_eq!(near_total, triangle_count(&all_leaves));
     }
 }
