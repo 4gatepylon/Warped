@@ -78,6 +78,16 @@ played once. 30 minutes without a winner is a tie. Unit tests: the design doc's 
 row by row, and every win sequence up to 14 rounds (866) against a separate reading of the
 rules.
 
+## The one-window app and the game master
+
+`../warped_mvp_rust/` (the official MVP) hosts and joins matches from one window. For it the match
+server announces itself on UDP 47851 (a `WARPMTCH` beacon every 0.5 s: port, players per team,
+phase, round), and takes a `play <level>` or `play match` datagram from any client (the game
+master): free play on one level, round after round with each team's wins counted, or back to the
+match where it was; either ends the round under way, and every client follows into the next. The
+match's state, protocol and progression page live in `warped_shared` (`match_state`,
+`match_protocol`, `match_menu`); this crate's files of those names re-export them.
+
 ## Level interface
 
 Each level is a program that the match runs once per round. `match_levels.yaml` says which
