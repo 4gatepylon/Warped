@@ -30,6 +30,7 @@ the settings sections, `weapons`, `movement` (through `Ground`), `gait`, `avatar
 | `play_settings` | the settings files' sections every level reads alike: movement, sprint energy, both guns, consoles, respawn, a hit's slowing and look, aiming, thrown wormholes, the view and the minimap | yes |
 | `health` | the damage a hit adds and when it eliminates (the game server's count), what a fall in this player's health shows and does (`HitFeedback`: a shot shows the hit effect and slows, a blizzard's slow damage shows once per hit's worth), the hit effect's fading | yes |
 | `shot_noise` | how far each shot strays from the crosshair, and its beam's speckle | yes |
+| `shot_gate` | when moving lets a player or bot shoot (`ShotGate`, `ShotMoves`): the server settings' `shooting` switches for jumping, walking and sprinting, and `movement.shoot_after_moving_s`; `Weapons::can_shoot` wraps it | yes |
 | `movement` | the rules of moving (`MoveState::step`): crouching, sprint energy, the head bob's steps, a hit's and crouching's slow; each level moves the player in its own space (`VoxelPlayer::step`, City Sphere's `CityWorld::move_player`, Dark Forest's `Forest` through the `Ground` trait and a step's `MoveIntent`); a crouch's height share and its 4-bit network level (`get_crouched_height_frac`, `encode_crouch_level`) | yes |
 | `mesh`, `avatar_model` | glTF models of the maps' structures and the players' robot body, posed by a clip, and squashed for a crouched player (`make_squashed`) | yes |
 | `spaceships` | the spaceships in the sky | yes |

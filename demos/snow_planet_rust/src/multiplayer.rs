@@ -36,6 +36,7 @@ use crate::voxel_world::{
 };
 use crate::world::{Color, EYE_HEIGHT_M, World};
 use warped_shared::movement::get_crouched_height_frac;
+use warped_shared::shot_gate::{ShotGate, ShotMoves};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -529,7 +530,8 @@ pub enum BotObjective {
 }
 
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks after the nearest enemy around blocks and
-/// dangers and, once it sees them, faces them and fires (`console_bot::Fighter`), reports hits
+/// dangers and, once it sees them, faces them and fires (`console_bot::Fighter`) when moving lets
+/// it (`ShotGate`, by the server's `shooting` rules, as for players), reports hits
 /// (handing `save_view` its view, which it may save on another thread) and rejoins the server
 /// settings' `respawn.delay_s` after being hit.
 /// With `objective` `Consoles` it walks to the other team's consoles instead (`consoles`, each
@@ -558,6 +560,7 @@ pub fn run_voxel_bot(
     let mut rejoin_at: Option<Instant> = None;
     let mut last_victim: Option<u32> = None;
     let mut fighter: Fighter = Fighter::New(find_snow_dangers(world));
+    let mut shot_gate: ShotGate = ShotGate::New();
     while start.elapsed().as_secs_f64() < duration_s {
         let tick: Instant = Instant::now();
         let now_s: f64 = start.elapsed().as_secs_f64();
@@ -640,7 +643,19 @@ pub fn run_voxel_bot(
             let own_step_s: f64 =
                 BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
             let fight: FightStep = fighter.step(world, &mut player, &enemies, now_s, own_step_s);
-            let is_laser_on: bool = fight.is_laser_on;
+            let input: &Input = &fight.input;
+            let shot_moves: ShotMoves = ShotMoves {
+                is_jumping: input.up,
+                is_walking_upright: (input.forward || input.back || input.left || input.right)
+                    && !input.crouch,
+                is_sprinting: player.is_sprinting,
+            };
+            let settings: &ServerSettings = client
+                .settings
+                .as_ref()
+                .expect("a welcome brings the settings");
+            shot_gate.note_moves(&shot_moves, &settings.shooting, own_step_s);
+            let is_laser_on: bool = fight.is_laser_on && shot_gate.is_open(&settings.movement);
             player.step(world, &fight.input, own_step_s, team as usize);
             let camera: DMat4 = player.get_camera_frame(world);
             let view: SharedVoxelView = pack_shared_voxel_view(

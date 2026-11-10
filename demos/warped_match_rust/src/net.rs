@@ -665,6 +665,11 @@ impl Server {
                 if shooter_team.is_none() || self.game.winner.is_some() || hits_to_kill == 0 {
                     return Ok(());
                 }
+                if !self.settings.shooting.is_friendly_fire_on
+                    && shooter_team == Some(self.slots[victim].player.team)
+                {
+                    return Ok(());
+                }
                 if !add_damage(
                     &mut self.slots[victim].damage_frac,
                     get_hit_damage_frac(hits_to_kill),
@@ -1683,6 +1688,7 @@ mod tests {
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
     //! | Scores datagram | complete (several players, none), cut short, too long, an unknown team | `scores_survive_encoding` |
     //! | Who a hit eliminates | nobody (a hit short of the limit), the other team's player (a kill and a death), a teammate (a death only) | `eliminations_count_kills_and_deaths` |
+    //! | Friendly fire (`shooting.is_friendly_fire_on`) | on (a teammate falls), off (a teammate's hit does nothing, an enemy's still counts) | `eliminations_count_kills_and_deaths`, `friendly_fire_can_be_turned_off` |
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
@@ -2418,6 +2424,25 @@ mod tests {
             read(&Message::New(Kind::Scores).scores(&[unknown_team]).0),
             None
         );
+    }
+
+    #[test]
+    fn friendly_fire_can_be_turned_off() {
+        let mut server: Server = make_server();
+        server.settings.shooting.is_friendly_fire_on = false;
+        let (red_one, red_two, blue_three) = (address(50_001), address(50_002), address(50_003));
+        join(&mut server, red_one, RED);
+        join(&mut server, red_two, RED);
+        join(&mut server, blue_three, BLUE);
+        let token: u64 = get_token(&server, red_one);
+        server
+            .handle(&make_hit(token, 1, 2, 1), red_one)
+            .expect("a hit on a teammate");
+        assert_eq!(server.slots.len(), 3);
+        server
+            .handle(&make_hit(token, 1, 3, 1), red_one)
+            .expect("a hit on an enemy");
+        assert_eq!(server.slots.len(), 2);
     }
 
     #[test]

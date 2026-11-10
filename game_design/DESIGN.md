@@ -126,8 +126,10 @@ For example:
   joins blue and `2` joins red. A player can't shoot until the server has let them in.
 - A game server on the internet has a password, which its operator shares with the players; the server admits only
   players who prove they know it, and the password itself never crosses the network.
-- Friendly fire is on: a shot eliminates a teammate as it would an enemy, but only an enemy counts
-  as a kill.
+- Friendly fire is a game setting, on by default (`shooting.is_friendly_fire_on`, W-156 (friendly fire, by game
+  setting); the user: "add setting in game settings to toggle whether or not friendly fire is possible"). When on, a
+  shot eliminates a teammate as it would an enemy, but only an enemy counts as a kill; when off, a shot doesn't
+  hurt teammates.
 - The game counts each player's kills and deaths, shown on the scoreboard (see [Screen](#screen)).
 
 ### Respawning
@@ -284,7 +286,12 @@ which has nothing to do with the guns' heat.
 - Energy drains at a steady rate while a player sprints, and refills at a steady rate while they
   don't: as fast as it drains while crouched, and half as fast while walking or standing.
 - Energy never goes above full. A player who runs out of energy can't sprint.
-- A player can't shoot while sprinting.
+- By default a player can't shoot while jumping, walking upright or sprinting: a shot waits 0.25 s after the
+  last such move (`movement.shoot_after_moving_s`); walking crouched doesn't hold a shot. Each of the three is a
+  game setting (`shooting.can_shoot_while_jumping`, `can_shoot_while_walking`, `can_shoot_while_sprinting`; W-147
+  (shooting while moving, by game setting); the user: "the ability to toggle via game settings whether you can shoot
+  while jumping, and seperately while moving laterally (i.e. while walking) and seperately while sprinting"), and
+  bots follow the same rule.
 
 | Parameter | Value |
 | --- | --- |

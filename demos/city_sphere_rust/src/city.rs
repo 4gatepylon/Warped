@@ -34,6 +34,7 @@ use warped_shared::hud::{
     HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
 };
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
+use warped_shared::shot_gate::ShotMoves;
 use warped_shared::shot_noise::ShotNoise;
 use warped_shared::third_person::{ThirdPersonCamera, place_camera_flat};
 use warped_shared::weapons::{Weapons, take_hit_weight};
@@ -1044,7 +1045,6 @@ struct CitySession {
     spawn_count: usize,
     shots: Vec<LiveShot>,
     weapons: Weapons,
-    since_movement_key_s: f64,
     was_firing: bool,
     has_shot_hit_wormholes: bool,
     remote_lasers: HashMap<u32, bool>,
@@ -1142,7 +1142,6 @@ impl CitySession {
             spawn_count: 0,
             shots: Vec::new(),
             weapons,
-            since_movement_key_s: f64::INFINITY,
             was_firing: false,
             has_shot_hit_wormholes: false,
             remote_lasers: HashMap::new(),
@@ -1250,12 +1249,12 @@ impl CitySession {
         }
     }
 
-    /// `can_shoot` says whether this player may shoot, as on Lunar Surface: once no movement key
-    /// has been held for the server settings' `movement.shoot_after_moving_s` (standing or
-    /// falling with no key held may shoot), and only while in the game (spawned and welcomed), not
+    /// `can_shoot` says whether this player may shoot, as on Lunar Surface: once moving allows it
+    /// (`Weapons::can_shoot`, by the server settings' `shooting` rules and
+    /// `movement.shoot_after_moving_s`), and only while in the game (spawned and welcomed), not
     /// holding `E` on a console, and before a team has won.
     fn can_shoot(&self) -> bool {
-        self.since_movement_key_s >= self.settings.movement.shoot_after_moving_s
+        self.weapons.can_shoot(&self.settings.movement)
             && self.is_spawned
             && self.client.id.is_some()
             && self.disabling.is_none()
@@ -1545,16 +1544,19 @@ impl CitySession {
     /// `update_gun_motion` moves the gun as Lunar Surface does on its voxel maps: it steps with
     /// the head bob that `move_player` stepped (its phase, and `bob_frac` easing in and out), and
     /// its pose goes toward jogging while sprinting and back to aiming otherwise. As on Lunar
-    /// Surface, it counts the time since a movement key (walking upright, not crouched, or
-    /// jumping) was last held, and moving ends the shot under way (`can_shoot`).
+    /// Surface, it notes the moves that may hold a shot (`Weapons::note_moves`: walking upright,
+    /// sprinting or jumping, by the `shooting` rules), and a held shot ends the shot under way
+    /// (`can_shoot`).
     fn update_gun_motion(&mut self, input: &CityInput, dt_s: f64) {
         let is_moving: bool = input.forward_frac != 0.0 || input.right_frac != 0.0;
         let is_walking_upright: bool = is_moving && !input.is_crouching;
-        self.since_movement_key_s = if is_walking_upright || input.is_jumping {
-            0.0
-        } else {
-            self.since_movement_key_s + dt_s
+        let shot_moves: ShotMoves = ShotMoves {
+            is_jumping: input.is_jumping,
+            is_walking_upright,
+            is_sprinting: self.player.move_state.is_sprinting,
         };
+        self.weapons
+            .note_moves(&shot_moves, &self.settings.shooting, dt_s);
         if !self.can_shoot() {
             self.weapons.shot_time_s = 0.0;
         }
@@ -3628,6 +3630,14 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 &BrainSight::default(),
             );
             world.move_player(&mut player, &out.input, &settings, &head_bob, dt_s);
+            let shot_moves: ShotMoves = ShotMoves {
+                is_jumping: out.input.is_jumping,
+                is_walking_upright: (out.input.forward_frac != 0.0 || out.input.right_frac != 0.0)
+                    && !out.input.is_crouching,
+                is_sprinting: player.move_state.is_sprinting,
+            };
+            weapons.note_moves(&shot_moves, &settings.shooting, dt_s);
+            let can_shoot: bool = weapons.can_shoot(&settings.movement);
             let targets: Vec<Target> = client
                 .players
                 .iter()
@@ -3643,6 +3653,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 })
                 .collect();
             if weapons.sniper_reload_s <= 0.0
+                && can_shoot
                 && let Some(aim) = find_bot_aim(&world, &settings, &player, &targets, client.id)
             {
                 let eye_point: DVec3 = player.get_eye_frame().w_axis.truncate();
@@ -3650,7 +3661,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 weapons.fire_sniper(&settings.sniper);
                 has_shot_hit = false;
             }
-            if weapons.is_firing(true) {
+            if weapons.is_firing(can_shoot) {
                 let shot_eye: DMat4 = weapons.shot_offset.aim(player.get_eye_frame());
                 let shot: Shot = world.trace_shot(
                     shot_eye.w_axis.truncate(),

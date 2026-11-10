@@ -30,8 +30,8 @@ use serde_json::Value;
 use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
-    MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
-    SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
+    MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings, ShootingSettings,
+    SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
 };
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
@@ -128,6 +128,8 @@ pub struct ServerSettings {
     pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
@@ -434,6 +436,7 @@ mod tests {
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | `shooting` section | present (built in, the old rules), missing in an old file (the old rules), a misspelt key (fails) | `shooting_switches_default_to_the_old_rules` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -447,6 +450,28 @@ mod tests {
             settings
         );
         assert!(PerPlayerSettings::Builtin().view.look_rad_per_px > 0.0);
+    }
+
+    #[test]
+    fn shooting_switches_default_to_the_old_rules() {
+        assert_eq!(
+            ServerSettings::Builtin().shooting,
+            ShootingSettings::default()
+        );
+        let start: usize = BUILTIN_SERVER_YAML
+            .find("\nshooting:")
+            .expect("a shooting section");
+        let end: usize = start + BUILTIN_SERVER_YAML[start..].find("\n\n").expect("its end");
+        let old_yaml: String = format!(
+            "{}{}",
+            &BUILTIN_SERVER_YAML[..start],
+            &BUILTIN_SERVER_YAML[end..]
+        );
+        let old: ServerSettings = ServerSettings::FromYaml(&old_yaml, "old").expect("an old file");
+        assert_eq!(old.shooting, ShootingSettings::default());
+        let typo_yaml: String =
+            BUILTIN_SERVER_YAML.replace("  is_friendly_fire_on:", "  is_friendly_fire:");
+        assert!(ServerSettings::FromYaml(&typo_yaml, "typo").is_err());
     }
 
     #[test]

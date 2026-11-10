@@ -18,8 +18,8 @@ use std::error::Error;
 use serde::{Deserialize, Serialize};
 pub use warped_shared::play_settings::{
     AimSettings, BeamSpeckleSettings, ConsoleSettings, FlashlightSettings, HeadBobSettings,
-    HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
-    SprintEnergySettings, WhenHitSettings,
+    HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings, ShootingSettings,
+    SniperSettings, SprintEnergySettings, WhenHitSettings,
 };
 
 /// `WormholeSettings` is how players throw their wormhole mouths (`Q`, `thrown_wormholes.rs`) and
@@ -70,6 +70,8 @@ pub const HEAD_BOB: HeadBobSettings = HeadBobSettings {
 pub struct ServerSettings {
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub wormholes: WormholeSettings,
     pub sniper: SniperSettings,
     pub rifle: RifleSettings,
@@ -93,6 +95,7 @@ impl ServerSettings {
                 reach_m: 3.0,
             },
             respawn: RespawnSettings { delay_s: 3.0 },
+            shooting: ShootingSettings::default(),
             wormholes: WormholeSettings {
                 throw_speed_m_per_s: 16.0,
                 throw_up_rad: 0.3,

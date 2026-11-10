@@ -6,7 +6,8 @@
 //! `PerPlayerSettings` (City Sphere adds its own `glass`) and reads and checks the files.
 //!
 //! Interface: `MovementSettings`, `SprintEnergySettings`, `HeadBobSettings`, `SniperSettings`,
-//! `RifleSettings`, `BeamSpeckleSettings`, `ConsoleSettings`, `RespawnSettings`, `WhenHitSettings`,
+//! `RifleSettings`, `BeamSpeckleSettings`, `ShootingSettings`, `ConsoleSettings`,
+//! `RespawnSettings`, `WhenHitSettings`,
 //! `HitEffectSettings`, `FlashlightSettings`, `AimSettings`, `WormholeSettings`, `MapEdgeSettings`,
 //! `SpaceSettings`, `BlackHoleSettings`, `ViewSettings`, `MinimapCorner`, `MinimapSettings`.
 //!
@@ -114,6 +115,36 @@ pub struct BeamSpeckleSettings {
     pub black_frac: f64,
     pub white_frac: f64,
     pub dropout_frac: f64,
+}
+
+/// `ShootingSettings` is the game master's rules for shots, each a switch: whether a player may
+/// shoot while jumping, while walking upright and while sprinting (W-147 (shooting while moving, by
+/// game setting); a move that may not shoot holds a shot until `movement.shoot_after_moving_s`
+/// after it, `ShotGate`), and whether a shot hurts teammates (W-156 (friendly fire, by game
+/// setting); when it does, it counts a death but no kill). A file without this section reads as
+/// `ShootingSettings::default()`, the rules from before the switches.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ShootingSettings {
+    pub can_shoot_while_jumping: bool,
+    pub can_shoot_while_walking: bool,
+    pub can_shoot_while_sprinting: bool,
+    pub is_friendly_fire_on: bool,
+}
+
+impl Default for ShootingSettings {
+    /// `default` is the rules from before the switches: no shot while jumping, walking upright or
+    /// sprinting, and friendly fire on.
+    ///
+    /// Example: `let shooting = ShootingSettings::default();`
+    fn default() -> ShootingSettings {
+        ShootingSettings {
+            can_shoot_while_jumping: false,
+            can_shoot_while_walking: false,
+            can_shoot_while_sprinting: false,
+            is_friendly_fire_on: true,
+        }
+    }
 }
 
 /// `ConsoleSettings` is how long holding `E` takes to turn off a console, and from how far.
