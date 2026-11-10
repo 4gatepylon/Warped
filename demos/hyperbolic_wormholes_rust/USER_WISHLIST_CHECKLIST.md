@@ -175,7 +175,7 @@ is in [`AGENTS.md`](AGENTS.md).
 ## Pending user review
 
 - [?] **W-142 Growing respawn time.** The user, 2026-11-09: "also make sure to roll in the respawn times going up mechanic and add a respaning loading bar". Their earlier design (`game_design/brainstorm/USER_THOUGHTS.md`, "Addendum: respawns"): "Respawns will happen on a cadence, and every n steps, it will increase in time linearly so that it takes longer to respawn as time progresses. This means that as time progresses, the stakes get basically higher to dying versus earlier on. The respawn rates should start at you being stuck dead for 20 seconds, and they should go up linearly every five minutes by 10 seconds on a given level in the map." In every level.
-  #PR_NUMBER: every level's server (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest) waits
+  #522: every level's server (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest) waits
   `respawn.start_s + step_s × floor(t / period_s)` (20 s, 10 s, 5 minutes) for a death `t` into the level and sends
   the wait with the elimination; "YOU DIED" shows its countdown and a bar filling over it (shared `hud`).
 - [?] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
