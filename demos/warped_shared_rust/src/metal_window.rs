@@ -5,10 +5,10 @@
 //! its own and plays in it through the same entry point the app calls (`get_level_window` with
 //! `NoMatchLink`).
 //!
-//! Interface: `MetalWindow` (`Open`, `get_window`, `get_layer`, `get_device`, `get_sdl`,
+//! Interface: `MetalWindow` (`Open`, with `WindowOptions`; `get_window`, `get_layer`, `get_device`, `get_sdl`,
 //! `get_event_pump_mut`, `get_level_window`), `NoMatchLink`, `set_window_title`.
 //!
-//! Example: `let mut window = MetalWindow::Open("Lunar Surface", (1280, 800))?;
+//! Example: `let mut window = MetalWindow::Open("Lunar Surface", (1280, 800), WindowOptions::default())?;
 //! let end = play_level(&mut window.get_level_window(&mut NoMatchLink), &join)?;`
 //!
 //! Must know:
@@ -31,6 +31,15 @@ use crate::match_protocol::MatchView;
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+/// `WindowOptions` is how a window opens besides its title and size: covering the screen
+/// (`is_fullscreen`, e.g. for a benchmark), or hidden (`is_hidden`, a bot's window, which draws
+/// nothing). The default is neither.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct WindowOptions {
+    pub is_fullscreen: bool,
+    pub is_hidden: bool,
+}
+
 /// `MetalWindow` is an open window with its Metal layer: SDL, the window, its Metal view (which
 /// owns the layer), the Metal device the layer draws with, and SDL's event pump.
 pub struct MetalWindow {
@@ -44,15 +53,21 @@ pub struct MetalWindow {
 impl MetalWindow {
     /// `Open` starts SDL and opens a window titled `title`, `size_pt` screen points wide and high
     /// (pixels on a 1x display), centred, resizable and at the display's full pixel density, with
-    /// a Metal layer on the system's Metal device.
+    /// a Metal layer on the system's Metal device, full screen or hidden as `options` say.
     ///
-    /// Example: `let window = MetalWindow::Open("Warped", (1280, 800))?;`
+    /// Example: `let window = MetalWindow::Open("Warped", (1280, 800), WindowOptions::default())?;`
     #[allow(non_snake_case)]
-    pub fn Open(title: &str, size_pt: (u32, u32)) -> Result<MetalWindow> {
+    pub fn Open(title: &str, size_pt: (u32, u32), options: WindowOptions) -> Result<MetalWindow> {
         let sdl: sdl3::Sdl = sdl3::init()?;
         let video: sdl3::VideoSubsystem = sdl.video()?;
         let mut builder: sdl3::video::WindowBuilder = video.window(title, size_pt.0, size_pt.1);
         builder.high_pixel_density().resizable().position_centered();
+        if options.is_fullscreen {
+            builder.fullscreen();
+        }
+        if options.is_hidden {
+            builder.hidden();
+        }
         let flags: u32 = builder.window_flags() | sdl3::sys::video::SDL_WINDOW_METAL.0 as u32;
         let window: Window = builder.set_window_flags(flags).build()?;
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
