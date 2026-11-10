@@ -345,6 +345,7 @@ pub struct VoxelWorld {
     pub gravity_m_per_s2: f64,
     map_player: PlayerSettings,
     map_gravity_m_per_s2: f64,
+    map_blizzard_radii_m: Vec<f64>,
     pub settings: ServerSettings,
     pub head_bob: HeadBobSettings,
     pub spawns: Vec<DMat4>,
@@ -885,6 +886,11 @@ impl VoxelWorld {
             gravity_m_per_s2: map.gravity_m_per_s2,
             map_player: map.player,
             map_gravity_m_per_s2: map.gravity_m_per_s2,
+            map_blizzard_radii_m: map
+                .get_blizzards()
+                .iter()
+                .map(|blizzard| blizzard.radius_m)
+                .collect(),
             settings: ServerSettings::Builtin(),
             head_bob: PerPlayerSettings::Builtin().view.head_bob,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
@@ -929,10 +935,14 @@ impl VoxelWorld {
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
-    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
+    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows);
+    /// and each blizzard `blizzard.radius_per_map_radius` times as wide as the map's.
     ///
     /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
     pub fn set_settings(&mut self, settings: ServerSettings) {
+        for (blizzard, map_radius_m) in self.blizzards.iter_mut().zip(&self.map_blizzard_radii_m) {
+            blizzard.radius_m = map_radius_m * settings.blizzard.radius_per_map_radius;
+        }
         let movement = &settings.movement;
         let half_jump_s: f64 = self.map_player.jump_m_per_s / self.map_gravity_m_per_s2
             * movement.jump_time_per_map_jump_time;
@@ -3957,6 +3967,7 @@ mod parity_tests {
     const GAP_TO_PYLON_M: f64 = 1.0;
     const CONSOLE_COUNT: usize = 4;
     const LUNAR_SETTINGS_PATH: &str = "../hyperbolic_wormholes_rust/server_settings.yaml";
+    const LEVEL_OWN_SECTIONS: [&str; 2] = ["blizzard:", "surface:"];
     const SNOW_ONLY_SETTINGS: [&str; 3] = [
         "jump_time_per_map_jump_time",
         "walk_speed_per_map_speed",
@@ -3998,11 +4009,18 @@ mod parity_tests {
         let lunar_map: Map =
             Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
         let mut lunar: VoxelWorld = VoxelWorld::FromMap(&lunar_map).expect("a voxel world");
+        let text: String = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
+        )
+        .expect("Lunar Surface's server settings");
+        let mut yaml: serde_yaml::Value = serde_yaml::from_str(&text).expect("YAML");
+        yaml.as_mapping_mut()
+            .expect("sections")
+            .remove("surface")
+            .expect("Lunar Surface's own section");
         lunar.set_settings(
-            ServerSettings::Load(
-                &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
-            )
-            .expect("Lunar Surface's server settings"),
+            ServerSettings::FromJson(&serde_json::to_vec(&yaml).expect("JSON"))
+                .expect("Lunar Surface's server settings"),
         );
         let (lunar_apex_m, lunar_step_count) = measure_jump(&lunar, [-27.0, 0.0]);
         let (snow_apex_m, snow_step_count) = measure_jump(&load_snow_planet(), [-30.0, 0.0]);
@@ -4051,6 +4069,11 @@ mod parity_tests {
             std::fs::read_to_string(root.join(path))
                 .expect("a settings file")
                 .lines()
+                .take_while(|line| {
+                    !LEVEL_OWN_SECTIONS
+                        .iter()
+                        .any(|section| line.starts_with(section))
+                })
                 .filter(|line| {
                     !SNOW_ONLY_SETTINGS
                         .iter()

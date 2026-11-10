@@ -17,7 +17,7 @@
 use glam::{DMat3, DMat4, DVec3, DVec4};
 use warped_shared::gravity::FlatWarp;
 
-use crate::city_world::{CityWorld, Shot, get_up};
+use crate::city_world::{Bounces, CityWorld, Shot, get_up};
 use crate::settings::WormholeSettings;
 use crate::thrown_wormholes::{Flight, MouthPlace, WormholeColor};
 
@@ -107,7 +107,7 @@ fn find_first_hit(
     direction: DVec3,
     length_m: f64,
 ) -> Option<DVec3> {
-    let shot: Shot = world.trace_shot(from, direction, length_m, 0, &[], None);
+    let shot: Shot = world.trace_shot(from, direction, length_m, Bounces::NONE, &[], None);
     let end: DVec3 = shot.points[1];
     ((end - from).length() < length_m - BACK_OFF_M * BACK_OFF_M).then_some(end)
 }

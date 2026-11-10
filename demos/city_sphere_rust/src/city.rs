@@ -43,8 +43,8 @@ use warped_shared::weapons::{Weapons, take_hit_weight};
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::city_world::{
-    CityInput, CityPlayer, CityWorld, Console, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M,
-    Target, get_up,
+    Bounces, CityInput, CityPlayer, CityWorld, Console, HEAD_HEIGHT_M, Shot, ShotHit, Side,
+    TORSO_HEIGHT_M, Target, get_up,
 };
 use crate::city_wormholes::{
     MOUTH_RADIUS_M, can_place_mouth, carry_through, find_crossing, fly_city_throw, get_mouth_frame,
@@ -1608,7 +1608,9 @@ impl CitySession {
     fn place_camera(&self, eye: DMat4) -> (DMat4, bool) {
         let boom_frac: f64 = self.view_switch.get_boom_frac(self.weapons.aim_frac);
         let get_clear_m = |from: DVec3, direction: DVec3, max_m: f64| -> f64 {
-            let shot: Shot = self.world.trace_shot(from, direction, max_m, 0, &[], None);
+            let shot: Shot =
+                self.world
+                    .trace_shot(from, direction, max_m, Bounces::NONE, &[], None);
             (shot.points[1] - from).length()
         };
         let placed: ThirdPersonCamera =
@@ -1630,7 +1632,7 @@ impl CitySession {
             from,
             -camera.z_axis.truncate(),
             self.settings.glass.range_m,
-            0,
+            Bounces::NONE,
             &[],
             None,
             get_shot_drop_per_m(&self.settings),
@@ -1819,7 +1821,7 @@ impl CitySession {
                 from,
                 along,
                 range_m,
-                self.settings.glass.max_bounce_count,
+                Bounces::FromGlass(&self.settings.glass),
                 targets,
                 shooter_id,
                 get_shot_drop_per_m(&self.settings),
@@ -3199,7 +3201,7 @@ fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
             eye,
             (DVec3::new(0.3, 0.2, 0.1) - d).normalize(),
             90.0,
-            2,
+            Bounces::Perfect(2),
             &[],
             None,
         );
@@ -3340,7 +3342,14 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
         let origin: DVec3 = from + up * eye_m;
         (
             world
-                .trace_shot(origin, (to - origin).normalize(), 90.0, 2, &[], None)
+                .trace_shot(
+                    origin,
+                    (to - origin).normalize(),
+                    90.0,
+                    Bounces::Perfect(2),
+                    &[],
+                    None,
+                )
                 .points,
             team,
             1.0,
@@ -3535,7 +3544,7 @@ fn find_bot_aim(
             origin,
             aim,
             settings.glass.range_m,
-            settings.glass.max_bounce_count,
+            Bounces::FromGlass(&settings.glass),
             targets,
             shooter_id,
             get_shot_drop_per_m(settings),
@@ -3739,7 +3748,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                     shot_eye.w_axis.truncate(),
                     -shot_eye.z_axis.truncate(),
                     settings.glass.range_m,
-                    settings.glass.max_bounce_count,
+                    Bounces::FromGlass(&settings.glass),
                     &targets,
                     client.id,
                     get_shot_drop_per_m(&settings),
@@ -3956,7 +3965,7 @@ mod tests {
     const LUNAR_JUMP_AT_M: [f64; 2] = [-27.0, 0.0];
     const CROUCH_WALK_S: f64 = 0.5;
     const CROUCH_SPEED_TOLERANCE_FRAC: f64 = 1e-3;
-    const CITY_ONLY_SECTION: &str = "glass:";
+    const LEVEL_OWN_SECTIONS: [&str; 2] = ["glass:", "surface:"];
     const CITY_ONLY_SETTINGS: [&str; 2] = [
         "  walk_speed_per_map_speed:",
         "  sprint_speed_per_map_speed:",
@@ -4211,7 +4220,7 @@ mod tests {
         .expect("City's server settings");
         let shared = |text: &str| -> Vec<String> {
             text.lines()
-                .take_while(|line| !line.starts_with(CITY_ONLY_SECTION))
+                .take_while(|line| !LEVEL_OWN_SECTIONS.iter().any(|s| line.starts_with(s)))
                 .filter(|line| {
                     !CITY_ONLY_SETTINGS
                         .iter()
@@ -4355,7 +4364,7 @@ mod tests {
                 eye.w_axis.truncate(),
                 -eye.z_axis.truncate(),
                 90.0,
-                2,
+                Bounces::Perfect(2),
                 &targets,
                 Some(0),
             );

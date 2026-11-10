@@ -57,6 +57,7 @@ mod voxel_world;
 mod world;
 mod zone_walls;
 
+use warped_shared::game_settings::GameSettings;
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, HudBars, HudPulses, describe_gun,
@@ -764,8 +765,14 @@ fn run_match_server(arguments: &Arguments) -> Result<()> {
     };
     println!("Join with: make join-match SERVER=<this computer's address> (127.0.0.1 here)");
     println!("Run folder: {}", folder.display());
+    let manifest_folder: &Path = arguments
+        .match_levels
+        .parent()
+        .ok_or("--match-levels has no folder")?;
+    let settings: GameSettings = GameSettings::Load(&levels, manifest_folder)?;
     let state: match_state::MatchState = match_flow::serve_match(
         &levels,
+        settings,
         &times,
         &folder,
         arguments.match_port,

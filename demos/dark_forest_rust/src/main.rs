@@ -52,6 +52,7 @@ fn main() {
             map_path: args.get_map_path(),
             level_result_file: args.level_result_file.clone(),
             game_password: Vec::new(),
+            server_settings: args.server_settings.clone(),
         };
         if let Err(error) = server::run(&options, &AtomicBool::new(false)) {
             eprintln!("error: {error}");
