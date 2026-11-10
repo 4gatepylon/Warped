@@ -8,15 +8,20 @@ this demo, so agents on different platforms can share the work without doing it 
 Each item has an id (`W-NN`) and a status: `[ ]` open, `[~]` claimed, `[?]` pending user review, `[x]` done (the
 user confirmed it).
 
+- **Commits follow the `pr-description` skill.** A commit that changes an item follows
+  `.agents/skills/pr-description/wishlist-transitions.md` and `wishlist-history.md`: it changes one item and
+  nothing else, carries one transition line and the item's history, and has the subject
+  `wishlist(<wishlist>): ...` (the titles below are those subjects), where `<wishlist>` is the folder that holds
+  the checklist.
 - **Always name an id with its short name.** Wherever you write an id, write the item's short name beside it, the bold
   title in the checklist: `W-85 (stuck leaving a bunker)`, never a bare `W-85`. This holds in commit messages, PR
   titles and descriptions, decisions, docs, the checklist's own cross-references, and every message to the user or to
   other agents, so the user never has to remember what a number means while tens or hundreds of items are in flight.
-  For several ids, name each one: `wishlist: claim W-37 (stronger curvature) and W-64 (zone planes)`.
+  For several ids, name each one.
 - **Read it first.** Before starting work on this demo, read the checklist on the latest `staging/global` and your user's
   `staging/user-<username>` (`git fetch origin staging/global staging/user-<username>`). Work only on items that are open, or that you have claimed.
 - **Add requests at once.** As soon as the user asks for something new, add it under "Open" with the next id, in the
-  user's words (fixing only spelling), in its own `wishlist: add W-NN (<short name>)` PR into your user's `staging/user-<username>` that you merge
+  user's words (fixing only spelling), in its own `wishlist(<wishlist>): add W-NN (<short name>)` PR into your user's `staging/user-<username>` that you merge
   at once, even while doing other work; then do it when its turn comes. Ask the user before splitting or merging
   items.
 - **Claim before starting.** Change the item's `[ ]` to `[~]`, move it under "Claimed", and add who and where:
@@ -25,21 +30,21 @@ user confirmed it).
   worktree's full path and machine, the branch and whether it is pushed, where pictures and other outputs are, and the
   state of the work with its date. Keep it current while you work, and push your branch to `origin` whenever it has
   commits worth sharing, so the work survives your session. Put only that change in a PR into your user's
-  `staging/user-<username>` titled `wishlist: claim W-NN (<short name>)` and merge it at once (agents may merge into
+  `staging/user-<username>` titled `wishlist(<wishlist>): claim W-NN (<short name>)` and merge it at once (agents may merge into
   their user's branch), so the user's other agents see the claim before the work starts, and other users' agents
   once it reaches `staging/global`.
-- **Mark it pending user review, never done.** In the PR that delivers the item, change `[~]` to `[?]`, move it under
+- **Mark it pending user review, never done.** In the PR that delivers the item, in a commit of its own (`MOVE TO PENDING ON WISHLIST`), change `[~]` to `[?]`, move it under
   "Pending user review", and replace the claim with the PR's number (`#NNN`; add it once the PR is open, before
   merging). Tell the user it is on `staging/user-<username>` to test, with screenshots of anything visual (see "Graphical changes"
   below). A fix for an item adds its PR number to that item and keeps it pending.
 - **Only the user's confirmation makes it done.** The user tests every claimed fix and every visual before it counts
   as finished. When the user says, in chat, that they tested an item and it works, change `[?]` to `[x]`, move it
-  under "Done" and add `Confirmed by the user, <YYYY-MM-DD>.`, in a `wishlist: W-NN (<short name>) confirmed` PR
+  under "Done" and add `Confirmed by the user, <YYYY-MM-DD>.`, in a `wishlist(<wishlist>): W-NN (<short name>) confirmed` PR
   merged at once. Never mark an item `[x]` on your own judgement, from tests or screenshots, or from another agent's
   report. If the user reports a problem, keep the item `[?]`, add their words to it, and fix it.
 - **Stale claims.** A claim with no open PR for two days may be taken over. Change the claim to yours and say whose it
   was in the PR description.
-- **Unclaim.** If you stop working on an item, change it back to `[ ]` under "Open" in a `wishlist: unclaim W-NN
+- **Unclaim.** If you stop working on an item, change it back to `[ ]` under "Open" in a `wishlist(<wishlist>): unclaim W-NN
   (<short name>)` PR.
 
 ## Graphical changes

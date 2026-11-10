@@ -24,8 +24,8 @@ a precise question; never invent or guess a term.
 - Generated code (output of a script or compiler) doesn't count either, but commit it only if the
   user agrees. A PR may go well over 200 lines this way: the limit is on what reviewers read.
 - State the reviewable line count in the PR description.
-- Write every PR description with the `pr-description` skill (`.agents/skills/pr-description/`).
-  Every PR uses its template unchanged.
+- Write every PR description and commit message with the `pr-description` skill
+  (`.agents/skills/pr-description/`). Every PR uses its template unchanged.
 - Open every PR against your user's `staging/user-<username>`, which goes into `staging/global` (the
   latest game), then `main` (stable). Agents merge into `staging/global` or `main` only with the
   user's explicit permission for that merge (the `merging-to-staging` skill).
