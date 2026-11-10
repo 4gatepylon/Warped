@@ -1,21 +1,31 @@
 ---
 name: pr-description
-description: Write or update a pull request description using this repo's standard template, and open every PR against the user's `staging/user-<username>` branch (agents merge into `staging/global` or `main` only with explicit permission). Use whenever you open a PR (gh pr create, gh stack submit), edit a PR's body, the user asks for a PR description, title or summary, or you attach screenshots or videos to a PR. Every PR in this repo uses the same template.
+description: Write or update a pull request description using this repo's standard template, write every commit message in this repo's standard format, and open every PR against the user's `staging/user-<username>` branch (agents merge into `staging/global` or `main` only with explicit permission). Use whenever you open a PR (gh pr create, gh stack submit), edit a PR's body, the user asks for a PR description, title or summary, you attach screenshots or videos to a PR, you write a commit message, or a commit changes a wishlist item's status (critical: `wishlist-transitions.md`). Every PR in this repo uses the same template.
 ---
 
-# PR description
+# PR descriptions and commit messages
 
-Every PR description in this repo uses the template below, exactly: the same sections, in the same
-order, with the same headings. Never drop a section; if it has nothing to say, write `None.`. This
-covers only the description (and title); the PR size rule is in the root `AGENTS.md`, and how to
-split and stack PRs is in the `stacked-prs` skill (`.agents/skills/stacked-prs/`).
+Every PR and every commit in this repo follows the formats in this skill. "Pull requests" covers the PR
+description (and title), and "Commits" covers the commit message. The PR size rule is in the root `AGENTS.md`,
+and how to split and stack PRs is in the `stacked-prs` skill (`.agents/skills/stacked-prs/`).
+
+Files in this skill:
+
+- `SKILL.md` (this file): the PR template and the commit rules.
+- [`wishlist-transitions.md`](wishlist-transitions.md): the line every wishlist commit carries. Read it before
+  any commit that changes a wishlist checklist.
+
+Keep every file here under 400 lines. Split a longer one by topic, and have each file name the files to read
+for what it leaves out, so that an agent that finds a gap knows where to look next.
+
+## Pull requests
 
 > NOTE: The template is a living document: it may change, but at any point in time every PR uses
 > the current version. If a PR doesn't fit it (a section makes no sense, or something important
 > has no place), stop and ask the user for guidance rather than improvising a variant. If the
 > template needs to change, change it in this skill in its own PR.
 
-## Base branch
+### Base branch
 
 - Open every PR against your user's `staging/user-<username>`, never straight against
   `staging/global` or `main`. In a stack, layer 1's base is `staging/user-<username>`.
@@ -24,7 +34,7 @@ split and stack PRs is in the `stacked-prs` skill (`.agents/skills/stacked-prs/`
 - An agent merges into `staging/global` or `main` only after the user explicitly says yes to that
   merge. How the branches fit together is in the `merging-to-staging` skill.
 
-## Template
+### Template
 
 ```markdown
 ## Summary
@@ -59,7 +69,7 @@ Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
 🤖 Generated with <agent>
 ```
 
-## Filling it in
+### Filling it in
 
 - **Title**: short and specific, `<folder or area>: <what changes>` (e.g.
   `physics: add curved-geodesic movement`). For a stack layer, no "1/2" numbering in the
@@ -109,6 +119,24 @@ Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
   below for the agent that wrote the PR. If the session gives a different attribution line, use
   that one.
 
+### Updating
+
+When a PR changes after review, update the description so it matches the final diff (Changes,
+Testing, Pictures, Size, Decisions), with `gh pr edit <n> --body-file body.md`. If that fails with a
+Projects (classic) error (seen once with gh 2.55 on a Linux machine, 2026-10-30), use
+`gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f body="$(cat body.md)"` instead.
+
+## Commits
+
+- **Wishlist commits (critical).** A commit that changes a wishlist checklist (`USER_WISHLIST_CHECKLIST.md`)
+  follows [`wishlist-transitions.md`](wishlist-transitions.md) exactly. Read that file before you commit. In
+  short, such a commit:
+  - changes one item in one checklist and nothing else, not code and not another item;
+  - has the subject `wishlist(<wishlist>): <what happened to the item>`, naming the checklist's folder;
+  - carries one transition line in its body, such as
+    `* [<wishlist>/<id> (<short name>)] (null -> [ ]) ADD TO WISHLIST: <text>`.
+- **Attribution.** An agent keeps the commit trailer its own default adds (table below).
+
 ## Attribution lines
 
 Each agent puts its own name and link in the footer and keeps the lines it adds by default
@@ -121,10 +149,3 @@ Each agent puts its own name and link in the footer and keeps the lines it adds 
 | Devin | `[Devin](https://devin.ai)` | `Link to Devin session: <url>` and `Requested by: @<user>` after the footer, where Devin appends them; commits authored by `Devin AI` (`devin-ai-integration[bot]`) |
 
 An agent that isn't in the table adds a row for itself in the same PR.
-
-## Updating
-
-When a PR changes after review, update the description so it matches the final diff (Changes,
-Testing, Pictures, Size, Decisions), with `gh pr edit <n> --body-file body.md`. If that fails with a
-Projects (classic) error (seen once with gh 2.55 on a Linux machine, 2026-10-30), use
-`gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f body="$(cat body.md)"` instead.
