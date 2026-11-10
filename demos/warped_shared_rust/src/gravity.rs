@@ -243,9 +243,17 @@ mod tests {
             radius_m: 1.0,
             is_mouth: false,
         };
-        let level: DVec3 =
-            get_flat_pull_m_per_s(&gravity, WALK_M_PER_S, DVec3::ZERO, DVec3::Y, &[hole(DVec3::X * 2.0)]);
-        assert!((level - DVec3::X * max_m_per_s).length() < TOLERANCE, "{level}");
+        let level: DVec3 = get_flat_pull_m_per_s(
+            &gravity,
+            WALK_M_PER_S,
+            DVec3::ZERO,
+            DVec3::Y,
+            &[hole(DVec3::X * 2.0)],
+        );
+        assert!(
+            (level - DVec3::X * max_m_per_s).length() < TOLERANCE,
+            "{level}"
+        );
         let above: DVec3 = get_flat_pull_m_per_s(
             &gravity,
             WALK_M_PER_S,
@@ -253,7 +261,10 @@ mod tests {
             DVec3::Y,
             &[hole(DVec3::new(2.0, 2.0, 0.0))],
         );
-        assert!(above.y == 0.0 && above.x > 0.0 && above.x < max_m_per_s, "{above}");
+        assert!(
+            above.y == 0.0 && above.x > 0.0 && above.x < max_m_per_s,
+            "{above}"
+        );
         let overhead: DVec3 = get_flat_pull_m_per_s(
             &gravity,
             WALK_M_PER_S,
@@ -281,8 +292,13 @@ mod tests {
             radius_m: 1.0,
             is_mouth: true,
         };
-        let one: DVec3 =
-            get_flat_pull_m_per_s(&gravity, WALK_M_PER_S, DVec3::ZERO, DVec3::Y, &[mouth(DVec3::X * 12.0)]);
+        let one: DVec3 = get_flat_pull_m_per_s(
+            &gravity,
+            WALK_M_PER_S,
+            DVec3::ZERO,
+            DVec3::Y,
+            &[mouth(DVec3::X * 12.0)],
+        );
         let two: DVec3 = get_flat_pull_m_per_s(
             &gravity,
             WALK_M_PER_S,
@@ -291,12 +307,19 @@ mod tests {
             &[mouth(DVec3::X * 12.0), mouth(DVec3::Z * 12.0)],
         );
         assert!(one.x > 0.0 && one.x < max_m_per_s / 2.0);
-        assert!((two - DVec3::new(one.x, 0.0, one.x)).length() < TOLERANCE, "{two}");
+        assert!(
+            (two - DVec3::new(one.x, 0.0, one.x)).length() < TOLERANCE,
+            "{two}"
+        );
         let ring: Vec<FlatWarp> = (0..3)
             .map(|k| mouth(DVec3::new(4.0 + f64::from(k), 0.0, f64::from(k) - 1.0)))
             .collect();
-        let capped: DVec3 = get_flat_pull_m_per_s(&gravity, WALK_M_PER_S, DVec3::ZERO, DVec3::Y, &ring);
-        assert!((capped.length() - max_m_per_s).abs() < TOLERANCE, "{capped}");
+        let capped: DVec3 =
+            get_flat_pull_m_per_s(&gravity, WALK_M_PER_S, DVec3::ZERO, DVec3::Y, &ring);
+        assert!(
+            (capped.length() - max_m_per_s).abs() < TOLERANCE,
+            "{capped}"
+        );
         assert_eq!(
             get_flat_pull_m_per_s(&gravity, WALK_M_PER_S, DVec3::ZERO, DVec3::Y, &[]),
             DVec3::ZERO
@@ -311,8 +334,9 @@ mod tests {
         let body: DMat4 = make_rotation(AXIS_X, AXIS_Z, turn_rad);
         let eye: DVec4 = (body * make_boost(AXIS_Y, eye_height_m / R_M)).col(AXIS_W);
         let ahead_m: f64 = 8.0;
-        let centre: DVec4 =
-            (make_boost(AXIS_Y, eye_height_m / R_M) * make_boost(AXIS_X, ahead_m / R_M)).col(AXIS_W);
+        let centre: DVec4 = (make_boost(AXIS_Y, eye_height_m / R_M)
+            * make_boost(AXIS_X, ahead_m / R_M))
+        .col(AXIS_W);
         let hole: HyperbolicWarp = HyperbolicWarp {
             centre,
             radius_m: 1.2,

@@ -4,9 +4,13 @@
 //! be compared byte for byte to show a change left play the same.
 //!
 //! Interface: the ignored test `record_play_trace`, run with `PLAY_TRACE_MAP` (a `--map` name)
-//! and `PLAY_TRACE_FILE` (where to write the trace).
+//! and `PLAY_TRACE_FILE` (where to write the trace), and optionally `PLAY_TRACE_AT` (where to
+//! start instead of the first spawn: `<u_m>,<v_m>,<target_u_m>,<target_v_m>`, a map point and the
+//! one to face, as `VoxelPlayer::AtView` takes them).
 //!
-//! Example: `PLAY_TRACE_MAP=dust PLAY_TRACE_FILE=/tmp/dust.txt cargo test --release record_play_trace -- --ignored`
+//! Example: `PLAY_TRACE_MAP=dust PLAY_TRACE_FILE=/tmp/dust.txt cargo test --release record_play_trace -- --ignored`;
+//! with `PLAY_TRACE_AT=-26,40,-14,40` on `lunar-surface` it starts 12 m from wormhole mouth A,
+//! facing it, so the trace shows the mouth's pull (W-144): standing drifts in, walking in is faster.
 
 use std::fmt::Write as _;
 
@@ -123,6 +127,22 @@ fn describe(step: usize, player: &VoxelPlayer, forward_m_per_s: f64) -> String {
     )
 }
 
+/// `get_start` gives where the trace starts on `world`: the first spawn, or the point that
+/// `PLAY_TRACE_AT` names, facing its target.
+fn get_start(world: &VoxelWorld) -> VoxelPlayer {
+    let Ok(at) = std::env::var("PLAY_TRACE_AT") else {
+        return VoxelPlayer::AtSpawn(world, 0);
+    };
+    let numbers_m: Vec<f64> = at
+        .split(',')
+        .map(|number| number.trim().parse().expect("PLAY_TRACE_AT holds numbers"))
+        .collect();
+    let [u_m, v_m, target_u_m, target_v_m] = numbers_m[..] else {
+        panic!("PLAY_TRACE_AT is <u_m>,<v_m>,<target_u_m>,<target_v_m>, not {at}");
+    };
+    VoxelPlayer::AtView(world, [u_m, v_m], [target_u_m, target_v_m], None, 0.0)
+}
+
 #[test]
 #[ignore]
 fn record_play_trace() {
@@ -134,7 +154,7 @@ fn record_play_trace() {
     let map = crate::load_map(map_name, &settings).expect("the map");
     let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel map");
     world.set_settings(settings);
-    let mut player: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
+    let mut player: VoxelPlayer = get_start(&world);
     let mut trace: String = String::new();
     let mut step: usize = 0;
     for leg in &SCRIPT {

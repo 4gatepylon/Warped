@@ -5,7 +5,7 @@
 //! comes out of the other, mirrored through it as Lunar's mouths carry rays.
 //!
 //! Interface: `fly_city_throw`, `land_city_mouth`, `get_mouth_frame`, `can_place_mouth`,
-//! `find_crossing`, `carry_through`, `MOUTH_RADIUS_M`.
+//! `find_crossing`, `carry_through`, `make_mouth_warps`, `MOUTH_RADIUS_M`.
 //!
 //! Example: `let flight = fly_city_throw(&world, eye, WormholeColor::Purple, &settings.wormholes);`
 //!
@@ -15,6 +15,7 @@
 //!   in the same 16 bytes of a snapshot.
 
 use glam::{DMat3, DMat4, DVec3, DVec4};
+use warped_shared::gravity::FlatWarp;
 
 use crate::city_world::{CityWorld, Shot, get_up};
 use crate::settings::WormholeSettings;
@@ -41,6 +42,22 @@ fn get_reference_axes(centre: DVec3) -> (DVec3, DVec3) {
     };
     let right: DVec3 = helper.cross(up).normalize();
     (right, right.cross(up))
+}
+
+/// `make_mouth_warps` gives both mouths of each linked pair of `pairs` as warps that pull walkers
+/// (W-144, `CityWorld::mouths`), each disc's radius as its throat's.
+///
+/// Example: `world.mouths = make_mouth_warps(&[[purple, green]]);`
+pub fn make_mouth_warps(pairs: &[[MouthPlace; 2]]) -> Vec<FlatWarp> {
+    pairs
+        .iter()
+        .flatten()
+        .map(|place| FlatWarp {
+            centre_m: DVec3::new(place.u_m, place.v_m, place.h_m),
+            radius_m: MOUTH_RADIUS_M,
+            is_mouth: true,
+        })
+        .collect()
 }
 
 /// `get_mouth_frame` gives a mouth's frame: columns right, up (toward the sphere's centre), back

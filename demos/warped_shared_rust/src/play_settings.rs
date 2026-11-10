@@ -274,8 +274,8 @@ impl GravitySettings {
     ///
     /// Example: `settings.gravity.check()?;`
     pub fn check(&self) -> Result<(), String> {
-        let is_max_in_range: bool = (0.0..MAX_PULL_PER_WALK_SPEED_EXCL)
-            .contains(&self.max_pull_per_walk_speed);
+        let is_max_in_range: bool =
+            (0.0..MAX_PULL_PER_WALK_SPEED_EXCL).contains(&self.max_pull_per_walk_speed);
         if !is_max_in_range || !(self.full_pull_m > 0.0 && self.full_pull_m < self.reach_m) {
             return Err(format!(
                 "gravity needs 0 <= max_pull_per_walk_speed < {MAX_PULL_PER_WALK_SPEED_EXCL} and \
