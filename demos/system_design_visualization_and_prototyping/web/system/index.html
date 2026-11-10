@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  `index.html` is the system view: it shows what the simulated backend is doing while the prototype runs, so the
+  system design can be watched at work.
+
+  Interface:
+  - Components: one box per component of the design, with an arrow for every pair that exchanged messages, its
+    message count, and a yellow flash while messages are passing.
+  - Fleet: each region's machines and the game servers in their slots. The yellow FAIL buttons kill one.
+  - Caps and wait queue, the newest messages, and every database table with its definition and newest rows.
+
+  Example: `make run-prototype`, then open http://127.0.0.1:8010/system/ and set "Players online" to 200.
+
+  Must know:
+  - Gotchas: `system.js` redraws everything once a second from `GET /api/simulation/system`.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warped system view</title>
+<link rel="stylesheet" href="../shared/look.css">
+</head>
+<body>
+<div class="page">
+  <h1>System view</h1>
+  <p class="dim">The simulated system, redrawn every second. Each box below stands in for a component of the real
+    design: this prototype's database is SQLite where the real one is PostgreSQL, and its "cloud" boots pretend
+    machines.</p>
+
+  <h2>Components and the messages between them</h2>
+  <svg id="diagram" viewBox="0 0 1040 380"></svg>
+
+  <h2>Fleet</h2>
+  <p class="dim">The fleet manager keeps spare game server slots ready in each region, asks the cloud for machines
+    when matches wait, and turns machines off when they stay empty.</p>
+  <div id="fleet"></div>
+
+  <h2>Caps and wait queue</h2>
+  <div id="caps"></div>
+
+  <h2>Newest messages</h2>
+  <div class="scroll"><table id="messages"></table></div>
+
+  <h2>Database</h2>
+  <p class="dim">Every table with its definition, a first draft of the real schema, and its newest rows.</p>
+  <div id="tables"></div>
+</div>
+<script src="../shared/api.js"></script>
+<script src="../shared/sim_controls.js"></script>
+<script src="system.js"></script>
+</body>
+</html>

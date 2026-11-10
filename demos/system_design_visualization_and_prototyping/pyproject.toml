@@ -1,0 +1,34 @@
+# `pyproject.toml` defines the system prototype's uv project: its package, dependencies and tools.
+#
+# Interface:
+#     system_prototype package: src/system_prototype/.
+#     system-prototype command: serves the prototype (src/system_prototype/serve.py).
+#     dev dependency group: httpx2 (for FastAPI's test client), pytest and ruff.
+#
+# Example:
+#     uv run pytest
+[project]
+name = "system-prototype"
+version = "0.1.0"
+description = "A playable simulation of the system around a Warped match, with every component visible"
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.1",
+    "fastapi>=0.115",
+    "pydantic>=2.9",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+system-prototype = "system_prototype.serve:main"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
+
+[build-system]
+requires = ["uv_build>=0.8"]
+build-backend = "uv_build"
