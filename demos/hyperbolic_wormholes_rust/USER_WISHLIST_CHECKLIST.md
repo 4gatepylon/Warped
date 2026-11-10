@@ -166,6 +166,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-206 Click every option in every menu.** The user, 2026-11-10: "Being able to click on all options in all menus instead of using hotkeys". Related: W-150 (arrow keys and clicks for menu pages), which made the pages' names clickable.
 - [ ] **W-207 Better window text UI.** The user, 2026-11-10: "Better window text UI (things spaced apart more widely, color on hover, easier to understand hitboxes, better font, ideally nice background animation etc..)". Related: W-197 (menus that fit the game's look) and W-151 (menu layout and help tooltip).
 - [ ] **W-208 Hold an arrow or use the scroll wheel to scroll through settings.** The user, 2026-11-10: "be able to click and hold down arrow to scroll through settings (also scroll wheel)".
+- [ ] **W-210 Labels on world objects while playing.** The user, 2026-11-10: "the creation of an option that lets you toggle on in-map labeling (i.e. the ability to see the labels when you are playing to test this stuff above)". The labels are the unique names the glossary gives each object of a level's world (`game_design/GLOSSARY.md`), so the names can be checked in play.
 
 ## Pending user review
 
