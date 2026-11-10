@@ -166,6 +166,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-206 Click every option in every menu.** The user, 2026-11-10: "Being able to click on all options in all menus instead of using hotkeys". Related: W-150 (arrow keys and clicks for menu pages), which made the pages' names clickable.
 - [ ] **W-207 Better window text UI.** The user, 2026-11-10: "Better window text UI (things spaced apart more widely, color on hover, easier to understand hitboxes, better font, ideally nice background animation etc..)". Related: W-197 (menus that fit the game's look) and W-151 (menu layout and help tooltip).
 - [ ] **W-208 Hold an arrow or use the scroll wheel to scroll through settings.** The user, 2026-11-10: "be able to click and hold down arrow to scroll through settings (also scroll wheel)".
+- [ ] **W-210 Settings steps wrap around or stop at zero.** The user, 2026-11-10, on the game settings page (W-209, game settings checked when saved, with the reason): "add to wishlist wraparound for 0-1 range settings and cannot go under zero for positive value settings".
 
 ## Pending user review
 
