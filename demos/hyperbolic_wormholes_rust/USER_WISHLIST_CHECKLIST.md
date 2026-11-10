@@ -127,6 +127,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-151 Menu layout and help tooltip.** The user, 2026-11-09: "menu page have menu name at the top and the options BELOW it (i.e. the panes "which pane you are in" with brackets and the pane names", "there should also be a question mark that fi you hver tells you the tooltip for how to navigate the menu instea edof showing by default the instruction Q/E".
 - [ ] **W-152 Pylons stay off, as a setting.** The user, 2026-11-09: "pylons once turned off are turned off forever and that this is a toggled setting (put that in wishlist, dont impl yet)", "that way if you jump back to a level that was previously played that you just barely lost, it takes less time to win again in theory". Not to be built yet.
 - [ ] **W-153 Shot through a wormhole looks wrong on the other side.** A bug the user found playtesting, 2026-11-09: "a bug where bug shot across a wormhole shows up with the wrong visuals on the other side (looks like it's dust right on the surface of teh wormhole, but it shouldk be warped instead)". The user: "do NOT fix this yet".
+- [ ] **W-154 Voice agent for map variants.** The user, 2026-11-09: "a way to use a voice agent to spin up map variants or modify levels even while they are running". Builds on W-143 (declarative levels).
 
 ## Pending user review
 
