@@ -46,8 +46,21 @@ pub fn load_levels(path: &Path) -> Result<Vec<LevelEntry>, Box<dyn Error>> {
     LoadLevels(path)
 }
 
+/// `find_picture_in_checkout` gives a level's map picture in its own crate folder when the
+/// manifest's path (`relative`, through the match's `.levels/` links, which only `make levels`
+/// makes) isn't there: the part of `relative` after the level's `crate_folder`, under the checkout
+/// (two folders up from the manifest's `folder`); `None` if that isn't there either.
+///
+/// Example: `let path = find_picture_in_checkout(folder, "demos/dust_rust", ".levels/dust/demos/dust_rust/map_pictures/dust_r50m.png");`
+fn find_picture_in_checkout(folder: &Path, crate_folder: &str, relative: &str) -> Option<PathBuf> {
+    let (_, inside_crate) = relative.split_once(&format!("{crate_folder}/"))?;
+    let path: PathBuf = folder.join("../..").join(crate_folder).join(inside_crate);
+    path.exists().then_some(path)
+}
+
 /// `load_map_pictures` gives each level's map picture, read from the manifest at
-/// `manifest_path`'s folder, or `None` for a level without one or whose file isn't there.
+/// `manifest_path`'s folder (or from the level's crate folder, `find_picture_in_checkout`), or
+/// `None` for a level without one or whose file isn't there.
 ///
 /// Example: `let pictures = load_map_pictures(&path, &levels)?;`
 pub fn load_map_pictures(
@@ -63,10 +76,13 @@ pub fn load_map_pictures(
             let Some(relative) = &level.map_picture else {
                 return Ok(None);
             };
-            let path: PathBuf = folder.join(relative);
-            if !path.exists() {
-                return Ok(None);
-            }
+            let path: PathBuf = match folder.join(relative) {
+                path if path.exists() => path,
+                _ => match find_picture_in_checkout(folder, &level.folder, relative) {
+                    Some(path) => path,
+                    None => return Ok(None),
+                },
+            };
             let image: image::RgbaImage = image::open(&path)
                 .map_err(|error| format!("{}: {error}", path.display()))?
                 .to_rgba8();
@@ -83,7 +99,7 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Manifest | the checkout's (five levels, each named once) | `the_checkout_manifest_loads` |
-    //! | Pictures | one per level, each either read or missing, never an error | `the_checkout_manifest_loads` |
+    //! | Pictures | a level with a map picture (found in its crate folder without `.levels/`), one without | `the_checkout_manifest_loads` |
 
     use super::*;
 
@@ -97,5 +113,13 @@ mod tests {
         assert_eq!(names.len(), levels.len());
         let pictures: Vec<Option<Picture>> = load_map_pictures(&path, &levels).unwrap();
         assert_eq!(pictures.len(), levels.len());
+        for (level, picture) in levels.iter().zip(&pictures) {
+            assert_eq!(
+                picture.is_some(),
+                level.map_picture.is_some(),
+                "{}",
+                level.name
+            );
+        }
     }
 }

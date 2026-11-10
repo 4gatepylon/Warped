@@ -1,7 +1,7 @@
 //! `children.rs` starts the headless programs behind a game the player hosts: the match server
 //! (which starts each round's level server itself) and the bots, each a match client without a
 //! window. They are child processes of the app, logging to its run folder, stopped when the
-//! player stops hosting or quits.
+//! player stops hosting or quits, and when the app ends in any other way (`ChildGroup`).
 //!
 //! Interface: `GameKind`, `BotObjective`, `BotPlan`, `Programs` (`Find`), `plan_bots`,
 //! `MAX_ALLY_COUNT`, `MAX_ENEMY_COUNT`, `MAX_BOT_COUNT`,
@@ -17,12 +17,18 @@
 //! - Gotchas: `--bot-objective fight` reaches the match client, which (until its `main.rs` passes
 //!   it on, after W-140) still starts console bots.
 //! - Side effects: the match server writes its own run folder in its crate's `.artifacts/`.
+//! - Gotchas: everything a game starts shares one process group, whose guard kills it all when
+//!   the app ends, however it ends (a crash too). A level server is the match server's child, so
+//!   only the group reaches it once the match server is killed.
 
 use std::error::Error;
 use std::fs;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use warped_shared::app_bundle::{get_app_logs_folder, get_app_resources_folder};
 use warped_shared::match_protocol::stop_child;
@@ -38,6 +44,12 @@ pub const SIT_OUT_ROUND_COUNT: usize = 255;
 const MATCH_PROGRAM_IN_APP: &str = "warped-match";
 const CHECKOUT_MATCH_PROGRAM: &str = "../warped_match_rust/.build/release/hyperbolic-wormholes";
 const CHECKOUT_ARTIFACTS_FOLDER: &str = ".artifacts";
+const GUARD_SHELL: &str = "/bin/sh";
+const GUARD_SCRIPT: &str = "read -r line; kill -KILL 0";
+const KILL_PROGRAM: &str = "/bin/kill";
+const NO_SIGNAL_FLAG: &str = "-0";
+const GROUP_EMPTY_WAIT_MS: u64 = 2000;
+const GROUP_POLL_MS: u64 = 20;
 
 /// `GameKind` is the game the player starts from the main menu: hosted for others, alone, or
 /// with bots (how many on the player's team and on the other, and what they do).
@@ -236,13 +248,87 @@ pub fn make_run_folder(script: &str, run_id: &str) -> Result<PathBuf> {
     Ok(folder)
 }
 
-/// `spawn_logged` starts `command` with its output in `folder/<name>.log`.
+/// `is_group_alive` says whether a process of the process group `group_id` is still running
+/// (it signals nothing: `kill -0`).
 ///
-/// Example: `let child = spawn_logged(command, &folder, "match_server")?;`
-fn spawn_logged(mut command: Command, folder: &Path, name: &str) -> Result<Child> {
+/// Example: `if is_group_alive(group_id)? { ... }`
+fn is_group_alive(group_id: i32) -> Result<bool> {
+    Ok(Command::new(KILL_PROGRAM)
+        .args([NO_SIGNAL_FLAG, "--", &format!("-{group_id}")])
+        .stderr(Stdio::null())
+        .status()?
+        .success())
+}
+
+/// `ChildGroup` is the process group of everything a hosted game starts, with its guard: a shell
+/// that leads the group and waits on a pipe only the app writes to. When the app ends in any way
+/// (a return, a panic, a crash, a kill), the pipe closes and the guard kills the whole group, so
+/// no server or bot outlives the app.
+struct ChildGroup {
+    guard: Child,
+    guard_pipe: Option<ChildStdin>,
+}
+
+impl ChildGroup {
+    /// `Start` starts the guard, which leads a new process group.
+    ///
+    /// Example: `let group = ChildGroup::Start()?;`
+    #[allow(non_snake_case)]
+    fn Start() -> Result<ChildGroup> {
+        let mut guard: Child = Command::new(GUARD_SHELL)
+            .args(["-c", GUARD_SCRIPT])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map_err(|error| format!("can't start the guard of the game's processes ({error})"))?;
+        let guard_pipe: Option<ChildStdin> = guard.stdin.take();
+        Ok(ChildGroup { guard, guard_pipe })
+    }
+
+    /// `get_id` gives the group's id, for `Command::process_group`.
+    ///
+    /// Example: `command.process_group(group.get_id()?);`
+    fn get_id(&self) -> Result<i32> {
+        Ok(i32::try_from(self.guard.id())?)
+    }
+
+    /// `stop` closes the pipe, so the guard kills the group, and waits until the group is empty;
+    /// it fails if a process of the group is still alive `GROUP_EMPTY_WAIT_MS` later. A second
+    /// call does nothing.
+    ///
+    /// Example: `group.stop()?;`
+    fn stop(&mut self) -> Result<()> {
+        if self.guard_pipe.take().is_none() {
+            return Ok(());
+        }
+        self.guard.wait()?;
+        let group_id: i32 = self.get_id()?;
+        let waited_from: Instant = Instant::now();
+        while is_group_alive(group_id)? {
+            if waited_from.elapsed() >= Duration::from_millis(GROUP_EMPTY_WAIT_MS) {
+                return Err(format!(
+                    "processes of the game's process group {group_id} are still alive \
+                     {GROUP_EMPTY_WAIT_MS} ms after the app stopped it"
+                )
+                .into());
+            }
+            thread::sleep(Duration::from_millis(GROUP_POLL_MS));
+        }
+        Ok(())
+    }
+}
+
+/// `spawn_logged` starts `command` in the process group `group_id` with its output in
+/// `folder/<name>.log`.
+///
+/// Example: `let child = spawn_logged(command, group.get_id()?, &folder, "match_server")?;`
+fn spawn_logged(mut command: Command, group_id: i32, folder: &Path, name: &str) -> Result<Child> {
     let log: fs::File = fs::File::create(folder.join(format!("{name}.log")))?;
     eprintln!("warped: starting {command:?}");
     Ok(command
+        .process_group(group_id)
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
@@ -251,7 +337,7 @@ fn spawn_logged(mut command: Command, folder: &Path, name: &str) -> Result<Child
 }
 
 /// `HostedGame` is a game this app hosts: its kind, the match server's address, the match server
-/// and the bots, and the folder of their logs.
+/// and the bots, the process group they all run in, and the folder of their logs.
 pub struct HostedGame {
     pub kind: GameKind,
     pub server: SocketAddr,
@@ -259,6 +345,7 @@ pub struct HostedGame {
     programs: Programs,
     match_server: Option<Child>,
     bots: Vec<(BotPlan, Option<Child>)>,
+    group: ChildGroup,
 }
 
 impl HostedGame {
@@ -277,8 +364,10 @@ impl HostedGame {
         run_folder: &Path,
     ) -> Result<HostedGame> {
         let server: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, ports.0));
+        let group: ChildGroup = ChildGroup::Start()?;
         let match_server: Child = spawn_logged(
             make_match_server_command(programs, ports.0, ports.1, is_loopback_only),
+            group.get_id()?,
             run_folder,
             "match_server",
         )?;
@@ -289,6 +378,7 @@ impl HostedGame {
             programs: programs.clone(),
             match_server: Some(match_server),
             bots: Vec::new(),
+            group,
         };
         for plan in plan_bots(kind, player_team) {
             game.start_bot(plan)?;
@@ -303,6 +393,7 @@ impl HostedGame {
         let name: String = format!("bot_{}_{}", self.bots.len() + 1, plan.team.get_name());
         let child: Child = spawn_logged(
             make_bot_command(&self.programs, self.server, &plan),
+            self.group.get_id()?,
             &self.run_folder,
             &name,
         )?;
@@ -343,23 +434,28 @@ impl HostedGame {
         Ok(())
     }
 
-    /// `stop` stops the bots and the match server (which stops its level server).
+    /// `stop` stops the bots and the match server, then the rest of their process group (the
+    /// level server the match server started); it fails if a process of the group is still alive
+    /// afterwards.
     ///
-    /// Example: `game.stop();`
-    pub fn stop(&mut self) {
+    /// Example: `game.stop()?;`
+    pub fn stop(&mut self) -> Result<()> {
         for (_, child) in &mut self.bots {
             stop_child(child);
         }
         stop_child(&mut self.match_server);
+        self.group.stop()
     }
 }
 
 impl Drop for HostedGame {
-    /// `drop` stops the children, so none outlives the app.
+    /// `drop` stops the game's processes, so none outlives the app, and prints a failure to.
     ///
     /// Example: `drop(game);`
     fn drop(&mut self) {
-        self.stop();
+        if let Err(error) = self.stop() {
+            eprintln!("warped: {error}");
+        }
     }
 }
 
@@ -372,9 +468,64 @@ mod tests {
     //! | Game kind | hosted, alone (blue, red), bots (none: as alone; allies and enemies; allies only: a sitting-out enemy; the most) | `each_game_kind_plans_its_bots` |
     //! | Match server command | ports and manifest passed; on the network (no variable), loopback only (`WARPED_LOOPBACK_ONLY=1`) | `the_match_server_serves_the_manifest_on_its_ports` |
     //! | Bot command | consoles, fight, sitting out (as many rounds as `SIT_OUT_ROUND_COUNT`, the other team named) | `bots_join_with_their_team_and_objective` |
+    //! | How the game's processes end | the app stops the game (a level server left by its killed match server dies too), the app ends without stopping it (the guard's pipe closes) | `stopping_a_group_kills_a_grandchild`, `a_group_dies_with_the_app` |
 
     use super::*;
     use std::ffi::OsStr;
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::ExitStatusExt;
+
+    const SLEEP_PROGRAM: &str = "/bin/sleep";
+    const SLEEP_S: &str = "600";
+    const SLEEP_SCRIPT: &str = "/bin/sleep 600 & echo $!; wait";
+    const SIGKILL: i32 = 9;
+
+    /// `is_process_alive` says whether the process `process_id` is still running.
+    ///
+    /// Example: `assert!(is_process_alive(grandchild_id));`
+    fn is_process_alive(process_id: i32) -> bool {
+        Command::new(KILL_PROGRAM)
+            .args([NO_SIGNAL_FLAG, &process_id.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    #[test]
+    fn stopping_a_group_kills_a_grandchild() {
+        let mut group: ChildGroup = ChildGroup::Start().unwrap();
+        let mut child: Child = Command::new(GUARD_SHELL)
+            .args(["-c", SLEEP_SCRIPT])
+            .stdout(Stdio::piped())
+            .process_group(group.get_id().unwrap())
+            .spawn()
+            .unwrap();
+        let mut line: String = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let grandchild_id: i32 = line.trim().parse().unwrap();
+        stop_child(&mut Some(child));
+        assert!(is_process_alive(grandchild_id));
+        group.stop().unwrap();
+        assert!(!is_group_alive(group.get_id().unwrap()).unwrap());
+        assert!(!is_process_alive(grandchild_id));
+        group.stop().unwrap();
+    }
+
+    #[test]
+    fn a_group_dies_with_the_app() {
+        let mut group: ChildGroup = ChildGroup::Start().unwrap();
+        let mut child: Child = Command::new(SLEEP_PROGRAM)
+            .arg(SLEEP_S)
+            .process_group(group.get_id().unwrap())
+            .spawn()
+            .unwrap();
+        drop(group.guard_pipe.take());
+        assert_eq!(child.wait().unwrap().signal(), Some(SIGKILL));
+        group.guard.wait().unwrap();
+    }
 
     /// `get_args` gives a command's arguments as strings.
     ///
