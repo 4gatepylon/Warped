@@ -2,7 +2,9 @@
 
 Interface:
     make_app: Builds the FastAPI app around a `World`.
-    Routes under `/api/`: what the real backend would offer (`/docs` lists them with their schemas).
+    Routes under `/api/`: what the real backend would offer (`/docs` lists them with their schemas);
+        the account and purchase ones are in `account_routes.py`.
+    Routes under `/fake-google/` and `/fake-stripe/`: the stand-ins' own (`provider_routes.py`).
     Routes under `/api/simulation/`: the simulation controls and the system view, which the real
         system doesn't have.
     Every other path: the web pages in `web/`.
@@ -22,10 +24,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import RequestResponseEndpoint
 
-from .rules import NotFoundError, RuleError
+from .account_routes import add_account_routes
+from .provider_routes import add_provider_routes
+from .rules import AuthError, NotFoundError, RuleError
 from .world import World
 
 TICK_INTERVAL_S: float = 0.25
+HTTP_UNAUTHORIZED: int = 401
 HTTP_NOT_FOUND: int = 404
 HTTP_CONFLICT: int = 409
 
@@ -123,6 +128,15 @@ def make_app(world: World, web_folder: Path) -> FastAPI:
         """
         return JSONResponse({"detail": str(error)}, status_code=HTTP_NOT_FOUND)
 
+    @app.exception_handler(AuthError)
+    async def answer_auth_error(request: Request, error: AuthError) -> JSONResponse:
+        """`answer_auth_error` turns refused credentials into a 401 with the reason in `detail`.
+
+        Example:
+            >>> GET /api/me without a bearer token gives 401.
+        """
+        return JSONResponse({"detail": str(error)}, status_code=HTTP_UNAUTHORIZED)
+
     @app.get("/api/status")
     async def get_status() -> dict:
         """The public status page's data: the caps and their use, and each region's machines.
@@ -190,5 +204,7 @@ def make_app(world: World, web_folder: Path) -> FastAPI:
         world.failMachine(machine_id)
         return world.describeStatus()
 
+    add_account_routes(app, world)
+    add_provider_routes(app, world)
     app.mount("/", StaticFiles(directory=web_folder, html=True), name="web")
     return app
