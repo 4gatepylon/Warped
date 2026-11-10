@@ -145,6 +145,25 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-169 Better sounds.** The user, 2026-11-09: "getting sounds for all the guns etc.. and that the sounds should be better than what they are right now". New sounds come through the adding-assets skill (approval and credits).
 - [ ] **W-170 Wishlist to GitHub issues.** The user, 2026-11-09: "switching from wishlist markdown to github issues". Issues follow the github-issue skill (title format, template, labels); the agents' rules about the wishlist (in each demo's AGENTS.md) would move with it.
 - [ ] **W-171 The game out of demos/.** The user, 2026-11-09: "refactoring the code to not be in demos/ but instead to be in the main location as the main game". Related: the open refactor plan PR #375 (`game/REFACTOR_PLAN.md`: a `game/` workspace with warped-core, client and server), and the one-window app in `demos/warped_mvp_rust/` (W-141 (one window for the whole game)).
+- [ ] **W-172 Better City Sphere graphics.** The user, 2026-11-09: "improving graphics on space station, including laser, the actual glass/mirrors".
+- [ ] **W-173 Professional gun models.** The user, 2026-11-09: "improving gun sprites to look professional". No general sprites item exists; related: W-96 (a different rifle model), W-12 (gun on screen), W-73 (gun lit by the scene).
+- [ ] **W-174 Working downloadable bundle.** The user, 2026-11-09: "having a working downloadable bundle". Related: W-116 (download page, pending review) and W-141 (one window for the whole game: the Mac app).
+- [ ] **W-175 Stable download website.** The user, 2026-11-09: "having a stable website from where the bundle can be downloaded". Related: W-116 (download page).
+- [ ] **W-176 Official name and domain.** The user, 2026-11-09: "having an official name and domain for the stable website".
+- [ ] **W-177 Online servers people can use.** The user, 2026-11-09: "having a running server (or management + game server(s) such that players can play across different parts of the world) and to actually have this set up and running on gcloud (or equivalnet) so that real people can play online". Related: W-42 (server in the cloud, pending review).
+- [ ] **W-178 Keep strangers out of matches.** The user, 2026-11-09: "to have some kind of password or key or secret token or waitlist mechanism to avoid randoms joining matches". Related: common/protocol/authentication.md (in #375).
+- [ ] **W-179 Keep strangers out of the game.** The user, 2026-11-09: "to have some kind of password or key or secret token or waitlist mechanism to avoid randoms joining the game at all".
+- [ ] **W-180 Elo or ranking.** The user, 2026-11-09: "to have some kind of elo or ranking system based on wins between players".
+- [ ] **W-181 Create games on the server.** The user, 2026-11-09: "having the ability to create games on the server".
+- [ ] **W-182 Join without knowing the IP.** The user, 2026-11-09: "have ability to not need to know the IP of the server directly".
+- [ ] **W-183 Web app for running games.** The user, 2026-11-09: "have the ability to see running games, etc.. from a webpage (and more broadly to have all the non-real-time-video-game features in a web-app as well)".
+- [ ] **W-184 Spectating.** The user, 2026-11-09: "have the ability to spectate a game from the app or from a webpage".
+- [ ] **W-185 Donations.** The user, 2026-11-09: "to have the ability to donate to the mantainers via a stripe link".
+- [ ] **W-186 Load balancing.** The user, 2026-11-09: "to have load balancing in case there are too many players and that this hould redirect to the stripe link".
+- [ ] **W-187 Asking players to pay.** The user, 2026-11-09: "to ask that everyone after pllaying for more than 30m pay the maintainers (or maybe after their match; and it's unclear if they should be forced or just be asked kindly; this is still under consideration as the game is built)". Undecided; don't build without the user.
+- [ ] **W-188 Map editor.** The user, 2026-11-09: "ability to build maps from a map editor with a reasonably large universe of pre-existing skins etc... and on only hyperbolic and euclidean and possibly toroidal space soon". Builds on W-143 (declarative levels); related: W-161 (real toroidal flat space).
+- [ ] **W-189 Black holes can kill, by setting.** The user, 2026-11-09: "ability to toggle whether black holes kill you".
+- [ ] **W-190 World-building.** The user, 2026-11-09: "to do world-building so the world for this game is precisely described and everything fits the same aesthetic and a nice storyline basically".
 
 ## Pending user review
 
