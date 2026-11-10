@@ -173,11 +173,11 @@ is in [`AGENTS.md`](AGENTS.md).
 ## Pending user review
 
 - [?] **W-147 Shooting while moving, by game setting.** The user, 2026-11-09: "add to wishlist the ability to toggle via game settings whether you can shoot while jumping, and seperately while moving laterally (i.e. while walking) and seperately while sprinting".
-  #SHOOT_PR: the server settings' `shooting` section (`can_shoot_while_jumping`, `can_shoot_while_walking`,
+  #524: the server settings' `shooting` section (`can_shoot_while_jumping`, `can_shoot_while_walking`,
   `can_shoot_while_sprinting`, all off by default as before) decides, through the shared `ShotGate` and
   `Weapons::can_shoot`, when players and bots may shoot in every level.
 - [?] **W-156 Friendly fire, by game setting.** The user, 2026-11-09: "add setting in game settings to toggle whether or not friendly fire is possible".
-  #SHOOT_PR: `shooting.is_friendly_fire_on` (on by default, as before: a teammate's death, no kill); off, every
+  #524: `shooting.is_friendly_fire_on` (on by default, as before: a teammate's death, no kill); off, every
   level's server ignores hits on teammates.
 - [?] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
   #486: in every level (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest): holding `Tab`
