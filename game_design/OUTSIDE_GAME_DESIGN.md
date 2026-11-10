@@ -41,6 +41,18 @@ document is agreed.
 | Queue | The players and parties waiting for matchmaking to form a match. |
 | Rating window | How far apart in rating matchmaking lets a party and its opponents be. It widens as the party waits. |
 | Ready check | The moment each of the ten players confirms they are there, before a matchmade match starts. |
+| Ranked match | A matchmade match or a tournament game. Only ranked matches change ratings. |
+| Skill | The game's best estimate of how well a player plays, in points. |
+| Uncertainty | How unsure the game is of a player's skill, in points. It shrinks as the player plays and grows while they are away. |
+| Rating | The number a player is ranked by: their skill minus their uncertainty. |
+| Placement | A player's first ranked matches of a season, while their rating is still hidden. |
+| Tier | A named band of ratings, such as Gold. |
+| Season | A stretch of about three months, after which rankings start afresh. |
+| Rankings | The list of players by rating, which anyone can read. |
+| Reconnect window | The time a player who dropped out of a ranked match has to come back. |
+| Abandon | To leave a ranked match for good: by choice, by not reconnecting in time, by going idle or by being kicked. |
+| Cooldown | A time during which a player can't join the queue, given for abandoning or for failing a ready check. |
+| Void | To cancel a match so that it changes no rating and gives no penalty. |
 
 ## Accounts
 
@@ -222,7 +234,7 @@ Every online match starts with a warm-up, as in Counter-Strike.
 - **The timer:** everyone sees how long the warm-up still lasts.
 - **Matchmade matches:** the warm-up lasts until all ten players have connected, then counts down ≈10 s and
   starts the match. It lasts at most ≈5 minutes: a player who hasn't connected by then has left the match (see
-  Rating, in a later section).
+  [Matches that don't count](#matches-that-dont-count)).
 - **Custom and tournament games:** the warm-up lasts until an admin starts the match.
 
 ## Watching
@@ -289,7 +301,7 @@ While waiting, a player sees how long they have waited and an estimate of how mu
 - If all ten confirm, the match's server starts in the chosen region, and the players go to its
   [warm-up](#warm-up).
 - If anyone declines or doesn't answer, there is no match. That player's party leaves the queue, and the player
-  gets a short cooldown that grows if they do it again (see Rating, in a later section). The other parties go back
+  gets a short cooldown that grows if they do it again (see [Cooldowns](#cooldowns)). The other parties go back
   into the queue with the time they had already waited.
 - If the caps are full, the confirmed match waits in the wait queue ahead of new custom games, and the players
   see their place.
@@ -307,7 +319,7 @@ While waiting, a player sees how long they have waited and an estimate of how mu
 
 ### After the match
 
-- The players see the result and how their rating changed (see Rating, in a later section).
+- The players see the result and how their rating changed (see [Rating](#rating)).
 - A party stays together and can queue again at once. Players who met in the match can form a party for the next
   one.
 
@@ -319,6 +331,129 @@ While waiting, a player sees how long they have waited and an estimate of how mu
   them. Each queue would follow the steps above with its own settings.
 - **Tournaments:** at launch a superadmin sets up each tournament game by hand. Brackets that start the games
   themselves can be added on top of tournament games.
+
+## Rating
+
+A rating says how good a player is at winning ranked matches. It moves only in ranked matches, by the match's
+result and the ratings of the other nine players.
+
+### What a rating is
+
+- The game keeps two numbers for each player: a **skill**, its best estimate, and an **uncertainty**, how unsure
+  it is. A new account has a skill of ≈2,000 and an uncertainty of ≈1,000.
+- A player's **rating** is their skill minus their uncertainty, so a new account's is ≈1,000. The rating is
+  cautious on purpose: a few lucky wins don't put a new player at the top, and it rises as the game grows sure.
+- Matchmaking compares **skill**, not rating, so a strong new player meets strong opponents after a few matches.
+  Wherever [Matchmaking](#matchmaking) says rating, it means skill.
+
+### What changes it
+
+- **Only ranked matches:** matchmade matches and tournament games. Custom games, local games and matches that
+  start with bots change nothing.
+- **The team's result:** everyone on the winning team gains and everyone on the losing team loses. A match that
+  runs out of time is a tie, which moves the two teams toward each other. Kills and deaths don't matter.
+- **The other players:** a win against a team with higher skills gains more than a win against a weaker team,
+  and losing to a weaker team costs more.
+- **Uncertainty:** a player the game is unsure about moves further per match. Each match shrinks the player's
+  uncertainty.
+- **The formula can change:** Warped starts with OpenSkill, a rating method made for teams. The game keeps every
+  ranked match's result, so that all ratings can be worked out again if the method changes.
+
+### Placement
+
+- A player's first ≈10 ranked matches are placement matches. Until they are played, the player has no tier, isn't
+  in the rankings, and sees "Placement, match 3 of 10" instead of a rating.
+
+### Time away
+
+- After ≈14 days without a ranked match, a player's uncertainty grows a little each week, up to a new account's.
+  Their skill doesn't change, so their rating falls slowly and recovers within a few matches.
+- After ≈30 days without a ranked match, a player leaves the rankings until they play one.
+
+### Tiers
+
+A tier is a band of ≈200 rating points with a name, shown next to the player's name and icon.
+
+| Tier | Rating |
+| --- | --- |
+| Bronze | below ≈1,200 |
+| Silver | ≈1,200 to 1,400 |
+| Gold | ≈1,400 to 1,600 |
+| Platinum | ≈1,600 to 1,800 |
+| Diamond | ≈1,800 to 2,000 |
+| Master | ≈2,000 to 2,200 |
+| Warped | ≈2,200 and above |
+
+### Seasons
+
+- A season lasts ≈3 months.
+- When a season ends, each player keeps a badge of the highest tier they reached, shown on their profile.
+- When the next one starts, every player keeps their skill and gets back ≈half of a new account's uncertainty.
+  They play ≈5 placement matches, and the rankings start empty.
+
+### Rankings
+
+- The rankings list players by rating, highest first: name, icon, tier, rating, ranked matches played and share
+  of them won.
+- Anyone can read them on the web without signing in, and in the app. Nobody changes them by hand.
+- A player is listed once they have finished this season's placement, unless they are banned or have been away
+  ≈30 days.
+- The app also shows the rankings among a player's friends and inside their clan.
+
+### Match history
+
+- Each player sees their past online matches: the kind of game, the map, the result, both teams, each player's
+  kills and deaths, how their rating changed, and the replay.
+
+## Leaving a ranked match
+
+These rules follow Counter-Strike's. They apply to ranked matches only: leaving a custom game costs nothing.
+
+### Dropping out and coming back
+
+- A player whose app or connection fails can rejoin the same match. The app offers it as soon as it is back.
+- The player has ≈3 minutes in total per match to be away. While they are away, their team plays one short.
+- A player who gives no input for ≈3 minutes is removed from the match, as if their connection had failed.
+
+### Abandoning
+
+A player abandons a match when they choose to leave it, use up the reconnect window, or are kicked by their team.
+
+- **The first to abandon on a team** takes a loss, whatever the match's result, and a [cooldown](#cooldowns).
+- **Their teammates** may then leave freely: a teammate who leaves after that takes no cooldown, and the match
+  doesn't change their rating.
+- **A bot takes the place** of each player who abandoned, playing at about that player's level, and the match
+  stays ranked for everyone still in it.
+- **The other team** is not freed by this. Each team has its own first player to abandon.
+
+### Matches that don't count
+
+- **Nobody connects:** if a player never connects during the [warm-up](#warm-up) of a matchmade match, the match
+  is voided, the others go back into the queue, and that player gets a cooldown.
+- **Server failure:** if the match's server fails, the match is voided for everyone.
+
+### Cooldowns
+
+- Abandoning gives a cooldown of ≈30 minutes, then ≈2 hours, ≈24 hours and ≈7 days for each further time.
+- Failing a ready check gives ≈2 minutes, then ≈10 minutes, then ≈30 minutes.
+- A player's next cooldown drops back one step for every ≈7 days without an offence.
+- A cooldown is given whether or not the player meant to leave, as in Counter-Strike.
+- During a cooldown the player can't join the queue. They can still play custom and local games.
+
+## Votes in a ranked match
+
+- **Kick:** a player calls a vote to kick a teammate and must pick a reason: cheating, abuse, not playing, or
+  another they type. The kick passes with ≈3 yes votes from the 4 other teammates, the caller's included. A kicked
+  player has abandoned. Each player calls at most ≈1 kick vote per match.
+- **Surrender:** once a teammate has abandoned, a team can vote to surrender. If every human player left on the
+  team votes yes, the match ends as a loss for that team and a win for the other, and counts in full.
+- **Pause:** each team may pause the match ≈1 time for ≈60 s, for example while a teammate reconnects.
+
+## Rollbacks
+
+- When an account is banned for cheating, its ranked matches of the last ≈30 days are voided: every other
+  player's rating is worked out again as if those matches hadn't been played.
+- The players of those matches are told (see Fair play, in a later section).
 
 ## Superadmins
 
@@ -334,7 +469,7 @@ While waiting, a player sees how long they have waited and an estimate of how mu
 Anyone can open these without signing in:
 
 - the download page;
-- the rankings, read-only (see Rating, in a later section);
+- the [rankings](#rankings), read-only;
 - the terms of service, the privacy policy and the code of conduct;
 - the status page, which says whether sign-in, matchmaking and each region work.
 
@@ -375,6 +510,23 @@ Every number marked ≈ in this document, in one place.
 | Matchmaking | Time to answer the ready check | ≈20 s |
 | Matchmaking | Wait before bots are offered | ≈2 min |
 | Matchmaking | Fewest human players in a match with bots | ≈2 |
+| Rating | A new account's skill and uncertainty | ≈2,000 and ≈1,000, so its rating starts at ≈1,000 |
+| Rating | Placement matches in a player's first season | ≈10 |
+| Rating | Placement matches in later seasons | ≈5 |
+| Rating | Time away before uncertainty grows | ≈14 days |
+| Rating | Time away before a player leaves the rankings | ≈30 days |
+| Rating | Width of a tier | ≈200 rating points |
+| Rating | Length of a season | ≈3 months |
+| Rating | Uncertainty given back at a new season | ≈half of a new account's |
+| Leaving | Reconnect window, in total per match | ≈3 min |
+| Leaving | Idle time before a player is removed | ≈3 min |
+| Leaving | Cooldowns for abandoning | ≈30 min, 2 h, 24 h, 7 days |
+| Leaving | Cooldowns for failing a ready check | ≈2 min, 10 min, 30 min |
+| Leaving | Time without an offence that lowers the cooldown one step | ≈7 days |
+| Votes | Yes votes needed to kick, of the 4 other teammates | ≈3 |
+| Votes | Kick votes one player may call in a match | ≈1 |
+| Votes | Pauses per team in a match, and their length | ≈1 of ≈60 s |
+| Rollback | How far back a cheater's matches are voided | ≈30 days |
 
 ## Open questions
 
@@ -391,3 +543,12 @@ Every number marked ≈ in this document, in one place.
   still gets a full human match when one turns up.
 - **Party gap:** whether the largest rating gap inside a party should be counted in rating points or in tiers.
 - **Blocked players:** whether matchmaking should also keep a blocked player off the other team.
+- **How much a match counts:** whether a rating change depends only on win, loss or tie, or also on how far the
+  winner's wavefront went.
+- **Playing on with a bot:** whether a team that lost a player to an abandon, and loses, should lose less rating.
+- **Surrender:** Counter-Strike lets a team surrender only after a teammate abandoned, as far as I recall;
+  confirm that Warped should copy that condition, and how many votes a surrender needs.
+- **Kicks by a party:** a party of four can vote out the fifth player. Whether a player kicked that way should be
+  spared the loss and the cooldown.
+- **Tier names:** the names here are placeholders.
+- **Reconnect window:** Counter-Strike's exact window isn't published; ≈3 minutes is a first guess.
