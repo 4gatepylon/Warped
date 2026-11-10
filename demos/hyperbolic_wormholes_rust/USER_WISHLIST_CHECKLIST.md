@@ -128,7 +128,9 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-152 Pylons stay off, as a setting.** The user, 2026-11-09: "pylons once turned off are turned off forever and that this is a toggled setting (put that in wishlist, dont impl yet)", "that way if you jump back to a level that was previously played that you just barely lost, it takes less time to win again in theory". Not to be built yet.
 - [ ] **W-153 Shot through a wormhole looks wrong on the other side.** A bug the user found playtesting, 2026-11-09: "a bug where bug shot across a wormhole shows up with the wrong visuals on the other side (looks like it's dust right on the surface of teh wormhole, but it shouldk be warped instead)". The user: "do NOT fix this yet".
 - [ ] **W-154 Voice agent for map variants.** The user, 2026-11-09: "a way to use a voice agent to spin up map variants or modify levels even while they are running". Builds on W-143 (declarative levels).
-- [ ] **W-155 Play against bots.** The user, 2026-11-09: "add to wishlist ability to play against bots". Also asked for in W-141 (one window for the whole game): "thing 2 is to be able to play against gbots or alone selecting from the game itself"; being built in the app (play alone and play against bots from the main menu, and `make play-alone` / `make play-bots` for the match).
+- [ ] **W-155 Play against bots.** The user, 2026-11-09: "add to wishlist ability to play against bots". Also asked for in W-141 (one window for the whole game): "thing 2 is to be able to play against gbots or alone selecting from the game itself"; being built in the app (play alone and play against bots from the main menu, and `make play-alone` / `make play-bots` for the match). And: "note wishlist paly agaisnt bots includes playing with multiple allied and enemy bots so that you can play 5v5 or smth like that".
+- [ ] **W-156 Friendly fire, by game setting.** The user, 2026-11-09: "add setting in game settings to toggle whether or not friendly fire is possible".
+- [ ] **W-157 Bullet drop, by game setting.** The user, 2026-11-09: "add setting in game settings for bullet drop".
 
 ## Pending user review
 
