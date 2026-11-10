@@ -68,6 +68,11 @@ with glows that run along a bar while it changes; Lunar's crosshair; the console
 held on an enemy console; red, blurred edges and a shake when you take any damage; and "YOU DIED" with the respawn
 countdown.
 
+`WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it listens
+on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for network
+permission and `--join auto` finds only servers on this computer. Every test run uses it (`cargo test` without
+it); leave it unset to play across computers.
+
 ## The level
 
 - **Map:** [`../../common/maps/dark_forest/map.json`](../../common/maps/dark_forest/map.json), written by

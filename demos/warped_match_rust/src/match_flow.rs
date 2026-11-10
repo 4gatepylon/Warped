@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use crate::match_state::{MatchState, Team};
+use crate::net;
 use warped_shared::match_protocol::{
     CLIENT_TIMEOUT_S, MAX_DATAGRAM_BYTES, MatchAnnouncer, MatchBeacon, parse_hello, parse_play,
 };
@@ -35,6 +36,7 @@ pub use warped_shared::match_protocol::{
     LevelEntry, LoadLevels, MATCH_PORT, MatchClient, MatchTimes, MatchView, Phase, SELF_PROGRAM,
     describe_outcome, is_level_restart_due, is_sitting_out, stop_child,
 };
+use warped_shared::network_scope;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -149,8 +151,10 @@ pub fn serve_match(
     match_port: u16,
     level_port: u16,
 ) -> Result<MatchState> {
-    let announcer: MatchAnnouncer = MatchAnnouncer::OnNetwork()?;
-    let address: SocketAddr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, match_port));
+    let is_loopback_only: bool = net::is_loopback_only();
+    let announcer: MatchAnnouncer = MatchAnnouncer::OnNetwork(is_loopback_only)?;
+    let listen_ip: Ipv4Addr = network_scope::get_listen_ip(is_loopback_only);
+    let address: SocketAddr = SocketAddr::from((listen_ip, match_port));
     serve_match_on(
         levels,
         times,
