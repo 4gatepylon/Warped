@@ -92,3 +92,8 @@ flashlight:  # It shines while the right button is held, lighting the scene in a
   soft_edge_rad: 0.08  # How wide the cone's soft edge is.
   range_m: 25.0  # Distance at which its light has fallen to half.
   brightness_frac: 2.0  # How bright it is, as a fraction of full sunlight.
+
+gravity:  # How black holes and wormhole mouths pull walkers along the ground (W-144): the built-in values every level shares.
+  max_pull_per_walk_speed: 0.75  # The strongest pull, as a share of walking speed added toward a warp or taken from walking away (below 1; 0 for none).
+  full_pull_m: 3.0  # How far out from a horizon or throat the pull stays that strong.
+  reach_m: 24.0  # How far out the pull reaches, falling off beyond full_pull_m (above it).

@@ -654,20 +654,26 @@ mod tests {
     #[test]
     fn gravity_defaults_and_overrides() {
         let builtin: ServerSettings = ServerSettings::Builtin();
-        assert!(
-            !BUILTIN_SERVER_YAML
-                .lines()
-                .any(|line| line.starts_with("gravity:"))
-        );
         assert_eq!(builtin.gravity, GravitySettings::default());
+        let mut is_in_gravity: bool = false;
+        let without_gravity: String = BUILTIN_SERVER_YAML
+            .lines()
+            .filter(|line| {
+                if !line.starts_with(' ') && !line.is_empty() {
+                    is_in_gravity = line.starts_with("gravity:");
+                }
+                !is_in_gravity
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+        let left_out: ServerSettings =
+            ServerSettings::FromYaml(&without_gravity, "test").expect("no gravity section");
+        assert_eq!(left_out.gravity, GravitySettings::default());
         let json_back: ServerSettings =
             ServerSettings::FromJson(&builtin.to_json()).expect("the built-in settings as JSON");
         assert_eq!(json_back, builtin);
         let with_gravity = |section: &str| -> Result<ServerSettings> {
-            ServerSettings::FromYaml(
-                &format!("{BUILTIN_SERVER_YAML}\ngravity: {section}\n"),
-                "test",
-            )
+            ServerSettings::FromYaml(&format!("{without_gravity}\ngravity: {section}\n"), "test")
         };
         let one_key: ServerSettings = with_gravity("{reach_m: 12.0}").expect("one key");
         assert_eq!(
