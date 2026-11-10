@@ -164,6 +164,9 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-197 Menus that fit the game's look.** The user, 2026-11-09: "better graphics for the menus that fit the general story and aesthetic of teh game I alldued to before". Related: W-190 (world-building), W-151 (menu layout and help tooltip).
 - [ ] **W-198 Wormholes tinted with their team's colour.** The user, 2026-11-09: "Wormholes have a slight and soft color of the team that crated them." Related: W-167 (ownership over wormholes), W-159 (tell wormhole pairs apart).
 - [ ] **W-205 Swinging fast through a wormhole looks weird.** The user, 2026-11-10, after trying the new pull (W-202, pull toward wormholes and black holes in the game settings) in the game: "add to wishlist fixing issue where if you oscillate too rapidly in a wormhole it looks weird".
+- [ ] **W-206 Click every option in every menu.** The user, 2026-11-10: "Being able to click on all options in all menus instead of using hotkeys". Related: W-150 (arrow keys and clicks for menu pages), which made the pages' names clickable.
+- [ ] **W-207 Better window text UI.** The user, 2026-11-10: "Better window text UI (things spaced apart more widely, color on hover, easier to understand hitboxes, better font, ideally nice background animation etc..)". Related: W-197 (menus that fit the game's look) and W-151 (menu layout and help tooltip).
+- [ ] **W-208 Hold an arrow or use the scroll wheel to scroll through settings.** The user, 2026-11-10: "be able to click and hold down arrow to scroll through settings (also scroll wheel)".
 
 ## Pending user review
 
