@@ -2221,9 +2221,55 @@ users will want to see where on the map they are pretty often". This replaces D8
   two, seeded and mirrored like its props), and an online player respawns on the first team spawn no other player
   stands on, starting from one their id picks; offline play keeps the farthest spawn from the robots.
 - **Posing:** every voxel level's window poses the other players' robots in parallel (`with_posed_avatars`), since
-  posing 11 robots on the CPU takes about 9 ms a frame (W-200, robots posed on the CPU).
+  posing 11 robots on the CPU takes about 9 ms a frame (W-200, robots posed on the CPU); D120 packs them in
+  parallel too.
 - **Revisit if:** a level needs more than 12 players, or a player's record grows past 196 bytes (from 185; pages
   would then hold 5).
+
+### D120. A 5v5 on one computer at 60 fps: HUD rectangles in tiles, robots packed in parallel, bots' hit pictures only when asked, W-155 (play against bots)
+
+- **Choice:** three changes in every voxel level (Lunar Surface, the match, Dust, Snow Planet, City Sphere):
+  - *HUD rectangles in tiles.* The shader's `mark_rect_tiles` sorts the HUD's rectangles (at most 64) into 32-pixel
+    tiles of the output, a bit a rectangle, and `apply_overlay` looks only at its tile's rectangles for each pixel.
+  - *Robots packed in parallel.* `write_avatar_buffers` packs each frame's posed robots (triangles and BVH nodes) in
+    parallel straight into the Metal buffers, instead of on one thread into vectors that were then copied.
+  - *Hit pictures only when asked.* A `--bot` saves its view at each hit only with `--bot-hit-pictures`; without it
+    the bot makes no renderer at all.
+- **Alternatives:** for the HUD, drawing the rectangles as triangles (a second kind of pass to keep in step with
+  the shader's styles), or fewer rectangles (the HUD needs them). For the pictures, keeping them on by default with
+  a flag to turn them off (the app's and `play_with_bots.sh`'s bots, which the players share a computer with, would
+  each need the flag), or drawing them smaller or on the CPU (still work nobody looks at while playing).
+- **Rationale:** the user's goal is every level at about 60 fps, and W-155 (play against bots) asks for a 5v5 with
+  bots, which run on the player's computer.
+  - The overlay pass looked at all 64 rectangles for every output pixel, about half of a frame at 2560x1440: alone
+    in Snow Planet at render scale 0.5, 104 fps before and 216 fps after. A GPU test in each level
+    (`sorted_rects_draw_as_unsorted`) checks the sorted picture equals the unsorted one pixel for pixel.
+  - Each bot drew a 1280x800 picture with its own Metal renderer and saved a PNG at every hit. In a busy 5v5 the
+    window's slow frames were its CPU part waiting (in Snow Planet's frames over 40 ms: 36 ms before the render
+    call and 18 ms encoding, against 0.9 and 0.55 ms normally, with the GPU's 11 ms unchanged), at the moments bot
+    processes took 2.4 to 4.5 cores each. Nothing reads the pictures; they are for a person checking what a bot
+    shot at.
+- **Measured:** one window at 2560x1440 (drawing 2560x1334, automatic render scale) on blue with 4 allied and 5
+  enemy bots on the same Apple M3 Pro (6 performance and 6 efficiency cores), friendly fire off and a 2 s respawn
+  so that everyone keeps fighting, 20 s after the first 5 s, with the tiles and the parallel packing in both
+  columns:
+
+  | Level | Hit pictures on: fps, p99, worst half second | Off: fps, median, p99, worst frame, frames over 16.7 ms, worst half second |
+  | --- | --- | --- |
+  | Snow Planet | 66-67 fps, 23-28 ms, 20-38 fps | 78.4 fps, 12.34 ms, 17.05 ms, 19.30 ms, 20 of 1568, 62 fps |
+  | Dust | 63-72 fps, 29-50 ms, 10-48 fps | 71.0 fps, 14.10 ms, 16.62 ms, 18.09 ms, 11 of 1419, 66 fps |
+  | Lunar Surface | 82.2 fps, 28.0 ms, 42 fps | 84.8 and 89.2 fps, 11.35 and 11.17 ms, 15.77 and 13.61 ms, 178.61 and 15.89 ms, 14 of 1696 and 0 of 1785, 30 and 82 fps |
+  | City Sphere (its bots never saved pictures) | 159.1 fps, 8.41 ms | 185.7 and 126.3 fps, 3.92 and 7.70 ms, 9.83 and 11.85 ms, 51.96 and 19.69 ms, 5 of 3629 and 4 of 2479, 108 and 76 fps |
+
+  Lunar Surface's first run had one hitch (two frames, 178.61 ms the longer) that the second run didn't repeat;
+  its cause wasn't found, and other programs on the computer (a browser, Spotlight's indexing) took one to two
+  cores throughout.
+- **Not done:** each bot still packs a 1280x800 view with every robot's mesh at each step only to find whom its
+  laser hits (about a tenth of a core a bot); Dark Forest's overlay has the same every-rectangle loop and its 5v5
+  wasn't measured; a 5v5 with the default settings (friendly fire on, 20 s respawn) wasn't measured after this
+  change.
+- **Revisit if:** a 5v5 on one computer drops under 60 fps again, the HUD needs more than 64 rectangles (a tile's
+  bits are a `u64`), or someone needs the bots' pictures in the app (then the app passes the flag).
 
 ## Workload
 
