@@ -178,6 +178,10 @@ starts the clock again.
   pulls them outward onto its surface. With no warp objects, light travels in straight lines.
 - **T² × ℝ:** flat space whose two horizontal axes loop back around (a torus) and whose vertical
   axis goes on forever. The loops are large. The warp objects curve space around them.
+  - **Caveat, work in progress:** the levels described as toroidal here (Snow Planet and Dark
+    Forest) are not actually toroidal yet. In the Rust game both are plain flat (Euclidean) space
+    whose edge is a [map edge](#map-edge) that slows players without end; looping them around is a
+    work in progress (Snow Planet's looping world waits on its own branch).
 - **Hyperbolic:** hyperbolic space with warp objects. The pylons are far apart. Gravity pulls
   players down onto the ground, along the ground's normal under them; players never get far above
   the ground, so that simple rule is enough. Lunar Surface is a bounded patch of this space: its
@@ -259,6 +263,13 @@ Every level follows these rules:
   with corners to defend.
 - On most levels, one route is a big open area, joined to at least one other route by a connector.
 - The blue and red zones are easy to cross widthwise, so a team can rotate quickly between routes.
+- Each team zone's edge is a team boundary plane in every level (W-148, team boundary planes in every level): a
+  faint see-through wall that glows slightly in the team's colour, brightest at its foot, and stops neither
+  players nor lasers. What is seen through one shimmers like air over hot ground (W-149, shimmer through boundary
+  planes): the picture behind it wobbles a little, rising and changing all the time, in every level alike. The
+  shimmer is only where a wall covers the view, so it stops once you have crossed the wall and look away from it.
+  City Sphere's teams each have a hemisphere, so its one wall is a disc through the centre, blue from blue's side
+  and red from red's.
 
 | Zone layout | Shape |
 | --- | --- |
@@ -340,11 +351,20 @@ with distance, and never stopping a player who walks away.
 
 ### Map edge
 
-A level has no wall at its edge. On Lunar Surface the crater's wall is the edge: from its foot,
-each step a player takes outward is cut by the share of the way they have climbed toward halfway
-up, so they slow down without end and never get past halfway. Their view stretches out from the
-middle of the screen as they slow, as if they were stretched ever further. Walking back in is at
-full speed.
+No level has a wall at its edge. Every level slows players the same way past its playable area
+(Zeno's paradox): each step a player takes outward is cut by the share of the way they have come
+toward a stopping line, so they slow down without end and never reach it. Walking back in, or
+along the edge, is at full speed.
+
+- **Lunar Surface and Dust:** the crater's wall is the edge: the slowing starts at its foot and the
+  stopping line is halfway up. The view stretches out from the middle of the screen as players
+  slow, as if they were stretched ever further.
+- **Snow Planet:** the edge is a band 12 m wide outside the playable ellipse, over open snow, with
+  the same stretching view.
+- **Dark Forest:** the edge is a band 12 m wide outside the playable rectangle, and the bamboo
+  forest goes on 30 m past the edge, so a player walking off the map always sees trees ahead,
+  never empty space.
+- **City Sphere:** a closed sphere, so it has no edge.
 
 ## Controls
 
@@ -429,7 +449,9 @@ What a player sees while playing:
   - SETTINGS: the player's own settings, one row each: every key binding (`Return`, then the new
     key, button or wheel; `Esc` cancels), then numbers changed with `Left` and `Right` (mouse look
     speed, motion blur, head bob walking and sprinting, how red, shaky and blurred a hit looks,
-    the wormhole colour's strength and the Milky Way's brightness), then a row that saves them to
+    the wormhole colour's strength, the Milky Way's brightness, and the picture's brightness,
+    contrast, saturation and gamma, which change only how the finished picture looks on that
+    player's screen, W-51, basic visuals), then a row that saves them to
     `~/.config/warped/player_settings.yaml` (or the `--player-settings` file), which later games
     load. A line below says what changed or went wrong.
   - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole

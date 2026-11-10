@@ -435,7 +435,24 @@ pub fn pick_live_lens_mouths(
     slots
 }
 
-/// `RenderSettings` are the quality switches that can change while the demo runs.
+/// `MAX_BOUNDARY_PLANE_COUNT` is how many team boundary planes the tone map draws, `post.metal`'s.
+pub const MAX_BOUNDARY_PLANE_COUNT: usize = 4;
+
+/// `GpuBoundaryPlanes` matches `post.metal`'s `BoundaryPlanes` (W-148, team boundary planes in
+/// every level; W-149, shimmer through boundary planes): per plane (z in meters, team, 0, 0), then
+/// (height in meters, opacity at the foot, the shimmer's clock in seconds, 0), the planes' extent
+/// (x from, x to, the ground's height, 0), and (plane count, 0, 0, 0).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GpuBoundaryPlanes {
+    pub planes: [[f32; 4]; MAX_BOUNDARY_PLANE_COUNT],
+    pub look: [f32; 4],
+    pub extent: [f32; 4],
+    pub counts: [i32; 4],
+}
+
+/// `RenderSettings` are the quality switches that can change while the demo runs, and the
+/// player's visuals for the finished picture (W-51, basic visuals).
 #[derive(Clone, Copy, Debug)]
 pub struct RenderSettings {
     pub render_scale_frac: f32,
@@ -448,6 +465,7 @@ pub struct RenderSettings {
     pub is_vsync_enabled: bool,
     pub is_foveation_enabled: bool,
     pub shadow_distance_m: f32,
+    pub visuals: warped_shared::visuals::GpuPlayerVisuals,
 }
 
 /// `FrameTiming` is how long the GPU took for a frame finished earlier, how long this frame's
@@ -473,6 +491,8 @@ pub trait Renderer {
     fn set_environment(&mut self, environment: &EnvironmentData);
     /// `set_occluders` bakes how much sky each point of the arena sees, from boxes that block it.
     fn set_occluders(&mut self, occluders: &[OccluderBox], bounds_min_m: Vec3, bounds_max_m: Vec3);
+    /// `set_boundary_planes` sets the team boundary planes the tone map draws (W-148).
+    fn set_boundary_planes(&mut self, planes: GpuBoundaryPlanes);
     /// `render_frame` draws and presents one frame at the window's current size in pixels.
     /// `resize` sets the size, in pixels, of the window's drawable.
     fn resize(&mut self, width_px: u32, height_px: u32);

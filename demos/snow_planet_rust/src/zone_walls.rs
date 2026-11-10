@@ -42,7 +42,8 @@ impl ZoneWall {
 }
 
 /// `GpuZoneWalls` is `render_voxel.metal`'s `ZoneWalls`: per wall its plane's (n_z, -n_w, edge u
-/// in meters, team) (the rest zero), then (height, opacity, thickness, 0), then the boundary's
+/// in meters, team) (the rest zero), then (height, opacity, thickness, the shimmer's clock in s,
+/// which `render_voxel.rs` sets each frame), then the boundary's
 /// (u, v) semi-axes (0 without a boundary), then (wall count, 0, 0, 0).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]

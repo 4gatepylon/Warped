@@ -20,6 +20,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
+use warped_shared::map_edge;
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::geometry::{
@@ -943,7 +944,7 @@ impl VoxelWorld {
     /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
     /// in `poses` (a clip and a time in it, one per body; posed in parallel, a step of
     /// `POSE_STEP_S` at a time and shared between bodies in the same step, since posing is most of a
-    /// frame with 10 players: W-198, robots posed on the CPU), squashed to its height share; lasers
+    /// frame with 10 players: W-200, robots posed on the CPU), squashed to its height share; lasers
     /// still hit the shapes. After the
     /// bodies come `corpses` (a feet frame, an avatar colour index and a pose each), only drawn:
     /// lasers pass through them.
@@ -1405,9 +1406,10 @@ impl VoxelWorld {
         };
         let [u_m, v_m, _] = self.get_fermi_coordinates(x);
         let edge = &self.settings.map_edge;
-        ((terrain.get_wall_frac(u_m, v_m) - edge.start_wall_frac)
-            / (edge.stop_wall_frac - edge.start_wall_frac))
-            .clamp(0.0, 1.0)
+        map_edge::get_edge_frac(
+            terrain.get_wall_frac(u_m, v_m) - edge.start_wall_frac,
+            edge.stop_wall_frac - edge.start_wall_frac,
+        )
     }
 
     /// `is_outside_boundary` says whether a point is past the map's edge: on a map with terrain,
@@ -2356,10 +2358,9 @@ impl VoxelPlayer {
                     )
                 };
                 let edge_frac: f64 = world.get_edge_frac(self.body.col(AXIS_W));
-                body_new = move_m(distance_m);
-                if world.get_edge_frac(body_new.col(AXIS_W)) > edge_frac {
-                    body_new = move_m(distance_m * (1.0 - edge_frac));
-                }
+                body_new = map_edge::take_step(distance_m, edge_frac, move_m, |body: &DMat4| {
+                    world.get_edge_frac(body.col(AXIS_W))
+                });
             }
         }
         let messages: Vec<String> = crossed

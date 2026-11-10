@@ -678,6 +678,7 @@ fn handle_event(
             }
             settings.render_scale_frac = screen.menu_settings.render_scale_frac;
             settings.is_vsync_enabled = screen.menu_settings.is_vsync_enabled;
+            settings.visuals = screen.menu_settings.visuals.to_gpu();
         }
         Event::KeyDown {
             scancode: Some(scancode),
@@ -848,6 +849,7 @@ impl Level {
             is_vsync_enabled: !args.no_vsync,
             is_foveation_enabled: !args.disable_effect.contains(&Effect::Foveation)
                 && !((args.photo.is_some() || args.video_frames.is_some()) && !args.photo_hud),
+            visuals: crate::args::get_start_visuals(args).to_gpu(),
         };
         Level {
             files,
@@ -960,6 +962,7 @@ impl Level {
                 is_vsync_enabled: settings.is_vsync_enabled,
                 is_showing_frame_time: args.show_frame_time,
                 is_showing_minimap: true,
+                visuals: crate::args::get_start_visuals(args),
             },
             is_mouse_captured: true,
         };
@@ -1494,6 +1497,7 @@ mod tests {
                 is_vsync_enabled: true,
                 is_showing_frame_time: false,
                 is_showing_minimap: true,
+                visuals: warped_shared::visuals::VisualsSettings::IDENTITY,
             },
             is_mouse_captured: true,
         }
@@ -1514,6 +1518,7 @@ mod tests {
             is_vsync_enabled: true,
             is_foveation_enabled: true,
             shadow_distance_m: 110.0,
+            visuals: warped_shared::visuals::GpuPlayerVisuals::IDENTITY,
         }
     }
 

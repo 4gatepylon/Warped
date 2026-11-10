@@ -37,10 +37,16 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   (`WARPMTCH`, a version byte, the port, players per team, phase, round; readers ignore bytes
   after the fields they know). A level server alone (`make serve-game`) isn't listed: the app joins
   levels through a match.
-- **The level's stand-in**: until the levels are libraries, a round shows a screen naming the level,
-  the round and the team, with the level's map picture while Tab is held, and follows the match as
-  a level will (it leaves when the round ends, Escape opens the in-level menu). No level process is
-  started for the player, so the round goes on without them.
+- **Levels play through their libraries in the app's own window**: the app links all five level
+  crates and finds a level's `play_level` by the manifest's `folder`, so the manifest still names
+  the levels. Dust's package is renamed `dust` (its binary keeps the name `hyperbolic-wormholes`),
+  because Cargo can't put two packages named `hyperbolic-wormholes` (Dust and Lunar Surface) in one
+  lockfile. The stand-in screen stays for a level without a library.
+- **Leaving a level keeps you out of its round** (the game menu's Rejoin brings you back), and a
+  level that fails shows its error on the game menu, so a broken level never traps the player.
+- **Frame times inside the app are wall-clock frame intervals** (`warped --tour-levels`: from one
+  frame's start to the next's, as the level asks the app once a frame), which include waiting for
+  the display, not GPU time alone.
 - **Player settings moved to `warped_shared::player_settings`** (Lunar Surface's code, the
   reference, with W-140's key upgrade) so the app and the levels share one reader; the levels still
   use their own copies until they become libraries, which should switch them over. The app's page

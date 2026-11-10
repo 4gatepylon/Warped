@@ -69,9 +69,19 @@ through `warped_shared::app_bundle` first; the levels-as-libraries and level-def
   Forest's section is empty). Left/Right steps a number, typing sets one, R goes back to the
   default; each change goes to the match server at once, and each round's level plays by the
   settings as they are when it starts. `*` marks a value off its default.
-- **Level**: a round's level. Escape opens the in-level menu (the same match status; resume, player
-  settings, exit to the game menu, quit); holding Tab shows the map. **Until the levels are
-  libraries, the level is a stand-in screen** that follows the match exactly as a level will.
+- **Level**: a round's level, played in this window by the level's own library
+  (`src/level_library.rs`: Lunar Surface, Dust, Snow Planet, City Sphere, Dark Forest, found by
+  the manifest's `folder`), joined to the round's level server on your team with your settings
+  file. Escape opens the level's menu (its MATCH page shows the match's status; its QUIT page
+  leaves for the game menu); holding Tab shows the map. When the round ends the level returns to
+  the game menu, which shows the match's progress; leaving keeps you out of that round until
+  Rejoin; closing the window quits. A level without a library would show a stand-in screen.
+- **`warped --tour-levels`** checks the levels inside the app: it plays alone, asks for each level
+  in turn, and in each one settles, times its frames, opens the menu and leaves; it writes
+  `frame_times.md` and the game menu after each level to `.artifacts/tour_levels/<run_id>/`.
+  `--tour-level <name>` (repeatable) visits only the levels named.
+  Run it with `WARPED_LOOPBACK_ONLY=1` and your own ports (`--match-port`, `--level-port`,
+  `--discovery-port`).
 - **Player settings**, from every menu: every key binding and the in-level menu's numbers, saved to
   `~/.config/warped/player_settings.yaml`, the file every level reads (`--player-settings` for
   another file).

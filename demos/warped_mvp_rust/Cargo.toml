@@ -20,6 +20,11 @@ serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 warped_shared = { path = "../warped_shared_rust" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+city_sphere_level = { package = "city-sphere", path = "../city_sphere_rust" }
+dark_forest_level = { package = "warped-dark-forest", path = "../dark_forest_rust" }
+dust_level = { package = "dust", path = "../dust_rust" }
+lunar_surface_level = { package = "hyperbolic-wormholes", path = "../hyperbolic_wormholes_rust" }
+snow_planet_level = { package = "snow-planet", path = "../snow_planet_rust" }
 objc2 = "0.6"
 objc2-core-foundation = "0.3"
 objc2-metal = "0.3"

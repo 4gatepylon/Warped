@@ -25,7 +25,7 @@ after the level crates become libraries of the one-window app. Until a level's m
 `<name>` is letters, digits and `_` (`lunar_surface`), the same in `map.json`'s `name`, `level.json`'s `name`, and
 `levels.json`. A folder with a `map.json` but no `level.json` is a map but not a level (`house_demo`).
 
-Two files, not one: `map.json` is generated (Dark Forest's is 8.6 MB, written by `forest_layout.rs`), so what a
+Two files, not one: `map.json` is generated (Dark Forest's is 11.9 MB, written by `forest_layout.rs`), so what a
 person edits by hand (a speed, the title, the laser colour) doesn't sit in a file a script rewrites, and changing
 a rule doesn't touch the layout's file, which every map reader parses strictly today.
 
@@ -103,7 +103,9 @@ Forest's built-in ones):
 
 New server settings go into the shared default with a value for every level, and a level that needs another value
 overrides it: W-144 (gravity toward black holes and wormholes) adds a section whose strength "might vary" per map,
-and W-145 (no walls at map edges) uses the existing `map_edge` section on every map.
+and W-145 (no walls at map edges) keeps the existing `map_edge` section for the crater maps (Lunar Surface, Dust),
+while the flat maps (Snow Planet, Dark Forest) give their slowing band's width in the map,
+`regions.boundary.soft_edge_m`, since it is part of the layout (Dark Forest's forest is grown to fill it).
 
 Player settings (keys, mouse, view) are each player's, not a level's: one `player_settings.yaml` in
 `warped_shared_rust` replaces the five identical copies, with no per-level layer.
@@ -135,9 +137,9 @@ The engines of today's levels:
 | --- | --- | --- | --- | --- | --- |
 | `voxel_lunar` | `demos/hyperbolic_wormholes_rust` (`hyperbolic-wormholes`) | hyperbolic | `lunar`, `meadow` | `ground.tiling`, `ground.terrain`, `structures`, `structures.mesh`, `boxes`, `warps`, `lights`, `sky.planet`, `sky.milky_way`, `sky.fog_m`, `regions.zones`, `regions.boundary`, `regions.zone_walls` | `black_hole_growth` |
 | `voxel_dust` | `demos/dust_rust` (`hyperbolic-wormholes`) | hyperbolic | `desert`, `lunar`, `meadow` | `voxel_lunar`'s, and `atmosphere.fog`, `atmosphere.sand`, `atmosphere.wind`, `appearance.laser_color` | `black_hole_growth` |
-| `voxel_snow` | `demos/snow_planet_rust` (`snow-planet`) | hyperbolic; euclidean, drawn as hyperbolic space of radius 160 m (`Map::curve_flat`) | `snow`, `lunar`, `meadow` | `voxel_lunar`'s, and `space.torus_periods_m` (the level ends at its edge: it doesn't loop; W-145 drops it), `sky.snow_per_m3`, `regions.blizzards`, `appearance.laser_color` | `black_hole_growth` |
+| `voxel_snow` | `demos/snow_planet_rust` (`snow-planet`) | hyperbolic; euclidean, drawn as hyperbolic space of radius 160 m (`Map::curve_flat`) | `snow`, `lunar`, `meadow` | `voxel_lunar`'s, and `regions.boundary.soft_edge_m` (W-145, no walls at map edges), `space.torus_periods_m` (read but not looped; Snow Planet's map no longer has it), `sky.snow_per_m3`, `regions.blizzards`, `appearance.laser_color` | `black_hole_growth` |
 | `sphere_city` | `demos/city_sphere_rust` (`city-sphere`) | euclidean, needs `ground.sphere` | `city_sphere` | `ground.sphere`, `shells`, `boxes`, `lights` (not drawn: the core's light is the engine's), `variation`, `lasers` | none |
-| `forest` | `demos/dark_forest_rust` (`dark-forest`) | euclidean | `forest` | `structures`, `structures.mesh`, `boxes`, `ladders`, `warps`, `lights`, `lights.flicker_frac`, `sky.fog_m`, `scatter`, `laser` | `laser_color` |
+| `forest` | `demos/dark_forest_rust` (`dark-forest`) | euclidean | `forest` | `structures`, `structures.mesh`, `boxes`, `ladders`, `warps`, `lights`, `lights.flicker_frac`, `sky.fog_m`, `scatter`, `laser`, `regions.boundary`, `regions.boundary.soft_edge_m` | `laser_color` |
 
 Every engine takes the required fields of a map (`ground.material`, `sky`, `spawns` and the rest), styles and
 lighting models aside. Each engine's lighting models are `ambient_sun` and, for the three voxel engines,
@@ -145,8 +147,8 @@ lighting models aside. Each engine's lighting models are `ambient_sun` and, for 
 a laser colour today; each engine keeps its own until its migration moves the colour to `level.json`'s
 `laser_color`, and then loses it. The three voxel engines are copies of one engine; once they are merged (not
 planned yet), they become one `voxel` engine with the union of their features, and their levels change one field.
-When an engine learns a feature (W-145 gives Dark Forest a slowing edge, which its map can give as
-`regions.boundary`), its entry in `levels.json` gains it in the same PR.
+When an engine learns a feature (as W-145, no walls at map edges, gave Dark Forest `regions.boundary` and its
+`soft_edge_m`), its entry in `levels.json` gains it in the same PR.
 
 ### Matches
 
@@ -238,7 +240,7 @@ As of `staging/user-4gatepylon` at #482 (2026-11-09):
 | Crate | `hyperbolic_wormholes_rust` (and the match's copy) | `dust_rust` | `snow_planet_rust` | `city_sphere_rust` | `dark_forest_rust` |
 | Map made by | `demos/levels/lunar_surface/export_map.mjs` | `tools/make_dust_map.py` (seed 121) | `tools/make_map.py` (seed 7) | `tools/make_map.py` (`variation.seed` 1192) | `src/forest_layout.rs` (`--export-map`, `scatter.seed`) |
 | Map read by | `include_str!` in `map.rs` | the same | the same | `include_str!` in `city_world.rs` | from disk at run time (`--map <path>`, default `common/maps/dark_forest/map.json`) |
-| Space | H³, the map's R = 40 m, played at 26.7 m (`space.curvature_per_map_curvature: 1.5` in settings) | H³, R = 50 m | E³ torus 112 × 72 m, drawn as H³ at R = 160 m, bounded (W-145: plain E³, a slowing edge) | E³, sphere of 24 m (`ground.sphere`) | E³, 60 × 112 m inside rock walls (W-145: no walls, a slowing edge, forest past it) |
+| Space | H³, the map's R = 40 m, played at 26.7 m (`space.curvature_per_map_curvature: 1.5` in settings) | H³, R = 50 m | E³ (no torus since W-145), drawn as H³ at R = 160 m; a 12 m slowing band past the 120 × 80 m ellipse | E³, sphere of 24 m (`ground.sphere`) | E³, 60 × 112 m playable, no walls since W-145: a 12 m slowing band past it, bamboo out to 30 m past it |
 | Pylons a team | 3: structures `<team> pylon`, consoles `<team> console 1-3` | 3, the same | 2, the same | 1: boxes in groups `pylons` and `consoles`, consoles `<team> console 0` | 2: structures `<team> pylon 0-1`, one material `<team> console` for both |
 | Laser colour | team colours (no field) | map `appearance.laser_color` | map `appearance.laser_color` | map `lasers.team_colors` (the team colours again) | map `laser.rgb` |
 | Features | the growing black hole (code: the map's only black hole, when it has consoles); crater edge; zone walls | wind, gusts, fog, sand (`atmosphere`); laser bend 2.4 (`atmosphere.wind.laser_gradient_per_view_gradient`) | one blizzard (`regions.blizzards`, with its slow, damage and shot reach); snowfall (`sky.snow_per_m3`); 5 black holes, none growing | glass shell (`shells`, reflections: settings `glass`); stairs and lifts (box groups) | ladders, decks and bridges (`ladders`, `boxes`); 5 lensed wormhole pairs (`warps`; the lens's cube atlas is the engine's); candles (`lights.flicker_frac`) |

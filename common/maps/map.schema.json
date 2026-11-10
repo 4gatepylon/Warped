@@ -306,12 +306,14 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["team", "u_min_m", "u_max_m"],
+            "oneOf": [{"required": ["team", "u_min_m", "u_max_m"]}, {"required": ["team", "v_min_m", "v_max_m"]}],
             "additionalProperties": false,
             "properties": {
               "team": {"enum": ["blue", "red", "middle"]},
               "u_min_m": {"type": ["number", "null"]},
-              "u_max_m": {"type": ["number", "null"]}
+              "u_max_m": {"type": ["number", "null"]},
+              "v_min_m": {"type": ["number", "null"]},
+              "v_max_m": {"type": ["number", "null"]}
             }
           }
         },
@@ -320,9 +322,10 @@
           "required": ["kind", "u_m", "v_m"],
           "additionalProperties": false,
           "properties": {
-            "kind": {"const": "fermi_ellipse"},
+            "kind": {"enum": ["fermi_ellipse", "fermi_rectangle"]},
             "u_m": {"type": "number", "exclusiveMinimum": 0},
-            "v_m": {"type": "number", "exclusiveMinimum": 0}
+            "v_m": {"type": "number", "exclusiveMinimum": 0},
+            "soft_edge_m": {"type": "number", "exclusiveMinimum": 0}
           }
         },
         "zone_walls": {

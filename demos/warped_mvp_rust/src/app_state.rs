@@ -10,18 +10,18 @@
 //! Example: `app.handle(MenuInput::Down); app.update(); let (shapes, size, pictures) = app.get_page();`
 //!
 //! Must know:
-//! - Gotchas: until the levels are libraries, a round shows the level's stand-in screen
-//!   (`game_menu::get_level_shapes`); it follows the match exactly as a level will, through the
-//!   same `Navigator` moves.
+//! - Gotchas: a round's level plays through its library (`take_level_to_play`, then `end_level`);
+//!   a level without one shows the stand-in screen (`game_menu::get_level_shapes`).
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use warped_shared::app::{LevelEnd, LevelJoin, play_level_fn_t};
 use warped_shared::game_settings::SettingsMessage;
-use warped_shared::match_menu::{PageClick, get_click_target};
+use warped_shared::match_menu::{PageClick, get_click_target, get_match_lines};
 use warped_shared::match_protocol::{
-    LevelEntry, MATCH_PORT, MatchClient, MatchListener, MatchView,
+    LevelEntry, MATCH_PORT, MatchClient, MatchListener, MatchView, Phase,
 };
 use warped_shared::match_state::Team;
 use warped_shared::network_scope;
@@ -33,6 +33,7 @@ use crate::game_menu::{
     GameAction, GameMenu, LevelMenu, LevelMenuAction, get_level_shapes, get_round,
 };
 use crate::game_settings_page::{GameSettingsOutcome, GameSettingsPage};
+use crate::level_library::get_play_level;
 use crate::levels_manifest::Picture;
 use crate::main_menu::{MainAction, MainMenu, MainRow};
 use crate::menu_page::{LINE, MARGIN, MenuInput, MenuRow, push_heading, push_rows, push_title};
@@ -143,6 +144,7 @@ pub struct App {
     pending_play: Option<(Option<usize>, Option<Instant>)>,
     left_round: Option<(usize, usize)>,
     level_round: Option<(usize, usize)>,
+    is_level_started: bool,
     is_map_held: bool,
     player_settings: PerPlayerSettings,
     player_settings_path: PathBuf,
@@ -189,6 +191,7 @@ impl App {
             pending_play: None,
             left_round: None,
             level_round: None,
+            is_level_started: false,
             is_map_held: false,
             player_settings,
             player_settings_path: player_settings_path.to_path_buf(),
@@ -261,12 +264,40 @@ impl App {
         self.navigator.leave_game();
     }
 
+    /// `stop_hosting` stops the game this app hosts, if any; it fails if one of the game's
+    /// processes is still alive afterwards.
+    ///
+    /// Example: `app.stop_hosting()?;`
+    pub fn stop_hosting(&mut self) -> Result<(), String> {
+        match self.hosted.take() {
+            Some(mut hosted) => hosted.stop().map_err(|error| error.to_string()),
+            None => Ok(()),
+        }
+    }
+
+    /// `request_play` asks the match server, as the game master, to play `choice` (a level's
+    /// index freely, or the match with `None`), sending it until the server's view shows it.
+    ///
+    /// Example: `app.request_play(Some(2));`
+    pub fn request_play(&mut self, choice: Option<usize>) {
+        if self.pending_play.map(|(pending, _)| pending) != Some(choice) {
+            self.pending_play = Some((choice, None));
+        }
+    }
+
+    /// `is_in_game_menu` says whether the game menu is shown (no level, no page over it).
+    ///
+    /// Example: `if app.is_in_game_menu() { ... }`
+    pub fn is_in_game_menu(&self) -> bool {
+        self.navigator.get_screen() == Screen::GameMenu
+    }
+
     /// `start_game` hosts a game of `kind` playing `choice` (the match, or one level) and joins
     /// it: alone or with bots, the player is blue at once (the allies are blue too); hosting for
     /// others, they pick a team in the game menu.
     ///
     /// Example: `self.start_game(GameKind::Alone, Some(2))?;`
-    fn start_game(&mut self, kind: GameKind, choice: Option<usize>) -> Result<(), String> {
+    pub fn start_game(&mut self, kind: GameKind, choice: Option<usize>) -> Result<(), String> {
         if self.hosted.is_some() {
             return Err("You already host a game: go back to it, or stop it first.".to_string());
         }
@@ -459,10 +490,7 @@ impl App {
                     let server: SocketAddr = self.hosted.as_ref().expect("a hosted game").server;
                     self.join(server, self.hosted_team)
                 }
-                MainAction::StopHosting => {
-                    self.hosted = None;
-                    Ok(())
-                }
+                MainAction::StopHosting => self.stop_hosting(),
                 MainAction::OpenPlayerSettings => {
                     self.open_player_settings();
                     Ok(())
@@ -546,13 +574,12 @@ impl App {
         }
     }
 
-    /// `update` polls the network once a frame: the games heard, the match this player is in
-    /// (sending the game master's pending choice until the server takes it), the game this app
-    /// hosts (whether its server stopped), and enters the round's level or leaves it as the
-    /// match goes.
+    /// `poll_network` polls the network: the games heard, the match this player is in (sending the
+    /// game master's pending choice until the server takes it), and the game this app hosts
+    /// (whether its server stopped). A level calls it once a frame through its `MatchLink`.
     ///
-    /// Example: `app.update();`
-    pub fn update(&mut self) {
+    /// Example: `app.poll_network();`
+    pub fn poll_network(&mut self) {
         if let Ok(listener) = &mut self.listener
             && let Err(error) = listener.poll()
         {
@@ -612,6 +639,17 @@ impl App {
                 self.pending_play = Some((choice, Some(Instant::now())));
             }
         }
+    }
+
+    /// `update` polls the network once a frame (`poll_network`), then enters the round's level or
+    /// leaves it as the match goes.
+    ///
+    /// Example: `app.update();`
+    pub fn update(&mut self) {
+        self.poll_network();
+        let Some(client) = &self.client else {
+            return;
+        };
         let round: Option<(usize, usize)> = client.view.as_ref().and_then(get_round);
         let is_on_team: bool = client.team.is_some();
         if self.navigator.is_in_level() && round != self.level_round {
@@ -625,7 +663,88 @@ impl App {
         {
             self.level_round = round;
             self.left_round = None;
+            self.is_level_started = false;
             self.navigator.enter_level();
+        }
+    }
+
+    /// `take_level_to_play` gives, once per round entered, what the level shown should play
+    /// (its manifest entry, its server, the team and the player's settings file) when it has a
+    /// library (`level_library`); `None` otherwise, and then the stand-in screen shows.
+    ///
+    /// Example: `if let Some((play, join)) = app.take_level_to_play() { ... }`
+    pub fn take_level_to_play(&mut self) -> Option<(play_level_fn_t, LevelJoin)> {
+        if self.navigator.get_screen() != Screen::Level || self.is_level_started {
+            return None;
+        }
+        let (_, level) = self.level_round?;
+        let client: &MatchClient = self.client.as_ref()?;
+        let view: &MatchView = client.view.as_ref()?;
+        let Phase::Playing { port, .. } = view.phase else {
+            return None;
+        };
+        let entry: LevelEntry = view.levels.get(level)?.clone();
+        let play: play_level_fn_t = get_play_level(&entry)?;
+        self.is_level_started = true;
+        Some((
+            play,
+            LevelJoin {
+                level: entry,
+                server: SocketAddr::new(client.server.ip(), port),
+                team: client.team?,
+                player_settings_path: self.player_settings_path.clone(),
+            },
+        ))
+    }
+
+    /// `is_level_round_over` says whether the round the level plays has ended (another round, a
+    /// break, or the match left), after `poll_network`.
+    ///
+    /// Example: `if app.is_level_round_over() { ... }`
+    pub fn is_level_round_over(&self) -> bool {
+        self.get_view().and_then(get_round) != self.level_round || self.level_round.is_none()
+    }
+
+    /// `get_match_lines` gives the in-level menu's MATCH page for this player, or `None` before
+    /// the server's first view.
+    ///
+    /// Example: `menu.set_match_lines(app.get_match_lines());`
+    pub fn get_match_lines(&self) -> Option<Vec<(String, bool)>> {
+        Some(get_match_lines(self.get_view()?, self.get_team()))
+    }
+
+    /// `get_level_view` gives the latest view of the match, for a level's `MatchLink`.
+    ///
+    /// Example: `let view = app.get_level_view();`
+    pub fn get_level_view(&self) -> Option<&MatchView> {
+        self.get_view()
+    }
+
+    /// `end_level` goes back to the game menu after a level returned `result`: when the round
+    /// ended, the menu shows the match's progress; when the player left, the round isn't joined
+    /// again (the game menu's Rejoin does); closing the window quits; a failure shows on the game
+    /// menu. The player's settings file is read again, since the level's menu may have saved it.
+    ///
+    /// Example: `app.end_level(Ok(LevelEnd::LeaveLevel));`
+    pub fn end_level(&mut self, result: Result<LevelEnd, String>) {
+        match result {
+            Ok(LevelEnd::RoundOver { .. }) => {}
+            Ok(LevelEnd::LeaveLevel) => self.left_round = self.level_round,
+            Ok(LevelEnd::CloseWindow) => self.should_quit = true,
+            Err(error) => {
+                self.left_round = self.level_round;
+                self.game_menu.message = Some(format!("The level stopped: {error}"));
+            }
+        }
+        self.level_round = None;
+        if self.navigator.is_in_level() {
+            self.navigator.leave_level();
+        }
+        if self.player_settings_path.exists() {
+            match PerPlayerSettings::Load(&self.player_settings_path) {
+                Ok(settings) => self.player_settings = settings,
+                Err(error) => self.game_menu.message = Some(error.to_string()),
+            }
         }
     }
 

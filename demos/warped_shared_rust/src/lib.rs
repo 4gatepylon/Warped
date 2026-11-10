@@ -9,6 +9,7 @@
 //! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
 //! - `shapes`: the smooth solids structures are made of.
 //! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
+//! - `map_edge`: the soft edge of every map: past the playable area players slow without end.
 //! - `gravity`: the pull of black holes and wormhole mouths on a player on the ground.
 //! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
@@ -26,6 +27,10 @@
 //! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
 //! - `third_person`: the third-person view's switch, and its boom in flat space.
 //! - `level_net`: how many players a level server takes, and its snapshot's pages.
+//! - `boundary_planes`: how the team boundary planes look and how what is seen through them
+//!   shimmers (W-148, W-149), with their shaders' code.
+//! - `visuals`: a player's brightness, contrast, saturation and gamma, applied to the finished
+//!   picture (W-51, basic visuals), with the shaders' colour maths.
 //! - `app`: the interface between the one-window app (`../warped_mvp_rust/`) and a level.
 //! - `match_state`, `match_protocol`, `match_menu`: the match's rules, what its server and clients
 //!   share (levels file, view, client, network beacon) and its progression page.
@@ -51,6 +56,7 @@
 pub mod app;
 pub mod app_bundle;
 pub mod avatar_model;
+pub mod boundary_planes;
 pub mod fps_demo_assets;
 pub mod gait;
 pub mod game_settings;
@@ -69,6 +75,7 @@ pub mod level_loop;
 pub mod level_net;
 #[cfg(target_os = "macos")]
 pub mod level_test;
+pub mod map_edge;
 pub mod match_menu;
 pub mod match_protocol;
 pub mod match_state;
@@ -97,5 +104,6 @@ pub mod texture_arrays;
 pub mod third_person;
 #[cfg(target_os = "macos")]
 pub mod viewmodel;
+pub mod visuals;
 #[cfg(target_os = "macos")]
 pub mod weapons;

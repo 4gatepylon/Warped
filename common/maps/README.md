@@ -15,9 +15,9 @@ level itself (its engine, rules, settings overrides and how menus show it) is th
 | [`house_demo/`](house_demo/) | `demos/hyperbolic_wormholes_rust` (`--export-map`) | the Rust wormholes demo's house, rails and pylons in H³ (R = 8 m), three wormholes |
 | [`lunar_surface/`](lunar_surface/) | `demos/levels/lunar_surface/export_map.mjs` | the Lunar Surface level in H³ (R = 40 m), a crater, 25 smooth-shape structures, a black hole and a wormhole |
 | [`dust/`](dust/) | `demos/dust_rust/tools/make_dust_map.py` | the Dust level in H³ (R = 50 m), a desert basin under a sandstorm whose wind bends light, a wormhole pair |
-| [`snow_planet/`](snow_planet/) | `demos/snow_planet_rust/tools/make_map.py` | the Snow Planet level on a flat torus, five black holes, a wormhole pair, one blizzard |
+| [`snow_planet/`](snow_planet/) | `demos/snow_planet_rust/tools/make_map.py` | the Snow Planet level in flat E³ with a slowing edge, five black holes, a wormhole pair, one blizzard |
 | [`city_sphere/`](city_sphere/) | `demos/city_sphere_rust/tools/make_map.py` | the City Sphere level inside a hollow sphere in E³, streets under a glass shell |
-| [`dark_forest/`](dark_forest/) | `demos/dark_forest_rust/src/forest_layout.rs` (`--export-map`) | the Dark Forest level in E³, a bamboo maze with treehouses, ladders, bridges and five wormhole pairs |
+| [`dark_forest/`](dark_forest/) | `demos/dark_forest_rust/src/forest_layout.rs` (`--export-map`) | the Dark Forest level in E³, a bamboo maze with treehouses, ladders, bridges and five wormhole pairs, the bamboo going on past its slowing edge |
 
 Each is exported from the program that first built it; the map files are what other programs read.
 
@@ -206,7 +206,8 @@ For maps inside a sphere (City Sphere), in Euclidean space with the origin at th
   which players move at `speed_frac` of their speed and lose `freeze_health_per_s` of their health a second, a laser
   goes only `shot_reach_m` in, and the air holds fog and snow of those densities.
 - `space.torus_periods_m` (optional, euclidean only): `[x, z]`, the periods of a flat torus T² × ℝ along the world's
-  x and z. Today's engine ends the level at its edge rather than looping it.
+  x and z. No shipped map has it now (W-145, no walls at map edges, made Snow Planet plain E³); Snow Planet's
+  looping world, which reads it, waits on its own branch (W-161, real toroidal flat space).
 
 ### Variation
 
@@ -228,9 +229,23 @@ ground or on a structure) and their eye `player.eye_height_m` above it, facing t
 
 ### Regions
 
-`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"},
+`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind", "u_m", "v_m", "soft_edge_m"},
 "zone_walls": {"height_m", "thickness_m", "opacity_frac"}}`, in the world's Fermi coordinates: a team's zone is a band
-of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1 for the boundary `kind` `fermi_ellipse`, or |u| ≤ u_m and
+|v| ≤ v_m for `fermi_rectangle`. A zone may instead be a band of v (`"v_min_m"`, `"v_max_m"`, optional since
+version 1, for a map whose teams face each other across v, such as City Sphere); its walls then stand on its v
+edges, and below the u edges read v.
+
+No map has a wall at its edge (W-145, no walls at map edges); players slow without end past it instead
+(`demos/warped_shared_rust/src/map_edge.rs`): each step that would take them further into the edge is cut by
+(1 − e), e the edge fraction where it starts, from 0 where the slowing starts to 1 where speed would reach 0, so
+they never get there.
+
+- On a map with `ground.terrain` (a crater), the edge is up the crater's wall, by the server settings' `map_edge`
+  (`start_wall_frac`, `stop_wall_frac`).
+- `boundary.soft_edge_m` (optional, maps without terrain only): e is the distance past the playable area over
+  `soft_edge_m` (past an ellipse, the distance to first order: exact on its axes). Without it (and without terrain)
+  the boundary is a hard edge: a step past it that goes further out is refused.
 
 `zone_walls` (optional) marks each finite edge (`u_min_m` or `u_max_m`) of each blue or red zone with a wall in the
 team's colour that stops neither players nor lasers. Its middle is the points straight above the edge (Fermi u equal to

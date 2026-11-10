@@ -396,3 +396,134 @@ fragment float4 beam_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     }
     return float4(encode_srgb(light), cover);
 }
+
+constant float BOUNDARY_MAX_SLANT = 4.0;
+constant float BOUNDARY_MIN_FACE_COS = 0.001;
+constant float BOUNDARY_SRGB_GAMMA = 2.2;
+constant uint MAX_HAZE_PLANE_COUNT = 4;
+constant float HAZE_FOOT_M = 0.3;
+constant float HAZE_RAY_DEPTH = 0.5;
+constant float4 CITY_HAZE_STYLE = float4(1.5, 0.06, 1.0, 1.0);
+
+/**
+ * @brief `boundary_fragment` draws a team boundary plane (W-148, team boundary planes in every level) over what is
+ * behind it (`behind`, read back by programmable blending): its glow in its team's colour, as opaque as the map says at
+ * each floor's foot (the street and the glass) and fading up its height (`get_boundary_profile`), thicker the more it
+ * is seen edge-on (up to `BOUNDARY_MAX_SLANT` times). Each team's plane shows only from its own side (`in.normal`), so
+ * the one disc between the hemispheres is blue from blue's half and red from red's.
+ * @par Example
+ * @code
+ * drawn after the glass with the boundary pipeline (no blending, depth tested)
+ * @endcode
+ */
+fragment float4 boundary_fragment(Fragment in [[stage_in]], float4 behind [[color(0)]], constant CityUniforms& u [[buffer(1)]]) {
+    float3 view = u.camera_m.xyz - in.world;
+    if (dot(view, in.normal) < 0.0) discard_fragment();
+    float r_m = length(in.world);
+    float floor_m = r_m > u.glass.x ? u.ambient.w : u.glass.x;
+    float shown_frac = get_boundary_profile(max(floor_m - r_m, 0.0), in.uv.x);
+    float slant = min(1.0 / max(abs(normalize(view).x), BOUNDARY_MIN_FACE_COS), BOUNDARY_MAX_SLANT);
+    float alpha = 1.0 - pow(1.0 - in.color.a * shown_frac, slant);
+    float3 glow = encode_srgb(pow(get_boundary_color(int(in.layer + 0.5)), BOUNDARY_SRGB_GAMMA) * BOUNDARY_BRIGHTNESS);
+    return float4(mix(behind.rgb, glow, alpha), behind.a);
+}
+
+/**
+ * @brief `CityHaze` matches `render_city.rs`'s `CityHaze`: the inverse view and projection, the camera, the street's and
+ * glass's radii with the shimmer's clock in `.w`, the render size and the target's texel size, each boundary plane's
+ * (x, side, height, team) and their count.
+ */
+struct CityHaze {
+    float4x4 world_from_clip;
+    float4 camera_m;
+    float4 radii;
+    float4 size;
+    float4 planes[MAX_HAZE_PLANE_COUNT];
+    int4 counts;
+};
+
+/** @brief `HazeVertexOut` is a vertex of `haze_vertex`'s full-screen triangle. */
+struct HazeVertexOut {
+    float4 position [[position]];
+};
+
+/**
+ * @brief `haze_vertex` makes a triangle that covers the whole render area, for `haze_fragment`.
+ * @par Example
+ * @code
+ * drawPrimitives(triangle, 0, 3) with the haze pipeline
+ * @endcode
+ */
+vertex HazeVertexOut haze_vertex(uint id [[vertex_id]]) {
+    float2 uv = float2((id << 1) & 2, id & 2);
+    HazeVertexOut out;
+    out.position = float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    return out;
+}
+
+/**
+ * @brief `haze_fragment` makes the picture shimmer like heat haze where a team boundary plane covers the screen (W-149,
+ * shimmer through boundary planes): it finds where the eye's ray through the pixel crosses a plane seen from its own
+ * side, between the core and the street, and how much the plane shows there (`get_boundary_profile` above the floor
+ * below it), then samples the frame's copy `drawn` moved by `get_boundary_haze_px` times that, in City Sphere's glassy
+ * style (`CITY_HAZE_STYLE`: wide, slow wobbles). It is screen-space: what is in front of the plane shimmers too.
+ * @par Example
+ * @code
+ * a render pass over the resolved frame, with the frame's copy at texture 0 and `CityHaze` at fragment buffer 0
+ * @endcode
+ */
+fragment float4 haze_fragment(HazeVertexOut in [[stage_in]], texture2d<float> drawn [[texture(0)]],
+                              constant CityHaze& haze [[buffer(0)]]) {
+    constexpr sampler edge(filter::linear, address::clamp_to_edge);
+    float2 pixel = in.position.xy;
+    float2 ndc = float2(2.0 * pixel.x / haze.size.x - 1.0, 1.0 - 2.0 * pixel.y / haze.size.y);
+    float4 far_point = haze.world_from_clip * float4(ndc, HAZE_RAY_DEPTH, 1.0);
+    float3 eye = haze.camera_m.xyz;
+    float3 dir = normalize(far_point.xyz / far_point.w - eye);
+    float weight = 0.0;
+    for (int i = 0; i < haze.counts.x; i++) {
+        float4 plane = haze.planes[i];
+        float t_m = (plane.x - eye.x) / dir.x;
+        if ((eye.x - plane.x) * plane.y <= 0.0 || !(t_m > 0.0)) continue;
+        float r_m = length(eye + t_m * dir);
+        float floor_m = r_m > haze.radii.y ? haze.radii.x : haze.radii.y;
+        float above_m = floor_m - r_m;
+        weight = max(weight, get_boundary_profile(max(above_m, 0.0), plane.z) * smoothstep(-HAZE_FOOT_M, 0.0, above_m));
+    }
+    if (weight <= 0.0) return drawn.sample(edge, pixel * haze.size.zw);
+    float2 move_px = get_boundary_haze_px(pixel, haze.size.y, haze.radii.w, CITY_HAZE_STYLE) * weight;
+    return drawn.sample(edge, (pixel + move_px) * haze.size.zw);
+}
+
+/** @brief `VisualsVertexOut` is a vertex of `visuals_vertex`'s full-screen triangle. */
+struct VisualsVertexOut {
+    float4 position [[position]];
+};
+
+/**
+ * @brief `visuals_vertex` makes a triangle that covers the whole render area, for `visuals_fragment`.
+ * @par Example
+ * @code
+ * drawPrimitives(triangle, 0, 3) with the visuals pipeline
+ * @endcode
+ */
+vertex VisualsVertexOut visuals_vertex(uint id [[vertex_id]]) {
+    float2 uv = float2((id << 1) & 2, id & 2);
+    VisualsVertexOut out;
+    out.position = float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    return out;
+}
+
+/**
+ * @brief `visuals_fragment` shows a pixel of the finished, resolved frame in the player's visuals (W-51, basic
+ * visuals): it reads the pixel already there (`drawn`, programmable blending) and gives it back through
+ * `apply_player_visuals` (`visuals.metal`, prepended by render_city.rs).
+ * @par Example
+ * @code
+ * a render pass that loads the resolved frame, with the visuals pipeline and `PlayerVisuals` at fragment buffer 0
+ * @endcode
+ */
+fragment float4 visuals_fragment(VisualsVertexOut in [[stage_in]], float4 drawn [[color(0)]],
+                                 constant PlayerVisuals& visuals [[buffer(0)]]) {
+    return float4(apply_player_visuals(drawn.rgb, visuals), drawn.a);
+}

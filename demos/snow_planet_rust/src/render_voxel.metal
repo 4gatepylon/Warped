@@ -202,12 +202,10 @@ constant float ZONE_STRIP_M = 0.8;
 constant float ZONE_TINT_GAIN = 1.5;
 constant float ZONE_TINT_FRAC = 0.07;
 constant int MAX_ZONE_WALL_COUNT = __MAX_ZONE_WALL_COUNT__;
-constant float ZONE_WALL_BRIGHTNESS = 0.8;
-constant float ZONE_WALL_FOOT_M = 0.4;
-constant float ZONE_WALL_BODY_FRAC = 0.6;
-constant float ZONE_WALL_TOP_FADE_FRAC = 0.4;
-constant float ZONE_WALL_SOFT_TOP_FRAC = 0.25;
 constant float ZONE_WALL_END_M = 4.0;
+constant float ZONE_WALL_HAZE_FOOT_M = 0.3;
+constant float ZONE_WALL_HAZE_BLEND_GAIN = 4.0;
+constant float4 ZONE_WALL_HAZE_STYLE = float4(1.5, 0.02, 2.0, 2.0);
 constant float ZONE_WALL_MAX_SLANT = 4.0;
 constant float ZONE_WALL_FACE_FRAC = 0.7;
 constant float ZONE_WALL_SAMPLE_M = 1.0;
@@ -521,7 +519,7 @@ struct Spaceship {
 
 /**
  * @brief `ZoneWalls` is `zone_walls.rs`'s `GpuZoneWalls`: per wall its plane's (n_z, -n_w, edge u in meters, team),
- * then (height, opacity, thickness in meters, unused), the boundary's (u, v) semi-axes in meters (0 without one), and
+ * then (height, opacity, thickness in meters, the shimmer's clock in seconds), the boundary's (u, v) semi-axes in meters (0 without one), and
  * (wall count, unused).
  */
 struct ZoneWalls {
@@ -2209,10 +2207,9 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
 
 /**
  * @brief `get_zone_wall_depth` gives the optical depth of a zone wall seen face-on (straight through its thickness) at
- * point p, `distance_s` from the eye, for the wall on the edge at Fermi u `wall_u_m`: the map's opacity at the ground,
- * falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`, then by `ZONE_WALL_TOP_FADE_FRAC` of that up
- * to the wall's height above the ground, over whose top `ZONE_WALL_SOFT_TOP_FRAC` it fades out; it also fades out over
- * the last `ZONE_WALL_END_M` before the boundary, and thins in the haze.
+ * point p, `distance_s` from the eye, for the wall on the edge at Fermi u `wall_u_m`: the map's opacity at the ground
+ * times the boundary planes' profile up to the wall's height (`get_boundary_profile`, `boundary_planes.metal`, W-148);
+ * it also fades out over the last `ZONE_WALL_END_M` before the boundary, and thins in the haze.
  * @par Example
  * @code
  * float depth = get_zone_wall_depth(scene, p, -45.0, s);
@@ -2225,9 +2222,7 @@ static float get_zone_wall_depth(thread const Scene &scene, float4 p, float wall
     float3 f = get_fermi(p, r);
     float v_end_m = boundary.y > 0.0 ? boundary.y * sqrt(max(1.0 - (wall_u_m / boundary.x) * (wall_u_m / boundary.x), 0.0)) : NO_HIT_S;
     float above_m = max(f.z - (scene.u.has_terrain != 0 ? terrain_height_m(scene, f.x, f.y) : 0.0), 0.0);
-    float height_frac = above_m / look.x;
-    float profile = mix(ZONE_WALL_BODY_FRAC * (1.0 - ZONE_WALL_TOP_FADE_FRAC * height_frac), 1.0, exp(-above_m / ZONE_WALL_FOOT_M))
-                  * (1.0 - smoothstep(1.0 - ZONE_WALL_SOFT_TOP_FRAC, 1.0, height_frac));
+    float profile = get_boundary_profile(above_m, look.x);
     float haze_frac = 1.0 - exp(-max(distance_s * r - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
     float opacity = look.y * profile * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y)) * (1.0 - HAZE_MAX_FRAC * haze_frac);
     return -log(1.0 - opacity);
@@ -2276,7 +2271,7 @@ static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float
             float slant = min(1.0 / max(abs(a * sinh(s_out) + b * cosh(s_out)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
             depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_out), wall.z, travelled + s_out);
         }
-        dust += float4(to_linear(wall.w > HALF_KIND ? RED_COLOR : BLUE_COLOR) * ZONE_WALL_BRIGHTNESS * depth, depth);
+        dust += float4(to_linear(get_boundary_color(int(wall.w > HALF_KIND))) * BOUNDARY_BRIGHTNESS * depth, depth);
     }
 }
 
@@ -3140,15 +3135,69 @@ static float3 get_soft_color(constant VoxelUniforms &u, texture2d<float> hdr, ui
 }
 
 /**
+ * @brief `get_zone_wall_haze_weight` gives how much a team boundary plane covers pixel `pixel` (W-149, shimmer through
+ * boundary planes): along the eye's straight ray through it (warps and what it hits ignored: the haze is a screen-space
+ * effect), the most any zone wall shows where the ray crosses its middle plane (`get_boundary_profile` up its height,
+ * fading in over `ZONE_WALL_HAZE_FOOT_M` at its foot and over `ZONE_WALL_END_M` before the boundary), 0 to 1.
+ * @par Example
+ * @code
+ * float weight = get_zone_wall_haze_weight(u, float2(id) + 0.5);
+ * @endcode
+ */
+static float get_zone_wall_haze_weight(constant VoxelUniforms &u, float2 pixel) {
+    constant ZoneWalls &walls = u.zone_walls;
+    float r = u.curvature_radius_m;
+    float2 ndc = float2(2.0 * pixel.x / float(u.width_px) - 1.0, 1.0 - 2.0 * pixel.y / float(u.height_px));
+    float3 d_cam = normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0));
+    float4 x = u.camera[3], v = u.camera[0] * d_cam.x + u.camera[1] * d_cam.y + u.camera[2] * d_cam.z;
+    float weight = 0.0;
+    for (int i = 0; i < walls.counts.x; i++) {
+        float4 wall = walls.walls[i];
+        float t = -(x.z * wall.x + x.w * wall.y) / (v.z * wall.x + v.w * wall.y);
+        if (!(t > 0.0 && t < LAMBDA_LIMIT)) continue;
+        float3 f = get_fermi(geodesic_point(x, v, atanh(t)), r);
+        float edge_frac = walls.boundary.x > 0.0 ? wall.z / walls.boundary.x : 0.0;
+        float v_end_m = walls.boundary.y > 0.0 ? walls.boundary.y * sqrt(max(1.0 - edge_frac * edge_frac, 0.0)) : NO_HIT_S;
+        float shown = get_boundary_profile(max(f.z, 0.0), walls.look.x) * smoothstep(-ZONE_WALL_HAZE_FOOT_M, 0.0, f.z)
+                    * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y));
+        weight = max(weight, shown);
+    }
+    return weight;
+}
+
+/**
+ * @brief `get_hazed_color` is `get_soft_color` where no team boundary plane covers the screen, and where one does, the
+ * HDR picture sampled `get_boundary_haze_px` away, a heat-haze shimmer that changes every frame (W-149), as strongly as
+ * the plane shows there (`get_zone_wall_haze_weight`) in this level's style (`ZONE_WALL_HAZE_STYLE`).
+ * @par Example
+ * @code
+ * float3 c = get_hazed_color(u, hdr, id);
+ * @endcode
+ */
+static float3 get_hazed_color(constant VoxelUniforms &u, texture2d<float> hdr, uint2 id) {
+    float3 color = get_soft_color(u, hdr, id);
+    float weight = u.zone_walls.counts.x > 0 ? get_zone_wall_haze_weight(u, float2(id) + 0.5) : 0.0;
+    if (weight <= 0.0) return color;
+    constexpr sampler edge(filter::linear, address::clamp_to_edge);
+    float2 size = float2(hdr.get_width(), hdr.get_height());
+    float2 move_px = get_boundary_haze_px(float2(id), size.y, u.zone_walls.look.w, ZONE_WALL_HAZE_STYLE) * weight;
+    float3 moved = hdr.sample(edge, (float2(id) + 0.5 + move_px) / size).rgb;
+    return mix(color, moved, saturate(weight * ZONE_WALL_HAZE_BLEND_GAIN));
+}
+
+/**
  * @brief `tonemap_voxel` finishes the HDR image (texture 1) like the fps_demo: mixes in the bloom levels, adds the
  * bloom's bright parts as a glow, exposes, grades, tone maps with ACES, vignettes and encodes sRGB into texture 0,
- * with its luma in alpha for `fxaa_voxel`. It reads each pixel through `get_soft_color`.
+ * with its luma in alpha for `fxaa_voxel`, in the player's `visuals` (`apply_player_visuals`, W-51, basic visuals);
+ * where a team boundary plane covers the screen it shimmers (`get_hazed_color`). It reads each pixel through
+ * `get_soft_color`.
  * @par Example
  * @code
  * dispatched by render_voxel.rs after tracing, one thread per pixel.
  * @endcode
  */
-kernel void tonemap_voxel(constant VoxelUniforms &u [[buffer(16)]], texture2d<float> hdr [[texture(1)]],
+kernel void tonemap_voxel(constant VoxelUniforms &u [[buffer(16)]], constant PlayerVisuals &visuals [[buffer(15)]],
+                          texture2d<float> hdr [[texture(1)]],
                           array<texture2d<float>, BLOOM_LEVELS> bloom [[texture(7)]], texture2d<float, access::write> image [[texture(0)]],
                           uint2 id [[thread_position_in_grid]]) {
     if (id.x >= hdr.get_width() || id.y >= hdr.get_height()) return;
@@ -3158,10 +3207,10 @@ kernel void tonemap_voxel(constant VoxelUniforms &u [[buffer(16)]], texture2d<fl
     for (int k = 0; k < BLOOM_LEVELS; k++) bloom_color += bloom[k].sample(edge, uv).rgb;
     float3 bloom_mean = bloom_color / float(BLOOM_LEVELS);
     float3 glow = bloom_mean * smoothstep(BLOOM_GLOW_LUMA_EDGES.x, BLOOM_GLOW_LUMA_EDGES.y, dot(bloom_mean, LUMA));
-    float3 color = (mix(get_soft_color(u, hdr, id), bloom_mean, BLOOM_STRENGTH) + BLOOM_GLOW * glow) * EXPOSURE;
+    float3 color = (mix(get_hazed_color(u, hdr, id), bloom_mean, BLOOM_STRENGTH) + BLOOM_GLOW * glow) * EXPOSURE;
     color = grade_display(aces_fitted(grade_scene(color)));
     color *= 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length((uv - 0.5) * float2(1.1, 1.0)));
-    float3 encoded = linear_to_srgb(saturate(color));
+    float3 encoded = apply_player_visuals(linear_to_srgb(saturate(color)), visuals);
     image.write(float4(encoded, dot(encoded, LUMA)), id);
 }
 
