@@ -56,6 +56,11 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
   types, the maps' models and the robot body, the smooth shapes, the key bindings, finding assets) are in
   [`../warped_shared_rust/`](../warped_shared_rust/README.md), a library this crate depends on; the rest of the
   copied Lunar Surface code is still in `src/`.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): `VoxelPlayer::step` adds the pull
+  of every black hole and wormhole mouth, the map's and the linked thrown ones (`VoxelWorld::get_warp_pull_m_per_s`,
+  along the geodesic to each, across the body's up), to the walk: faster toward a warp, slower away, a slow drift
+  standing still. Bots step by the same rule.
 - Space: the map is Euclidean with torus periods 112 × 72 m; the loader (`Map::curve_flat`) turns it into
   hyperbolic space of curvature radius 160 m, nearly flat, so the copied H³ ray marcher, physics, lasers and
   black-hole and wormhole lensing work unchanged. The level ends at its edge; walking across the torus seam is not
