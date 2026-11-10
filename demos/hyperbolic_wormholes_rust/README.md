@@ -130,7 +130,7 @@ make join-game SERVER=127.0.0.1
   structures away from the middle line spread apart along it. At 2, surfaces more than about 90 m from the middle
   speckle. The house demo keeps its own curvature (D100).
 - `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
-  on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
+  on frames that take more than about 10 ms of GPU time (close to a mouth, or in a busy game), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
 - The HUD shows the frame rate, the render time and, with Metal, the GPU's own time and the render scale; with Metal
   it is in the window's title.
