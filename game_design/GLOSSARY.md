@@ -21,6 +21,7 @@ terms.
 - [How to use it](#how-to-use-it)
 - [Structure of play](#structure-of-play)
 - [People and entities](#people-and-entities)
+- [Programs and places](#programs-and-places)
 
 ## Structure of play
 
@@ -61,3 +62,17 @@ terms.
 | **health** | What a hit takes away. | |
 | **energy** | What sprinting uses up and time refills. | |
 | **ammo** | What a gun uses when it fires. The sniper rifle holds one shot and reloads after it; the rifle heats up as it fires and cools down afterwards. Ammo never runs out for good. | |
+
+## Programs and places
+
+| Say | Meaning | Might be called by the user |
+| --- | --- | --- |
+| **the app** | The official game as one program with one window (`warped`, or `Warped.app` on a Mac). | |
+| **window** | The operating-system window of the app. The official game has exactly one; older demos opened one per level and one for the match. | |
+| **game server** | The headless program that hosts games and matches, and that players join. In the official game it is the program of `demos/warped_match_rust/`. | "match server" |
+| **level server** | The headless program a game server starts to run one round's level: its players, bots, shots and consoles. | |
+| **starter game** | The old 2D square game with its own `clients/starter/`, `game_server/` and `management_server/`. Historical, to be replaced soon. | "the 2D game" |
+| **management server** | The starter game's program that starts game servers and tracks who may join them. Historical. | |
+| **cloud** | Game servers on Google Cloud, with a download page ([`infra/`](../infra/README.md)). | |
+| **demo** | A program built to test an idea. Older commits call each level and the match "demos". | |
+| **library** | A Rust crate that levels share, such as `warped_shared`. | |
