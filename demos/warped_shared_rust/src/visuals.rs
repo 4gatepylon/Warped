@@ -6,9 +6,9 @@
 //! `visuals.metal` (`PLAYER_VISUALS_METAL`, which each level prepends to its shader source) and on
 //! the CPU in `apply_player_visuals`, which the tests compare with the shader.
 //!
-//! Interface: `VisualsSettings` (`IDENTITY`, `check`, `get`, `get_mut`, `to_gpu`), `VisualsKnob`,
-//! `VISUALS_ROWS`, `GpuPlayerVisuals` (`IDENTITY`), `apply_player_visuals`,
-//! `PLAYER_VISUALS_METAL`.
+//! Interface: `VisualsSettings` (`IDENTITY`, `check`, `get`, `get_mut`, `step`, `to_gpu`),
+//! `VisualsKnob`, `VISUALS_ROWS`, `get_visuals_row`, `GpuPlayerVisuals` (`IDENTITY`),
+//! `apply_player_visuals`, `PLAYER_VISUALS_METAL`.
 //!
 //! Example: `frame.set_visuals(mine.visuals.to_gpu());`
 //!
@@ -113,6 +113,16 @@ impl VisualsSettings {
         }
     }
 
+    /// `step` moves one setting by `direction` steps of its row (`VISUALS_ROWS`), kept within its
+    /// range.
+    ///
+    /// Example: `mine.visuals.step(VisualsKnob::Brightness, 1.0);`
+    pub fn step(&mut self, knob: VisualsKnob, direction: f64) {
+        let (_, _, step, low, high) = get_visuals_row(knob);
+        let slot: &mut f64 = self.get_mut(knob);
+        *slot = (*slot + direction * step).clamp(low, high);
+    }
+
     /// `check` fails, naming `source` and the key, on the first setting outside its range in
     /// `VISUALS_ROWS` (or not a number).
     ///
@@ -141,6 +151,16 @@ impl VisualsSettings {
             gamma: round(self.gamma),
         }
     }
+}
+
+/// `get_visuals_row` gives `knob`'s row of `VISUALS_ROWS`: its key, step and range.
+///
+/// Example: `let (_, key, step, low, high) = get_visuals_row(VisualsKnob::Gamma);`
+pub fn get_visuals_row(knob: VisualsKnob) -> (VisualsKnob, &'static str, f64, f64, f64) {
+    *VISUALS_ROWS
+        .iter()
+        .find(|row| row.0 == knob)
+        .expect("every knob has a row")
 }
 
 /// `apply_player_visuals` is `visuals.metal`'s function of the same name on the CPU: an
@@ -173,7 +193,7 @@ mod tests {
     //! | Setting changed | brightness, contrast, saturation (0 and above 1), gamma; each up and down | `each_setting_moves_colours_its_way` |
     //! | Range | each setting's lowest and highest together (every corner), on every colour | `extremes_stay_in_0_to_1` |
     //! | Checking | lowest, highest, built in; below lowest, above highest, not a number | `check_takes_each_range_and_names_the_key` |
-    //! | Rows | each step divides its range and lands on 1 | `rows_step_through_1` |
+    //! | Rows | each step divides its range and lands on 1; stepping past either end stops there | `rows_step_through_1` |
     //! | Shader against CPU | the identity (bit for bit), every setting changed (within float rounding) | `the_shader_matches_the_cpu` (macOS) |
 
     use super::*;
@@ -306,6 +326,13 @@ mod tests {
                 let steps: f64 = (1.0 - bound) / step;
                 assert!((steps - steps.round()).abs() < 1e-9, "{knob:?} {bound}");
             }
+            let mut visuals: VisualsSettings = VisualsSettings::IDENTITY;
+            let step_count: f64 = (high - low) / step + 2.0;
+            visuals.step(knob, step_count);
+            assert_eq!(visuals.get(knob), high, "{knob:?}");
+            visuals.step(knob, -2.0 * step_count);
+            assert_eq!(visuals.get(knob), low, "{knob:?}");
+            assert_eq!(get_visuals_row(knob).0, knob);
         }
     }
 

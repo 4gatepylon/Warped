@@ -1,7 +1,8 @@
 //! `menu` is the in-game menu, in pages under a tab bar (ported from the hyperbolic demo's
 //! `menu.rs`): the scores page, with each player's team, kills and deaths from the server; the
-//! settings page, where a player changes the look speed, render scale, vsync, frame-time readout
-//! and minimap for this run and sees the controls; the map page, whose picture the window draws
+//! settings page, where a player changes the look speed, render scale, vsync, frame-time readout,
+//! the picture's brightness, contrast, saturation and gamma (W-51, basic visuals) and minimap for
+//! this run and sees the controls; the map page, whose picture the window draws
 //! (`minimap.rs`); the credits page (`credits.rs`); the quit page, which leaves the level; and,
 //! when the caller supplies its lines (the one-window app's match status, `set_match_lines`), a
 //! MATCH page first.
@@ -23,6 +24,7 @@ use std::cmp::Reverse;
 use sdl3::keyboard::Scancode;
 use warped_shared::key_bindings::Control;
 use warped_shared::menu_and_map::{MATCH_PAGE_NAME, QUIT_LINES, format_tab_bar, is_leave_control};
+use warped_shared::visuals::{VisualsKnob, VisualsSettings, get_visuals_row};
 
 use crate::credits::CREDITS_LINES;
 use crate::net::{Score, TEAM_NAMES};
@@ -39,11 +41,15 @@ const PAGES: [(Page, &str); 5] = [
     (Page::Credits, "CREDITS"),
     (Page::Quit, "QUIT"),
 ];
-const ROWS: [Row; 5] = [
+const ROWS: [Row; 9] = [
     Row::LookSpeed,
     Row::RenderScale,
     Row::Vsync,
     Row::FrameTime,
+    Row::Visual(VisualsKnob::Brightness),
+    Row::Visual(VisualsKnob::Contrast),
+    Row::Visual(VisualsKnob::Saturation),
+    Row::Visual(VisualsKnob::Gamma),
     Row::Minimap,
 ];
 const CONTROLS_LINES: [&str; 6] = [
@@ -103,6 +109,7 @@ pub struct MenuSettings {
     pub is_vsync_enabled: bool,
     pub is_showing_frame_time: bool,
     pub is_showing_minimap: bool,
+    pub visuals: VisualsSettings,
 }
 
 /// `Row` is one line of the settings page that can be chosen.
@@ -112,6 +119,7 @@ enum Row {
     RenderScale,
     Vsync,
     FrameTime,
+    Visual(VisualsKnob),
     Minimap,
 }
 
@@ -321,6 +329,7 @@ impl Menu {
             }
             Row::Vsync => settings.is_vsync_enabled = !settings.is_vsync_enabled,
             Row::FrameTime => settings.is_showing_frame_time = !settings.is_showing_frame_time,
+            Row::Visual(knob) => settings.visuals.step(knob, f64::from(direction)),
             Row::Minimap => settings.is_showing_minimap = !settings.is_showing_minimap,
         }
         MenuOutcome::Stay
@@ -374,6 +383,11 @@ impl Menu {
                             "frame time",
                             format_switch(settings.is_showing_frame_time)
                         ),
+                        Row::Visual(knob) => format!(
+                            "{:<LABEL_WIDTH$}< {:.2} >",
+                            get_visuals_row(*knob).1,
+                            settings.visuals.get(*knob)
+                        ),
                         Row::Minimap => format!(
                             "{:<LABEL_WIDTH$}{}",
                             "minimap",
@@ -398,6 +412,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Page turning | forward past the last, back past the first; settings keys ignored off the settings page | `q_and_e_turn_pages` |
     //! | Settings row | a number (stepped, clamped), a switch | `settings_rows_change` |
+    //! | Visuals row (W-51, basic visuals) | stepped up to its highest, down to its lowest, back to 1 | `visuals_rows_step_within_their_ranges` |
     //! | Closing | Escape; not Tab (the held map's key) | `escape_closes_it_and_tab_does_not` |
     //! | Quit page | Return or Y (leave the level), another key (stay); Return elsewhere (no leaving) | `the_quit_page_leaves_the_level` |
     //! | Scoreboard | alone, waiting, scores (two teams, ties in kills, this player known or not) | `the_scores_page_sorts_and_totals` |
@@ -412,6 +427,7 @@ mod tests {
         is_vsync_enabled: true,
         is_showing_frame_time: false,
         is_showing_minimap: true,
+        visuals: VisualsSettings::IDENTITY,
     };
 
     #[test]
@@ -456,6 +472,41 @@ mod tests {
             MenuOutcome::Stay
         );
         assert!(!settings.is_showing_minimap);
+    }
+
+    #[test]
+    fn visuals_rows_step_within_their_ranges() {
+        let (mut menu, mut settings) = (Menu::New(), SETTINGS);
+        menu.handle(Scancode::E, &mut settings);
+        for (i, row) in ROWS.iter().enumerate() {
+            let Row::Visual(knob) = *row else { continue };
+            while menu.row_index != i {
+                menu.handle(Scancode::Down, &mut settings);
+            }
+            let (_, label, step, low, high) = get_visuals_row(knob);
+            let step_count: usize = ((high - low) / step).round() as usize + 2;
+            for _ in 0..step_count {
+                menu.handle(Scancode::Right, &mut settings);
+            }
+            assert_eq!(settings.visuals.get(knob), high, "{knob:?}");
+            for _ in 0..step_count {
+                menu.handle(Scancode::Left, &mut settings);
+            }
+            assert_eq!(settings.visuals.get(knob), low, "{knob:?}");
+            for _ in 0..((1.0 - low) / step).round() as usize {
+                menu.handle(Scancode::Right, &mut settings);
+            }
+            assert_eq!(
+                settings.visuals.to_gpu(),
+                VisualsSettings::IDENTITY.to_gpu()
+            );
+            let lines: Vec<(String, bool)> = menu.get_lines(&settings, Scoreboard::Waiting);
+            assert!(
+                lines
+                    .iter()
+                    .any(|(text, is_chosen)| *is_chosen && text.starts_with(label))
+            );
+        }
     }
 
     #[test]

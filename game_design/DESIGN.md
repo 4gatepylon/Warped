@@ -384,7 +384,9 @@ What a player sees while playing:
   - SETTINGS: the player's own settings, one row each: every key binding (`Return`, then the new
     key, button or wheel; `Esc` cancels), then numbers changed with `Left` and `Right` (mouse look
     speed, motion blur, head bob walking and sprinting, how red, shaky and blurred a hit looks,
-    the wormhole colour's strength and the Milky Way's brightness), then a row that saves them to
+    the wormhole colour's strength, the Milky Way's brightness, and the picture's brightness,
+    contrast, saturation and gamma, which change only how the finished picture looks on that
+    player's screen, W-51, basic visuals), then a row that saves them to
     `~/.config/warped/player_settings.yaml` (or the `--player-settings` file), which later games
     load. A line below says what changed or went wrong.
   - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole

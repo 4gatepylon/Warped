@@ -30,8 +30,9 @@ make join-game SERVER=127.0.0.1
 - Hold `Tab` to see the whole map over the game (the menu's MAP page, below): the game goes on and you can still move
   and look; let go to hide it (W-140, hold Tab for the map, Esc for the menu).
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
-  choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
-  (`--player-settings`) to `make join-game`.
+  choices (mouse speed, head bob, motion blur, how a hit looks, and `visuals`: the picture's brightness, contrast,
+  saturation and gamma, each 1 for none, applied to the finished picture only, W-51, basic visuals); a copy is
+  passed with `PLAYER_SETTINGS=mine.yaml` (`--player-settings`) to `make join-game`.
 - `Esc` opens the menu on its SCORES page (below); `E` turns to the settings page, of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
   (or the `--player-settings` file), which later games load by themselves. `Esc` closes it. Your player

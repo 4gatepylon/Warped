@@ -94,6 +94,8 @@ const MAX_BEAM_COUNT: usize = 60;
 const RATE_MAP_PLACEHOLDER_BYTES: usize = 256;
 /// `RATE_MAP_BUFFER_INDEX` is where the fragment shaders read the rate map's parameters.
 const RATE_MAP_BUFFER_INDEX: usize = 9;
+/// `VISUALS_BUFFER_INDEX` is where the tone map reads the player's visuals (W-51, basic visuals).
+const VISUALS_BUFFER_INDEX: usize = 3;
 /// `QUAD_VERTEX_COUNT` is the vertex count of a triangle-strip quad.
 const QUAD_VERTEX_COUNT: usize = 4;
 /// `FULLSCREEN_VERTEX_COUNT` is the vertex count of a full-screen triangle.
@@ -2019,6 +2021,7 @@ impl MetalRenderer {
                     lens_uniforms.params.x = 0.0;
                 }
                 set_fragment_bytes(encoder, as_bytes(&lens_uniforms), 2);
+                set_fragment_bytes(encoder, as_bytes(&settings.visuals), VISUALS_BUFFER_INDEX);
                 unsafe {
                     encoder.setFragmentBuffer_offset_atIndex(
                         Some(self.rate_map_parameters(targets)),

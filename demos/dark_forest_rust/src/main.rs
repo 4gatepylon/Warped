@@ -35,6 +35,7 @@ mod title;
 use warped_shared::hud::get_death_lines;
 use warped_shared::menu_and_map::{Cover, MenuAndMap};
 use warped_shared::shot_noise;
+use warped_shared::visuals::VisualsSettings;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -155,6 +156,18 @@ struct Args {
     /// Internal render resolution as a fraction of the window's pixels (0.25 to 1.0).
     #[arg(long, default_value_t = 1.0)]
     render_scale: f32,
+    /// The picture's brightness at the start, 0.5 to 2 (1 for none; the menu changes it, W-51).
+    #[arg(long, default_value_t = 1.0)]
+    brightness: f64,
+    /// The picture's contrast at the start, 0.5 to 2 (1 for none).
+    #[arg(long, default_value_t = 1.0)]
+    contrast: f64,
+    /// The picture's saturation at the start, 0 to 2 (1 for none, 0 for black and white).
+    #[arg(long, default_value_t = 1.0)]
+    saturation: f64,
+    /// The picture's gamma at the start, 0.5 to 2 (1 for none, above 1 lifts the dark tones).
+    #[arg(long, default_value_t = 1.0)]
+    gamma: f64,
     /// Number of AI robots when playing alone (0 to 6; none online).
     #[arg(long, default_value_t = 3)]
     bot_count: usize,
@@ -644,9 +657,23 @@ const VERTICAL_ROUTE: [Vec3; 22] = [
     Vec3::new(0.0, 0.0, 46.0),
 ];
 
+/// `get_start_visuals` gives the picture's visuals from `--brightness`, `--contrast`,
+/// `--saturation` and `--gamma` (W-51, basic visuals).
+///
+/// Example: `let visuals: VisualsSettings = get_start_visuals(&args);`
+fn get_start_visuals(args: &Args) -> VisualsSettings {
+    VisualsSettings {
+        brightness: args.brightness,
+        contrast: args.contrast,
+        saturation: args.saturation,
+        gamma: args.gamma,
+    }
+}
+
 /// `validate_args` checks every flag before anything starts.
 fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
     let example: &str = "example: dark-forest --render-scale 0.8 --bot-count 4";
+    get_start_visuals(args).check("from the command line")?;
     if !(0.25..=2.0).contains(&args.render_scale) {
         return Err(format!(
             "--render-scale must be in 0.25..=2.0 (above 1 supersamples), got {}; {example}",
@@ -977,6 +1004,7 @@ fn main() {
         is_vsync_enabled: !args.no_vsync,
         is_foveation_enabled: !args.disable_effect.contains(&Effect::Foveation)
             && !((args.photo.is_some() || args.video_frames.is_some()) && !args.photo_hud),
+        visuals: get_start_visuals(&args).to_gpu(),
     };
     let is_title_shown: bool = !(args.no_title
         || args.host
@@ -1122,6 +1150,7 @@ fn main() {
         is_vsync_enabled: settings.is_vsync_enabled,
         is_showing_frame_time: args.show_frame_time,
         is_showing_minimap: true,
+        visuals: get_start_visuals(&args),
     };
     let mut last_title: Instant = Instant::now();
     let mut view_stats: Vec<FrameStats> = CameraView::ALL
@@ -1184,6 +1213,7 @@ fn main() {
                     }
                     settings.render_scale_frac = menu_settings.render_scale_frac;
                     settings.is_vsync_enabled = menu_settings.is_vsync_enabled;
+                    settings.visuals = menu_settings.visuals.to_gpu();
                 }
                 Event::KeyDown {
                     scancode: Some(scancode),

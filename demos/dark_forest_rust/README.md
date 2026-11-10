@@ -140,6 +140,8 @@ binary. The wire protocol is the hyperbolic demo's; its wormhole fields carry th
 - `--photo <png> [--photo-width-px <px>] [--camera-pose x,y,z,yaw,pitch] [--fov-deg <deg>] [--hide-canopy]`: saves
   one frame without the HUD and quits; `--photo-map-page` opens the menu's map page.
 - `--map-picture <png>` (`make map-picture`): renders the map page's picture.
+- `--brightness`, `--contrast`, `--saturation`, `--gamma` (each 1 for none): the picture's visuals at the start (W-51,
+  basic visuals), which the menu's SETTINGS page changes for this run; they change only the finished picture.
 - `--camera-view <view>`, `--autopilot`, `--show-frame-time`, `--benchmark-seconds <s>`: as in `../fps_demo/`.
 - `--export-map <path>`: writes the map and quits.
 - `--throw-yaws-rad <purple>,<green>`: throws both wormhole mouths by script, turned to those yaws, at 0.5 s and 1.5 s

@@ -1,7 +1,8 @@
 //! `render_city` draws City Sphere with Metal rasterization (light goes straight in its Euclidean
 //! space, so no ray marching is needed): the street sphere and buildings, textured with the
 //! fps_demo's CC0 Poly Haven textures and lit by the glowing core; consoles, pylons and robots
-//! (per frame); the see-through glass shell with its lift holes; and laser beams.
+//! (per frame); the see-through glass shell with its lift holes; and laser beams. A last pass shows
+//! the finished frame in the player's visuals (W-51, basic visuals) when they aren't the identity.
 //!
 //! Interface: `CityVertex`, `CityScene`, `build_scene`, `CityFrame`, `CityGpu`, `push_rounded_box`,
 //! `push_mesh`, `push_beam`, `MAX_HOLE_COUNT`.
@@ -29,6 +30,7 @@ use crate::city_world::{CityWorld, Hole, get_up};
 use crate::fps_demo_assets::get_asset_path;
 use crate::mesh::{MeshMaterial, MeshModel};
 use crate::texture_arrays::{make_array, make_mips};
+use warped_shared::visuals::{GpuPlayerVisuals, PLAYER_VISUALS_METAL};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
@@ -171,6 +173,9 @@ pub struct CityFrame {
     /// then the cosines of its cone's inner and outer edges, the distance at which it falls to half
     /// and its brightness (0 when off).
     pub flashlight: [[f32; 4]; 3],
+    /// `visuals` is the player's brightness, contrast, saturation and gamma for the finished frame
+    /// (W-51, basic visuals); `GpuPlayerVisuals::IDENTITY` skips that pass.
+    pub visuals: GpuPlayerVisuals,
 }
 
 impl CityFrame {
@@ -1107,6 +1112,7 @@ pub struct CityGpu {
     opaque: Pipeline,
     glass: Pipeline,
     beam: Pipeline,
+    visuals: Pipeline,
     depth_write: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     depth_test: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     albedo: Texture,
@@ -1179,6 +1185,58 @@ fn make_pipeline(
         })?)
 }
 
+/// `make_visuals_pipeline` makes the pipeline of the visuals pass (`visuals_vertex`,
+/// `visuals_fragment`): one sample, no depth, drawing over the resolved frame.
+///
+/// Example: `let visuals = make_visuals_pipeline(device, &library)?;`
+fn make_visuals_pipeline(
+    device: &ProtocolObject<dyn MTLDevice>,
+    library: &ProtocolObject<dyn MTLLibrary>,
+) -> Result<Pipeline> {
+    let function = |name: &str| {
+        library
+            .newFunctionWithName(&NSString::from_str(name))
+            .ok_or(format!("Metal: no {name}"))
+    };
+    let descriptor: Retained<MTLRenderPipelineDescriptor> = MTLRenderPipelineDescriptor::new();
+    descriptor.setVertexFunction(Some(&*function("visuals_vertex")?));
+    descriptor.setFragmentFunction(Some(&*function("visuals_fragment")?));
+    let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
+    attachment.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+    Ok(device
+        .newRenderPipelineStateWithDescriptor_error(&descriptor)
+        .map_err(|e| {
+            format!(
+                "Metal: the City Sphere visuals pipeline failed: {}",
+                e.localizedDescription()
+            )
+        })?)
+}
+
+/// `set_render_area` limits `encoder` to the top-left `render_px` of a target of `target_px`.
+///
+/// Example: `set_render_area(&encoder, frame.render_px, target_px);`
+fn set_render_area(
+    encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+    render_px: (usize, usize),
+    target_px: (usize, usize),
+) {
+    encoder.setViewport(MTLViewport {
+        originX: 0.0,
+        originY: 0.0,
+        width: render_px.0 as f64,
+        height: render_px.1 as f64,
+        znear: 0.0,
+        zfar: 1.0,
+    });
+    encoder.setScissorRect(MTLScissorRect {
+        x: 0,
+        y: 0,
+        width: render_px.0.min(target_px.0),
+        height: render_px.1.min(target_px.1),
+    });
+}
+
 /// `make_sample_texture` makes a memoryless `MSAA_SAMPLE_COUNT`-sample render target of `format`
 /// and `size_px` (W-138, no aliasing): its samples live only in tile memory while the pass draws,
 /// and the colour pass resolves them into the target.
@@ -1224,8 +1282,9 @@ impl CityGpu {
     /// Example: `let gpu = CityGpu::New(&device)?;`
     #[allow(non_snake_case)]
     pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<CityGpu> {
+        let source: String = format!("{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}");
         let library = device
-            .newLibraryWithSource_options_error(&NSString::from_str(SHADER_SOURCE), None)
+            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|e| {
                 format!(
                     "Metal: render_city.metal failed: {}",
@@ -1252,6 +1311,7 @@ impl CityGpu {
             opaque: make_pipeline(device, &library, "city_fragment", None)?,
             glass: make_pipeline(device, &library, "glass_fragment", Some(false))?,
             beam: make_pipeline(device, &library, "beam_fragment", Some(false))?,
+            visuals: make_visuals_pipeline(device, &library)?,
             depth_write: make_depth_state(device, true)?,
             depth_test: make_depth_state(device, false)?,
             albedo: make_array(device, MTLPixelFormat::RGBA8Unorm_sRGB, 4, &layers)?,
@@ -1261,7 +1321,8 @@ impl CityGpu {
         })
     }
 
-    /// `encode` draws `frame` into the top-left `frame.render_px` of `target`.
+    /// `encode` draws `frame` into the top-left `frame.render_px` of `target`, then shows it in
+    /// `frame.visuals` (`encode_visuals`) unless they are the identity.
     ///
     /// Example: `gpu.encode(&device, &command_buffer, &frame, &render_texture)?;`
     pub fn encode(
@@ -1350,20 +1411,7 @@ impl CityGpu {
             .renderCommandEncoderWithDescriptor(&pass)
             .ok_or("Metal: no render encoder")?;
         encoder.setCullMode(MTLCullMode::None);
-        encoder.setViewport(MTLViewport {
-            originX: 0.0,
-            originY: 0.0,
-            width: frame.render_px.0 as f64,
-            height: frame.render_px.1 as f64,
-            znear: 0.0,
-            zfar: 1.0,
-        });
-        encoder.setScissorRect(MTLScissorRect {
-            x: 0,
-            y: 0,
-            width: frame.render_px.0.min(target_px.0),
-            height: frame.render_px.1.min(target_px.1),
-        });
+        set_render_area(&encoder, frame.render_px, target_px);
         let (opaque, opaque_count, glass, glass_count) =
             self.scene_buffers.as_ref().expect("made above");
         let draws: [(&Pipeline, bool, &Buffer, usize); 4] = [
@@ -1404,6 +1452,43 @@ impl CityGpu {
             }
         }
         encoder.endEncoding();
+        if frame.visuals != GpuPlayerVisuals::IDENTITY {
+            self.encode_visuals(command_buffer, frame, target)?;
+        }
+        Ok(())
+    }
+
+    /// `encode_visuals` redraws the top-left `frame.render_px` of `target` in `frame.visuals`
+    /// (W-51, basic visuals): a full-screen triangle whose fragments read back the pixel under
+    /// them (programmable blending) and write it through `apply_player_visuals`.
+    ///
+    /// Example: `self.encode_visuals(command_buffer, frame, target)?;`
+    fn encode_visuals(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        frame: &CityFrame,
+        target: &ProtocolObject<dyn MTLTexture>,
+    ) -> Result<()> {
+        let pass: Retained<MTLRenderPassDescriptor> = MTLRenderPassDescriptor::new();
+        let color = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+        color.setTexture(Some(target));
+        color.setLoadAction(MTLLoadAction::Load);
+        color.setStoreAction(MTLStoreAction::Store);
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&pass)
+            .ok_or("Metal: no render encoder for the visuals")?;
+        set_render_area(&encoder, frame.render_px, (target.width(), target.height()));
+        encoder.setRenderPipelineState(&self.visuals);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG VISUALS WILL HAPPEN
+        unsafe {
+            encoder.setFragmentBytes_length_atIndex(
+                NonNull::from(&frame.visuals).cast(),
+                std::mem::size_of::<GpuPlayerVisuals>(),
+                0,
+            );
+            encoder.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+        }
+        encoder.endEncoding();
         Ok(())
     }
 }
@@ -1414,8 +1499,20 @@ mod tests {
     //! | --- | --- |
     //! | The vertex layout matches the shader's (13 floats) | `vertex_is_13_floats` |
     //! | The scene has the street, boxes, core, hexagonal glass, glowing details, and the lifts' holes (round) before the stairs' (as wide as their stairs) | `scene_has_every_part` |
+    //! | The shaders, with `visuals.metal` before them, compile into the opaque and visuals pipelines (W-51, basic visuals) | `the_visuals_pass_compiles` |
 
     use super::*;
+
+    #[test]
+    fn the_visuals_pass_compiles() {
+        let device = objc2_metal::MTLCreateSystemDefaultDevice().expect("a Metal GPU");
+        let source: String = format!("{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}");
+        let library = device
+            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
+            .expect("render_city.metal compiles");
+        make_pipeline(&device, &library, "city_fragment", None).expect("the opaque pipeline");
+        make_visuals_pipeline(&device, &library).expect("the visuals pipeline");
+    }
 
     #[test]
     fn vertex_is_13_floats() {

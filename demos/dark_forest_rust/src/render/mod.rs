@@ -434,7 +434,8 @@ pub fn pick_live_lens_mouths(
     slots
 }
 
-/// `RenderSettings` are the quality switches that can change while the demo runs.
+/// `RenderSettings` are the quality switches that can change while the demo runs, and the
+/// player's visuals for the finished picture (W-51, basic visuals).
 #[derive(Clone, Copy, Debug)]
 pub struct RenderSettings {
     pub render_scale_frac: f32,
@@ -447,6 +448,7 @@ pub struct RenderSettings {
     pub is_vsync_enabled: bool,
     pub is_foveation_enabled: bool,
     pub shadow_distance_m: f32,
+    pub visuals: warped_shared::visuals::GpuPlayerVisuals,
 }
 
 /// `FrameTiming` is how long the GPU took for a frame finished earlier, how long this frame's

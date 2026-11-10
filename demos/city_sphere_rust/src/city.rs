@@ -983,6 +983,7 @@ fn make_frame(
         beams: beam_vertices,
         beam_speckle: [0.0; 4],
         flashlight: [[0.0; 4]; 3],
+        visuals: warped_shared::visuals::GpuPlayerVisuals::IDENTITY,
     }
 }
 
@@ -1996,6 +1997,7 @@ impl CitySession {
         if self.is_spawned && self.brain.is_none() {
             frame.zoom_in(self.get_zoom());
         }
+        frame.visuals = self.player_settings.visuals.to_gpu();
         let flashlight = &self.settings.flashlight;
         let shot_eye: DMat4 = self.player.get_eye_frame();
         frame.flashlight = [
@@ -3147,7 +3149,13 @@ fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
 
 /// `bench_views` renders each bench view `--frame-count` times at `--width-px` x `--height-px`,
 /// saves the last frame of each as a PNG and prints the median and 99th-percentile GPU and frame times.
+/// With `--player-settings`, the views are in that file's visuals (W-51, basic visuals); without
+/// it, in the identity.
 fn bench_views(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()> {
+    let visuals: warped_shared::visuals::GpuPlayerVisuals = match &arguments.player_settings {
+        Some(path) => PerPlayerSettings::Load(path)?.visuals.to_gpu(),
+        None => warped_shared::visuals::GpuPlayerVisuals::IDENTITY,
+    };
     let world: CityWorld = CityWorld::Builtin()?;
     let scene: Arc<CityScene> = Arc::new(build_scene(&world));
     let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
@@ -3170,7 +3178,7 @@ fn bench_views(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()>
         let mut gpu_ms: Vec<f64> = Vec::new();
         for k in 0..=arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: CityFrame = make_frame(
+            let mut frame: CityFrame = make_frame(
                 &world,
                 &scene,
                 &body,
@@ -3181,6 +3189,7 @@ fn bench_views(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()>
                 k as f64 / 60.0,
                 render_px,
             );
+            frame.visuals = visuals;
             renderer.render(FrameData::City(&frame), size, &mut pixels)?;
             if k > 0 {
                 frame_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
