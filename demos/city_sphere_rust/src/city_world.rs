@@ -164,12 +164,14 @@ struct JsonZoneWalls {
 }
 
 /// `BoundaryPlane` is one team boundary plane (W-148, team boundary planes in every level): the
-/// plane x = `x_m` on a finite edge of the team `team`'s zone, `height_m` tall above each floor
-/// (the street and the glass), `opacity_frac` opaque at its foot. It stops neither players nor
-/// lasers.
+/// plane x = `x_m` on a finite edge of the team `team`'s zone, whose zone lies on its `side` (+1
+/// toward +x, −1 toward −x), `height_m` tall above each floor (the street and the glass),
+/// `opacity_frac` opaque at its foot. It stops neither players nor lasers. City Sphere's map makes
+/// each team's zone a hemisphere, so both teams' planes are the disc x = 0.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BoundaryPlane {
     pub x_m: f64,
+    pub side: f64,
     pub team: u32,
     pub height_m: f64,
     pub opacity_frac: f64,
@@ -206,9 +208,11 @@ fn get_boundary_planes(regions: Option<&JsonRegions>) -> Result<Vec<BoundaryPlan
             .position(|name| *name == zone.team)
             .ok_or_else(|| format!("map: zone team {:?} isn't blue, red or middle", zone.team))?
             as u32;
-        for x_m in [zone.v_min_m, zone.v_max_m].into_iter().flatten() {
+        for (edge_m, side) in [(zone.v_min_m, 1.0), (zone.v_max_m, -1.0)] {
+            let Some(x_m) = edge_m else { continue };
             planes.push(BoundaryPlane {
                 x_m,
+                side,
                 team,
                 height_m: walls.height_m,
                 opacity_frac: walls.opacity_frac,
@@ -1414,7 +1418,7 @@ mod tests {
     //! | A shot at the glass beside a stairs' hole: from the street (stops), from the glass level (reflects); straight down into it (ends on a step) | `shots_beside_the_stairs_hole_meet_the_glass` |
     //! | A player on the glass level beside a stairs' hole: walking its whole length just past the edge (stays on the glass); standing over the stairs (falls in) | `players_walk_on_the_glass_beside_the_stairs_hole` |
     //! | A player climbing each team's stairs at the edge of the steps, either side: reaches the glass level | `players_climb_the_stairs_at_their_edge` |
-    //! | The team boundary planes (W-148): the map's (blue at x = 4 m, red at x = −4 m); zones without zone walls (none); a zone of another team (fails) | `the_map_gives_a_boundary_plane_per_team` |
+    //! | The team boundary planes (W-148): the map's (the disc x = 0 for both, blue's toward +x, red's toward −x, each team's spawns on its side); zones without zone walls (none); a zone of another team (fails) | `the_map_gives_a_boundary_plane_per_team` |
     //! | A linked mouth near a walker (W-144): walking toward it (farther in the same time), away (less far, still away), standing (drifts toward it); past the pull's reach (each the same as with no mouth, bit for bit) | `mouths_pull_walkers_toward_them` |
 
     use super::*;
@@ -1422,8 +1426,23 @@ mod tests {
     #[test]
     fn the_map_gives_a_boundary_plane_per_team() {
         let planes: Vec<BoundaryPlane> = CityWorld::Builtin().expect("the map").boundary_planes;
-        let places: Vec<(f64, u32)> = planes.iter().map(|plane| (plane.x_m, plane.team)).collect();
-        assert_eq!(places, [(4.0, 0), (-4.0, 1)]);
+        let places: Vec<(f64, f64, u32)> = planes
+            .iter()
+            .map(|plane| (plane.x_m, plane.side, plane.team))
+            .collect();
+        assert_eq!(places, [(0.0, 1.0, 0), (0.0, -1.0, 1)]);
+        let world: CityWorld = CityWorld::Builtin().expect("the map");
+        for (team, frame) in &world.spawns {
+            let side: f64 = planes
+                .iter()
+                .find(|plane| plane.team == *team)
+                .unwrap()
+                .side;
+            assert!(
+                frame.w_axis.x * side > 0.0,
+                "team {team}'s spawn is in its hemisphere"
+            );
+        }
         assert!(
             planes
                 .iter()

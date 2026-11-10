@@ -2,7 +2,8 @@
 //! space, so no ray marching is needed): the street sphere and buildings, textured with the
 //! fps_demo's CC0 Poly Haven textures and lit by the glowing core; consoles, pylons and robots
 //! (per frame); the see-through glass shell with its lift holes; the team boundary planes, which
-//! glow faintly and make what is seen through them shimmer (W-148, W-149); and laser beams.
+//! glow faintly (W-148); laser beams; and a last pass that makes the picture shimmer like heat
+//! haze where those planes cover the screen (W-149, `encode_haze`).
 //!
 //! Interface: `CityVertex`, `CityScene`, `build_scene`, `CityFrame`, `CityGpu`, `push_rounded_box`,
 //! `push_mesh`, `push_beam`, `MAX_HOLE_COUNT`.
@@ -17,12 +18,12 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
-    MTLBlendFactor, MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder,
-    MTLCompareFunction, MTLCullMode, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice,
-    MTLLibrary, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder,
-    MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineState,
-    MTLResourceOptions, MTLScissorRect, MTLStorageMode, MTLStoreAction, MTLTexture,
-    MTLTextureDescriptor, MTLTextureType, MTLTextureUsage, MTLViewport,
+    MTLBlendFactor, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor, MTLCommandBuffer,
+    MTLCommandEncoder, MTLCompareFunction, MTLCullMode, MTLDepthStencilDescriptor,
+    MTLDepthStencilState, MTLDevice, MTLLibrary, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType,
+    MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
+    MTLRenderPipelineState, MTLResourceOptions, MTLScissorRect, MTLStorageMode, MTLStoreAction,
+    MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage, MTLViewport,
 };
 use rayon::prelude::*;
 
@@ -150,6 +151,8 @@ pub struct CityScene {
     pub glass: Vec<CityVertex>,
     /// `boundary` is the team boundary planes' triangles (W-148, `push_boundary_plane`).
     pub boundary: Vec<CityVertex>,
+    /// `haze_planes` is each boundary plane as the haze pass reads it: (x, side, height, team).
+    pub haze_planes: Vec<[f32; 4]>,
     pub holes: Vec<[f32; 4]>,
     pub hole_sides: Vec<[f32; 4]>,
     pub lift_hole_count: usize,
@@ -538,6 +541,13 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     push_pylon_beacons(&mut opaque, world);
     push_electronics(&mut opaque, world);
     let mut boundary: Vec<CityVertex> = Vec::new();
+    let haze_planes: Vec<[f32; 4]> = world
+        .boundary_planes
+        .iter()
+        .map(|plane| {
+            [plane.x_m, plane.side, plane.height_m, f64::from(plane.team)].map(|x| x as f32)
+        })
+        .collect();
     for plane in &world.boundary_planes {
         let inner_m: f64 = f64::from(glass_radius_m) - plane.height_m;
         push_boundary_plane(&mut boundary, plane, inner_m, street_radius_m);
@@ -547,6 +557,7 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
         opaque,
         glass,
         boundary,
+        haze_planes,
         holes,
         hole_sides,
         lift_hole_count,
@@ -569,7 +580,7 @@ fn push_boundary_plane(
 ) {
     let ring_radius = |r_m: f64| (r_m * r_m - plane.x_m * plane.x_m).max(0.0).sqrt();
     let (inner_ring_m, outer_ring_m) = (ring_radius(inner_m), ring_radius(outer_m));
-    let normal: [f32; 3] = [plane.x_m.signum() as f32, 0.0, 0.0];
+    let normal: [f32; 3] = [plane.side as f32, 0.0, 0.0];
     let vertex = |angle_rad: f64, ring_m: f64| CityVertex {
         position: [
             plane.x_m as f32,
@@ -1161,6 +1172,8 @@ pub struct CityGpu {
     glass: Pipeline,
     beam: Pipeline,
     boundary: Pipeline,
+    haze: Pipeline,
+    haze_copy: Option<Texture>,
     depth_write: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     depth_test: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     albedo: Texture,
@@ -1228,6 +1241,76 @@ fn make_pipeline(
         .map_err(|e| {
             format!(
                 "Metal: the City Sphere pipeline failed: {}",
+                e.localizedDescription()
+            )
+        })?)
+}
+
+/// `MAX_HAZE_PLANE_COUNT` is how many team boundary planes the haze pass reads, `render_city.metal`'s.
+const MAX_HAZE_PLANE_COUNT: usize = 4;
+
+/// `CityHaze` matches `render_city.metal`'s `CityHaze`: what the haze pass needs to find where the
+/// team boundary planes cover the screen (W-149): the inverse of the frame's view and projection,
+/// the camera, the street's and the glass's radii with the shimmer's clock in `radii[3]`, the
+/// render size and the target's texel size, each plane's (x, side, height, team) and the count.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CityHaze {
+    world_from_clip: [[f32; 4]; 4],
+    camera_m: [f32; 4],
+    radii: [f32; 4],
+    size: [f32; 4],
+    planes: [[f32; 4]; MAX_HAZE_PLANE_COUNT],
+    counts: [i32; 4],
+}
+
+/// `make_copy_texture` makes a texture the size and format of the render target that shaders can
+/// read, for the haze pass's copy of the frame.
+///
+/// Example: `let copy = make_copy_texture(device, (2560, 1440))?;`
+fn make_copy_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    size_px: (usize, usize),
+) -> Result<Texture> {
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A COPY OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+    let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::BGRA8Unorm,
+            size_px.0,
+            size_px.1,
+            false,
+        )
+    };
+    descriptor.setUsage(MTLTextureUsage::ShaderRead);
+    descriptor.setStorageMode(MTLStorageMode::Private);
+    Ok(device
+        .newTextureWithDescriptor(&descriptor)
+        .ok_or("Metal: no memory for the haze's copy of the frame")?)
+}
+
+/// `make_haze_pipeline` makes the haze pass's pipeline (`haze_vertex`, `haze_fragment`): one
+/// sample, no depth, drawing over the resolved frame.
+///
+/// Example: `let haze = make_haze_pipeline(device, &library)?;`
+fn make_haze_pipeline(
+    device: &ProtocolObject<dyn MTLDevice>,
+    library: &ProtocolObject<dyn MTLLibrary>,
+) -> Result<Pipeline> {
+    let function = |name: &str| {
+        library
+            .newFunctionWithName(&NSString::from_str(name))
+            .ok_or(format!("Metal: no {name}"))
+    };
+    let descriptor: Retained<MTLRenderPipelineDescriptor> = MTLRenderPipelineDescriptor::new();
+    descriptor.setVertexFunction(Some(&*function("haze_vertex")?));
+    descriptor.setFragmentFunction(Some(&*function("haze_fragment")?));
+    let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
+    attachment.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+    Ok(device
+        .newRenderPipelineStateWithDescriptor_error(&descriptor)
+        .map_err(|e| {
+            format!(
+                "Metal: the City Sphere haze pipeline failed: {}",
                 e.localizedDescription()
             )
         })?)
@@ -1308,6 +1391,8 @@ impl CityGpu {
             glass: make_pipeline(device, &library, "glass_fragment", Some(false))?,
             beam: make_pipeline(device, &library, "beam_fragment", Some(false))?,
             boundary: make_pipeline(device, &library, "boundary_fragment", None)?,
+            haze: make_haze_pipeline(device, &library)?,
+            haze_copy: None,
             depth_write: make_depth_state(device, true)?,
             depth_test: make_depth_state(device, false)?,
             albedo: make_array(device, MTLPixelFormat::RGBA8Unorm_sRGB, 4, &layers)?,
@@ -1477,6 +1562,87 @@ impl CityGpu {
             }
         }
         encoder.endEncoding();
+        if !frame.scene.haze_planes.is_empty() {
+            self.encode_haze(device, command_buffer, frame, target)?;
+        }
+        Ok(())
+    }
+
+    /// `encode_haze` makes the picture shimmer like heat haze where a team boundary plane covers the
+    /// screen (W-149, shimmer through boundary planes): it copies the resolved frame, then redraws
+    /// the top-left `frame.render_px` of `target` from the copy, each pixel sampled where
+    /// `haze_fragment` moves it.
+    ///
+    /// Example: `self.encode_haze(device, command_buffer, frame, target)?;`
+    fn encode_haze(
+        &mut self,
+        device: &ProtocolObject<dyn MTLDevice>,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        frame: &CityFrame,
+        target: &ProtocolObject<dyn MTLTexture>,
+    ) -> Result<()> {
+        let target_px: (usize, usize) = (target.width(), target.height());
+        if self
+            .haze_copy
+            .as_ref()
+            .is_none_or(|copy| (copy.width(), copy.height()) != target_px)
+        {
+            self.haze_copy = Some(make_copy_texture(device, target_px)?);
+        }
+        let copy: &Texture = self.haze_copy.as_ref().expect("made above");
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .ok_or("Metal: no blit encoder for the haze")?;
+        unsafe { blit.copyFromTexture_toTexture(target, copy) };
+        blit.endEncoding();
+        let mut planes: [[f32; 4]; MAX_HAZE_PLANE_COUNT] = [[0.0; 4]; MAX_HAZE_PLANE_COUNT];
+        for (slot, plane) in planes.iter_mut().zip(&frame.scene.haze_planes) {
+            *slot = *plane;
+        }
+        let haze = CityHaze {
+            world_from_clip: frame.get_clip_from_world().inverse().to_cols_array_2d(),
+            camera_m: frame.camera_m.extend(1.0).to_array(),
+            radii: [
+                frame.scene.street_radius_m,
+                frame.scene.glass_radius_m,
+                0.0,
+                get_shimmer_clock_s(f64::from(frame.time_s)),
+            ],
+            size: [
+                frame.render_px.0 as f32,
+                frame.render_px.1 as f32,
+                1.0 / target_px.0 as f32,
+                1.0 / target_px.1 as f32,
+            ],
+            planes,
+            counts: [
+                frame.scene.haze_planes.len().min(MAX_HAZE_PLANE_COUNT) as i32,
+                0,
+                0,
+                0,
+            ],
+        };
+        let pass: Retained<MTLRenderPassDescriptor> = MTLRenderPassDescriptor::new();
+        let color = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+        color.setTexture(Some(target));
+        color.setLoadAction(MTLLoadAction::Load);
+        color.setStoreAction(MTLStoreAction::Store);
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&pass)
+            .ok_or("Metal: no render encoder for the haze")?;
+        set_render_area(&encoder, frame.render_px, target_px);
+        encoder.setRenderPipelineState(&self.haze);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE HAZE READING THE WRONG FRAME OR PLANES WILL HAPPEN
+        unsafe {
+            encoder.setFragmentTexture_atIndex(Some(copy), 0);
+            encoder.setFragmentBytes_length_atIndex(
+                NonNull::from(&haze).cast(),
+                std::mem::size_of::<CityHaze>(),
+                0,
+            );
+            encoder.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+        }
+        encoder.endEncoding();
         Ok(())
     }
 }
@@ -1518,6 +1684,7 @@ mod tests {
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .expect("render_city.metal compiles");
         make_pipeline(&device, &library, "boundary_fragment", None).expect("the boundary pipeline");
+        make_haze_pipeline(&device, &library).expect("the haze pipeline");
     }
 
     #[test]

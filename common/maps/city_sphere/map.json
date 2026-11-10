@@ -4254,18 +4254,13 @@
   "zones": [
    {
     "team": "blue",
-    "v_min_m": 4.0,
+    "v_min_m": 0.0,
     "v_max_m": null
-   },
-   {
-    "team": "middle",
-    "v_min_m": -4.0,
-    "v_max_m": 4.0
    },
    {
     "team": "red",
     "v_min_m": null,
-    "v_max_m": -4.0
+    "v_max_m": 0.0
    }
   ],
   "zone_walls": {

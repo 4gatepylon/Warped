@@ -905,6 +905,7 @@ constant float BOUNDARY_PLANE_MAX_SLANT = 4.0;
 constant float BOUNDARY_PLANE_MIN_COS = 0.001;
 constant float BOUNDARY_PLANE_END_M = 4.0;
 constant float BOUNDARY_PLANE_SRGB_GAMMA = 2.2;
+constant float4 FOREST_HAZE_STYLE = float4(0.8, 0.045, 2.0, 1.0);
 
 /**
  * @brief `BoundaryPlanes` matches `render::GpuBoundaryPlanes`: per plane (z in meters, team, 0, 0), then (height in
@@ -922,17 +923,17 @@ struct BoundaryPlanes {
  * @brief `find_boundary_planes` gives the team boundary planes (W-148) that the view from `eye` along unit `dir` crosses
  * before the scene (`scene_m` away): their glow over the picture, display-linear and premultiplied (rgb, alpha), each
  * as opaque as `get_boundary_profile` says at its height and thicker seen at a slant (up to `BOUNDARY_PLANE_MAX_SLANT`
- * times), fading over its last `BOUNDARY_PLANE_END_M` toward the extent's ends; and how far what is seen through them
- * turns (`turn`, radians across and up, `get_boundary_shimmer` times how much the plane shows: W-149).
+ * times), fading over its last `BOUNDARY_PLANE_END_M` toward the extent's ends; and how much they cover the pixel for the
+ * heat haze (`haze_weight`, the most any of them shows: W-149).
  * @par Example
  * @code
- * float4 glow = find_boundary_planes(boundary, eye, dir, scene_m, pixel_angle_rad, turn);
+ * float4 glow = find_boundary_planes(boundary, eye, dir, scene_m, haze_weight);
  * @endcode
  */
 static float4 find_boundary_planes(constant BoundaryPlanes& boundary, float3 eye, float3 dir, float scene_m,
-                                   float pixel_angle_rad, thread float2& turn) {
+                                   thread float& haze_weight) {
     float4 glow = float4(0.0);
-    turn = float2(0.0);
+    haze_weight = 0.0;
     float face_cos = max(abs(dir.z), BOUNDARY_PLANE_MIN_COS);
     for (int i = 0; i < boundary.counts.x; i++) {
         float4 plane = boundary.planes[i];
@@ -946,15 +947,16 @@ static float4 find_boundary_planes(constant BoundaryPlanes& boundary, float3 eye
         float alpha = 1.0 - pow(1.0 - boundary.look.y * shown_frac, min(1.0 / face_cos, BOUNDARY_PLANE_MAX_SLANT));
         float3 color = pow(get_boundary_color(int(plane.y + 0.5)), BOUNDARY_PLANE_SRGB_GAMMA) * BOUNDARY_BRIGHTNESS;
         glow += (1.0 - glow.a) * float4(color * alpha, alpha);
-        turn += get_boundary_shimmer(q.xy, boundary.look.z, t_m * pixel_angle_rad / face_cos) * shown_frac;
+        haze_weight = max(haze_weight, shown_frac);
     }
     return glow;
 }
 
 /**
  * @brief `tonemap_fragment` adds bloom, exposes, tone maps with ACES, grades, draws the team boundary planes over
- * the picture and makes what is seen through them shimmer (`find_boundary_planes`, W-148, W-149; not while capturing
- * the lens atlas), and stores luma in alpha for FXAA.
+ * the picture and makes what is seen through them shimmer like heat haze, soft in the forest (`find_boundary_planes`,
+ * `get_boundary_haze_px` in `FOREST_HAZE_STYLE`, W-148, W-149; not while capturing the lens atlas), and stores luma
+ * in alpha for FXAA.
  * @par Interface
  * `frame.effect_params.x` turns the color grade on, and `frame.effect_params.w` is the number of
  * bloom levels summed into `bloom`.
@@ -977,8 +979,7 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
     float2 screen_uv = frame.foveation.z < 0.5 ? in.uv : screen_px * frame.screen_size.zw;
     float is_kept_plain = lens.params.y;
     float4 boundary_glow = float4(0.0);
-    float2 boundary_turn = float2(0.0);
-    float pixel_angle_rad = 2.0 / (frame.proj[1][1] * frame.screen_size.y);
+    float boundary_haze_weight = 0.0;
     if (boundary.counts.x > 0 && is_kept_plain < 0.5) {
         constexpr sampler depth_sampler(coord::normalized, filter::nearest, address::clamp_to_edge);
         float2 boundary_ndc = float2(screen_uv.x * 2.0 - 1.0, 1.0 - screen_uv.y * 2.0);
@@ -991,9 +992,10 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
             float4 scene_point = frame.inv_view_proj * float4(boundary_ndc, boundary_depth, 1.0);
             scene_m = length(scene_point.xyz / scene_point.w - eye);
         }
-        boundary_glow = find_boundary_planes(boundary, eye, dir, scene_m, pixel_angle_rad, boundary_turn);
+        boundary_glow = find_boundary_planes(boundary, eye, dir, scene_m, boundary_haze_weight);
     }
-    float2 hdr_uv = in.uv + boundary_turn / pixel_angle_rad * frame.screen_size.zw;
+    float2 haze_move_px = get_boundary_haze_px(in.position.xy, frame.screen_size.y, boundary.look.z, FOREST_HAZE_STYLE);
+    float2 hdr_uv = in.uv + haze_move_px * boundary_haze_weight * frame.screen_size.zw;
     float3 color = hdr.sample(linear_sampler, hdr_uv).rgb;
     float3 bloom_color = bloom.sample(linear_sampler, in.uv).rgb / frame.effect_params.w;
     color = get_graded_color(frame, mix(color, bloom_color, frame.render_params.y));

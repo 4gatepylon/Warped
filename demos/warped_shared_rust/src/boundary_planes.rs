@@ -1,151 +1,63 @@
 //! `boundary_planes.rs` is how the team boundary planes look in every level (W-148, team boundary
 //! planes in every level; W-149, shimmer through boundary planes): the planes stand on the edges
 //! of the blue and red zones of each level's map (`regions.zones` and `regions.zone_walls`,
-//! `common/maps/README.md`), glow faintly in their team's colour, and what is seen through one
-//! shimmers a little until you cross it. Each level finds where its planes are; their look and the
-//! shimmer are `boundary_planes.metal` (`BOUNDARY_PLANES_METAL`, which each level prepends to its
-//! shader source), and the shimmer's clock and a CPU copy of it for tests are here.
+//! `common/maps/README.md`) and glow faintly in their team's colour, and where one covers the
+//! screen the picture shimmers like heat haze, a screen-space effect that changes a little every
+//! frame. Each level finds where its planes cover the screen; their look and the haze are
+//! `boundary_planes.metal` (`BOUNDARY_PLANES_METAL`, which each level prepends to its shader
+//! source), and the haze's clock is here.
 //!
-//! Interface: `BOUNDARY_PLANES_METAL`, `SHIMMER_CLOCK_PERIOD_S`, `get_shimmer_clock_s`,
-//! `get_boundary_shimmer`, `BOUNDARY_SHIMMER_RAD`.
+//! Interface: `BOUNDARY_PLANES_METAL`, `SHIMMER_CLOCK_PERIOD_S`, `get_shimmer_clock_s`.
 //!
 //! Example: `uniforms.zone_walls.look[3] = get_shimmer_clock_s(world.sky_time_s);`
 //!
 //! Must know:
-//! - Gotchas: the shimmer's waves each repeat a whole number of times in
-//!   `SHIMMER_CLOCK_PERIOD_S`, so the clock wraps without a jump and stays small enough for `f32`.
+//! - Gotchas: the haze's noise repeats only after `SHIMMER_CLOCK_PERIOD_S` (its lattice wraps
+//!   then, and each octave rises a whole number of cells a second), so the clock wraps without a
+//!   jump and stays small enough for `f32`.
 
 /// `BOUNDARY_PLANES_METAL` is `boundary_planes.metal`, for a level to prepend to its shader source.
 pub const BOUNDARY_PLANES_METAL: &str = include_str!("boundary_planes.metal");
-/// `SHIMMER_CLOCK_PERIOD_S` is how long the shimmer takes to repeat exactly.
-pub const SHIMMER_CLOCK_PERIOD_S: f64 = 10.0;
-/// `BOUNDARY_SHIMMER_RAD` is `boundary_planes.metal`'s largest turn of the view through a plane.
-pub const BOUNDARY_SHIMMER_RAD: f32 = 0.0025;
-const SHORTEST_WAVE_M: f32 = 0.6;
-const WAVES_PER_M: [f32; 4] = [1.1, 0.83, 0.71, 1.27];
-const WAVE_HZ: [f32; 4] = [0.9, 0.7, 1.1, 0.8];
+/// `SHIMMER_CLOCK_PERIOD_S` is how long the haze takes to repeat exactly: `boundary_planes.metal`'s
+/// time lattice (`BOUNDARY_HAZE_TIME_CELLS` cells of `BOUNDARY_HAZE_S_PER_TIME_CELL`) times its
+/// space lattice's `BOUNDARY_HAZE_SPACE_CELLS` over the time lattice's.
+pub const SHIMMER_CLOCK_PERIOD_S: f64 = 1024.0;
 
-/// `get_shimmer_clock_s` gives the shimmer's clock at `time_s` (any clock in seconds, such as the
-/// UTC time the sky uses): `time_s` wrapped to `SHIMMER_CLOCK_PERIOD_S`.
+/// `get_shimmer_clock_s` gives the haze's clock at `time_s` (any clock in seconds, such as the UTC
+/// time the sky uses): `time_s` wrapped to `SHIMMER_CLOCK_PERIOD_S`.
 ///
 /// Example: `let clock_s: f32 = get_shimmer_clock_s(world.sky_time_s);`
 pub fn get_shimmer_clock_s(time_s: f64) -> f32 {
     time_s.rem_euclid(SHIMMER_CLOCK_PERIOD_S) as f32
 }
 
-/// `smoothstep` is Metal's: 0 below `low`, 1 above `high`, and a smooth cubic between.
-///
-/// Example: `let fade = smoothstep(0.15, 0.3, footprint_m);`
-fn smoothstep(low: f32, high: f32, x: f32) -> f32 {
-    let t: f32 = ((x - low) / (high - low)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// `get_boundary_shimmer` is `boundary_planes.metal`'s function of the same name on the CPU: how
-/// far what is seen through a plane is turned (radians across and up the plane) where the view
-/// crosses it at `on_plane_m`, at the shimmer clock `clock_s`, faded out where one pixel covers
-/// `footprint_m` of the plane, more than about half the shortest wave.
-///
-/// Example: `let [across_rad, up_rad] = get_boundary_shimmer([2.0, 1.5], 3.0, 0.01);`
-pub fn get_boundary_shimmer(on_plane_m: [f32; 2], clock_s: f32, footprint_m: f32) -> [f32; 2] {
-    let [x, y] = on_plane_m;
-    let along: [f32; 4] = [x + y, x - y, y, x];
-    let phase: [f32; 4] = std::array::from_fn(|i| {
-        std::f32::consts::TAU * (WAVES_PER_M[i] * along[i] + WAVE_HZ[i] * clock_s)
-    });
-    let wave: [f32; 2] = [
-        0.5 * (phase[0].sin() + phase[1].sin()),
-        0.5 * (phase[2].sin() + phase[3].cos()),
-    ];
-    let fade: f32 = 1.0 - smoothstep(0.25 * SHORTEST_WAVE_M, 0.5 * SHORTEST_WAVE_M, footprint_m);
-    wave.map(|w| BOUNDARY_SHIMMER_RAD * fade * w)
-}
-
 #[cfg(test)]
 mod tests {
-    //! Tests of the boundary planes' shimmer.
+    //! Tests of the boundary planes' haze, on the GPU (the shader is its only implementation).
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Clock | inside the period, past it (wraps), before 0 (wraps up) | `the_clock_wraps_without_a_jump` |
-    //! | Shimmer over the period | at 0 and at the period (the same turn: no jump when the clock wraps) | `the_clock_wraps_without_a_jump` |
-    //! | Size | every place and time (within the largest turn), a fine pixel (full), a pixel over half the shortest wave (none) | `the_shimmer_stays_small_and_fades_where_pixels_are_coarse` |
-    //! | Smoothness | neighbouring points 1 cm apart (turns differ little: no flicker between pixels) | `the_shimmer_is_smooth` |
-    //! | Shader against CPU | several places and times (within float rounding) | `the_shader_matches_the_cpu` (macOS) |
+    //! | Clock | inside the period, past it (wraps), before 0 (wraps up) | `the_clock_wraps` |
+    //! | Haze at the clock's wrap | 1 ms before the period and at 0 (nearly the same move: no jump) | `the_haze_is_bounded_smooth_and_changing` (macOS) |
+    //! | Size | many pixels and times (within the strength), and not all small | `the_haze_is_bounded_smooth_and_changing` (macOS) |
+    //! | Across the screen | neighbouring pixels (moves differ by under half a pixel: no flicker) | `the_haze_is_bounded_smooth_and_changing` (macOS) |
+    //! | Over time | one frame later (changes a little, under 1.5 px), a second later (changes clearly) | `the_haze_is_bounded_smooth_and_changing` (macOS) |
 
     use super::*;
 
-    const FINE_FOOTPRINT_M: f32 = 0.001;
-    const SMOOTH_STEP_M: f32 = 0.01;
-
-    /// `get_samples` gives places on a plane (meters) and clock times (seconds) to test at.
-    ///
-    /// Example: `for ([x, y], clock_s) in get_samples() { ... }`
-    fn get_samples() -> Vec<([f32; 2], f32)> {
-        (0..200)
-            .map(|i| {
-                let k: f32 = i as f32;
-                (
-                    [(k * 0.37).sin() * 30.0, (k * 0.11) % 6.0],
-                    (k * 0.29) % 10.0,
-                )
-            })
-            .collect()
-    }
-
     #[test]
-    fn the_clock_wraps_without_a_jump() {
+    fn the_clock_wraps() {
         assert_eq!(get_shimmer_clock_s(3.5), 3.5);
-        assert!((get_shimmer_clock_s(1_794_187_309.25) - 9.25).abs() < 1e-3);
-        assert!((get_shimmer_clock_s(-2.0) - 8.0).abs() < 1e-6);
-        for (place, _) in get_samples() {
-            let start: [f32; 2] = get_boundary_shimmer(place, 0.0, FINE_FOOTPRINT_M);
-            let end: [f32; 2] =
-                get_boundary_shimmer(place, SHIMMER_CLOCK_PERIOD_S as f32, FINE_FOOTPRINT_M);
-            for i in 0..2 {
-                assert!(
-                    (start[i] - end[i]).abs() < 1e-6,
-                    "{place:?}: {start:?} {end:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn the_shimmer_stays_small_and_fades_where_pixels_are_coarse() {
-        let mut largest_rad: f32 = 0.0;
-        for (place, clock_s) in get_samples() {
-            let turn: [f32; 2] = get_boundary_shimmer(place, clock_s, FINE_FOOTPRINT_M);
-            assert!(
-                turn.iter().all(|x| x.abs() <= BOUNDARY_SHIMMER_RAD),
-                "{turn:?}"
-            );
-            largest_rad = largest_rad.max(turn[0].abs()).max(turn[1].abs());
-            assert_eq!(
-                get_boundary_shimmer(place, clock_s, SHORTEST_WAVE_M),
-                [0.0; 2]
-            );
-        }
-        assert!(largest_rad > 0.5 * BOUNDARY_SHIMMER_RAD, "{largest_rad}");
-    }
-
-    #[test]
-    fn the_shimmer_is_smooth() {
-        let largest_slope_rad_per_m: f32 =
-            BOUNDARY_SHIMMER_RAD * std::f32::consts::TAU * 2.0 * WAVES_PER_M[3];
-        for ([x, y], clock_s) in get_samples() {
-            let here: [f32; 2] = get_boundary_shimmer([x, y], clock_s, FINE_FOOTPRINT_M);
-            let next: [f32; 2] =
-                get_boundary_shimmer([x + SMOOTH_STEP_M, y], clock_s, FINE_FOOTPRINT_M);
-            for i in 0..2 {
-                assert!((here[i] - next[i]).abs() <= largest_slope_rad_per_m * SMOOTH_STEP_M);
-            }
-        }
+        let utc_s: f64 = 1_794_187_309.25;
+        assert!(
+            (get_shimmer_clock_s(utc_s) - (utc_s % SHIMMER_CLOCK_PERIOD_S) as f32).abs() < 1e-3
+        );
+        assert!((get_shimmer_clock_s(-2.0) - 1022.0).abs() < 1e-6);
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn the_shader_matches_the_cpu() {
+    fn the_haze_is_bounded_smooth_and_changing() {
         use std::ptr::NonNull;
 
         use objc2_foundation::NSString;
@@ -155,22 +67,32 @@ mod tests {
             MTLResourceOptions, MTLSize,
         };
 
-        const KERNEL: &str = "kernel void shimmer_test(device float4 *samples [[buffer(0)]], \
+        const KERNEL: &str = "kernel void haze_test(device float4 *samples [[buffer(0)]], \
             uint i [[thread_position_in_grid]]) { float4 s = samples[i]; \
-            samples[i].xy = get_boundary_shimmer(s.xy, s.z, s.w); }";
-        const SHADER_TOLERANCE_RAD: f32 = 1e-6;
-        let samples: Vec<[f32; 4]> = get_samples()
-            .into_iter()
-            .enumerate()
-            .map(|(i, ([x, y], clock_s))| [x, y, clock_s, (i % 5) as f32 * 0.06])
-            .collect();
+            samples[i] = float4(get_boundary_haze_px(s.xy, 1440.0, s.z, float4(1.0, 0.03, 3.0, 1.0)), 0.0, 0.0); }";
+        const HAZE_PX: f32 = 8.0;
+        const FRAME_S: f32 = 1.0 / 60.0;
+        const PERIOD_S: f32 = SHIMMER_CLOCK_PERIOD_S as f32;
+        let mut samples: Vec<[f32; 4]> = Vec::new();
+        for i in 0..400 {
+            let (x, y, t) = (
+                (i * 37 % 2560) as f32,
+                (i * 53 % 1440) as f32,
+                (i as f32 * 2.3) % 900.0,
+            );
+            for (dx, dt) in [(0.0, 0.0), (1.0, 0.0), (0.0, FRAME_S), (0.0, 1.0)] {
+                samples.push([x + dx, y, t + dt, 0.0]);
+            }
+            samples.push([x, y, PERIOD_S - 1e-3, 0.0]);
+            samples.push([x, y, 0.0, 0.0]);
+        }
         let device = MTLCreateSystemDefaultDevice().expect("a Metal GPU");
         let source: String = format!("{BOUNDARY_PLANES_METAL}\n{KERNEL}");
         let library = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .expect("boundary_planes.metal compiles");
         let function = library
-            .newFunctionWithName(&NSString::from_str("shimmer_test"))
+            .newFunctionWithName(&NSString::from_str("haze_test"))
             .expect("the test kernel");
         let pipeline = device
             .newComputePipelineStateWithFunction_error(&function)
@@ -197,25 +119,45 @@ mod tests {
             height: 1,
             depth: 1,
         };
-        let size: MTLSize = MTLSize {
-            width: samples.len(),
-            ..one
-        };
-        encoder.dispatchThreads_threadsPerThreadgroup(size, one);
+        encoder.dispatchThreads_threadsPerThreadgroup(
+            MTLSize {
+                width: samples.len(),
+                ..one
+            },
+            one,
+        );
         encoder.endEncoding();
         command_buffer.commit();
         command_buffer.waitUntilCompleted();
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE SAMPLES WILL HAPPEN
-        let shown: &[[f32; 4]] =
+        let moves: &[[f32; 4]] =
             unsafe { std::slice::from_raw_parts(buffer.contents().as_ptr().cast(), samples.len()) };
-        for (sample, gpu) in samples.iter().zip(shown) {
-            let cpu: [f32; 2] = get_boundary_shimmer([sample[0], sample[1]], sample[2], sample[3]);
-            for i in 0..2 {
-                assert!(
-                    (gpu[i] - cpu[i]).abs() < SHADER_TOLERANCE_RAD,
-                    "{sample:?}: shader {gpu:?}, CPU {cpu:?}"
-                );
-            }
+        let distance = |a: &[f32; 4], b: &[f32; 4]| (a[0] - b[0]).hypot(a[1] - b[1]);
+        let mut largest_px: f32 = 0.0;
+        let mut later_sum_px: f32 = 0.0;
+        for group in moves.chunks(6) {
+            let [
+                here,
+                right,
+                next_frame,
+                second_later,
+                before_wrap,
+                after_wrap,
+            ] = [0, 1, 2, 3, 4, 5].map(|k| &group[k]);
+            assert!(
+                here[0].abs() <= HAZE_PX && here[1].abs() <= HAZE_PX,
+                "{here:?}"
+            );
+            largest_px = largest_px.max(here[0].abs());
+            assert!(distance(here, right) < 0.5, "{here:?} {right:?}");
+            assert!(distance(here, next_frame) < 1.5, "{here:?} {next_frame:?}");
+            later_sum_px += distance(here, second_later);
+            assert!(
+                distance(before_wrap, after_wrap) < 0.2,
+                "{before_wrap:?} {after_wrap:?}"
+            );
         }
+        assert!(largest_px > 0.4 * HAZE_PX, "{largest_px}");
+        assert!(later_sum_px / 400.0 > 0.2 * HAZE_PX, "{later_sum_px}");
     }
 }
