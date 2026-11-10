@@ -143,7 +143,10 @@ mod tests {
         let mut pages: SnapshotPages<u32> = SnapshotPages::New();
         pages.add_page(0, 2, vec![1, 2], |&id| id);
         pages.add_page(1, 2, vec![3, 4], |&id| id);
-        assert_eq!(get_ids(&pages.add_page(0, 2, vec![1, 3], |&id| id)), [1, 3, 4]);
+        assert_eq!(
+            get_ids(&pages.add_page(0, 2, vec![1, 3], |&id| id)),
+            [1, 3, 4]
+        );
     }
 
     #[test]

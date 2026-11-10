@@ -2198,6 +2198,31 @@ users will want to see where on the map they are pretty often". This replaces D8
   The user (2026-11-09): "you may lower resolution outside a circle around the crosshairs if that helps"; the lead
   chose E from #469's sheets.
 
+### D118. 12 players a level server, snapshots in pages, W-155 (play against bots)
+
+- **Choice:** every level server (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest) takes 12
+  players, `warped_shared::level_net::MAX_PLAYER_COUNT` (was 8 in each `net.rs`): a 5v5 and a spare player for each
+  team. The snapshot goes out in pages of 6 players (each page: kind, page index, page count, player count, the
+  players, the game, their health bytes), at most 1129 of the 1200 bytes a page may take
+  (`MAX_SNAPSHOT_DATAGRAM_BYTES`); a window keeps the latest copy of each page (`level_net::SnapshotPages`).
+  `PROTOCOL_VERSION` is 2.
+- **Alternatives:** one snapshot of 2243 bytes for 12 players (it was already 1499 for 8, over a 1500-byte
+  Ethernet MTU, so IP split it); 16 players (3 pages); frames as f32 (122 bytes a player, still 1475 for 12).
+- **Rationale:** the user (W-155): "playing with multiple allied and enemy bots so that you can play 5v5 or smth
+  like that". Pages under 1200 bytes never fragment, so losing one fragment no longer loses the whole snapshot; a
+  lost page leaves its players one snapshot (1/60 s) behind.
+- **Compatibility:** a window or server from before this change can't join one after it, and says so: the join
+  carries `PROTOCOL_VERSION`, and the server refuses another ("the server ... runs game version 2, and this game is
+  version 1"). Rebuild every window and server from one commit. Saved settings and maps are unchanged, except Dark
+  Forest's map (two more spawns a team).
+- **Limits raised with it:** the voxel levels' marker materials (2 a player, 24), Dark Forest's lens (24 thrown
+  mouths, 40 in all, with the map's 10), the house demo's mouths (32) and boxes (112) and its spawn rings (3 of 8),
+  the app's and `play_with_bots.sh`'s bots (5 allies, 6 enemies). Dark Forest has 6 spawns a team (a back row of
+  two, seeded and mirrored like its props), and an online player respawns on the first team spawn no other player
+  stands on, starting from one their id picks; offline play keeps the farthest spawn from the robots.
+- **Revisit if:** a level needs more than 12 players, or a player's record grows past 196 bytes (from 185; pages
+  would then hold 5).
+
 ## Workload
 
 ### D7. Eight fixed views
