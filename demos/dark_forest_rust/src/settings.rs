@@ -1,14 +1,16 @@
 //! `settings` is the game server's settings that `net.rs` sends to players in its welcome: how
 //! long a console takes to switch off, how far it reaches, how long a player waits to respawn,
 //! both guns (with the rifle hits that eliminate a player), aiming, movement, sprint energy, how a
-//! hit slows, the flashlight and thrown wormholes; and the head bob, a player setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
+//! hit slows, the flashlight, thrown wormholes and the warps' pull on walkers (`gravity`, W-144,
+//! the shared built-in values when the server leaves it out); and the head bob, a player setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
 //! settings, under the same names and with the same values (W-126).
 //!
 //! Example: `let settings: ServerSettings = ServerSettings::Builtin();`
 //!
 //! Interface: `ServerSettings`, `ConsoleSettings`, `RespawnSettings`, `WormholeSettings`,
 //! `SniperSettings`, `RifleSettings`, `BeamSpeckleSettings`, `AimSettings`, `MovementSettings`,
-//! `SprintEnergySettings`, `WhenHitSettings`, `FlashlightSettings`, `HeadBobSettings`, `HEAD_BOB`,
+//! `SprintEnergySettings`, `WhenHitSettings`, `FlashlightSettings`, `GravitySettings`,
+//! `HeadBobSettings`, `HEAD_BOB`,
 //! `HitEffectSettings`, `HIT_EFFECTS`; in tests, `read_lunar_setting`. Every section but
 //! `WormholeSettings` is the shared `warped_shared::play_settings` one (W-126, same play in every
 //! level).
@@ -17,9 +19,9 @@ use std::error::Error;
 
 use serde::{Deserialize, Serialize};
 pub use warped_shared::play_settings::{
-    AimSettings, BeamSpeckleSettings, ConsoleSettings, FlashlightSettings, HeadBobSettings,
-    HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
-    SprintEnergySettings, WhenHitSettings,
+    AimSettings, BeamSpeckleSettings, ConsoleSettings, FlashlightSettings, GravitySettings,
+    HeadBobSettings, HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings,
+    SniperSettings, SprintEnergySettings, WhenHitSettings,
 };
 
 /// `WormholeSettings` is how players throw their wormhole mouths (`Q`, `thrown_wormholes.rs`) and
@@ -79,6 +81,8 @@ pub struct ServerSettings {
     pub sprint_energy: SprintEnergySettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
+    #[serde(default)]
+    pub gravity: GravitySettings,
 }
 
 impl ServerSettings {
@@ -165,15 +169,19 @@ impl ServerSettings {
                 range_m: 25.0,
                 brightness_frac: 2.0,
             },
+            gravity: GravitySettings::default(),
         }
     }
 
-    /// `FromJson` reads settings sent by a game server (`to_json`).
+    /// `FromJson` reads settings sent by a game server (`to_json`), and checks `gravity`'s
+    /// ranges (`GravitySettings::check`).
     ///
     /// Example: `let settings = ServerSettings::FromJson(&bytes)?;`
     #[allow(non_snake_case)]
     pub fn FromJson(bytes: &[u8]) -> Result<ServerSettings, Box<dyn Error>> {
-        Ok(serde_json::from_slice(bytes)?)
+        let settings: ServerSettings = serde_json::from_slice(bytes)?;
+        settings.gravity.check()?;
+        Ok(settings)
     }
 
     /// `to_json` gives the settings as compact JSON, to send to players.

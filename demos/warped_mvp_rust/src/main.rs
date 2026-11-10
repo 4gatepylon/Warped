@@ -37,10 +37,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Parser;
-use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
-use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice, MTLPixelFormat};
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
@@ -49,6 +46,7 @@ use warped_shared::match_protocol::{
     LevelEntry, MATCH_DISCOVERY_PORT, MATCH_PORT, MatchView, Phase,
 };
 use warped_shared::match_state::{MatchState, Team};
+use warped_shared::metal_window::{MetalWindow, WindowOptions};
 use warped_shared::page::Shape;
 use warped_shared::player_settings::{PerPlayerSettings, get_saved_player_settings_path};
 
@@ -186,32 +184,16 @@ fn get_menu_input(event: &Event, is_rebinding: bool) -> Option<MenuInput> {
 ///
 /// Example: `run_window(&arguments, app)?;`
 fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
-    let sdl: sdl3::Sdl = sdl3::init()?;
-    let video: sdl3::VideoSubsystem = sdl.video()?;
-    let mut builder: sdl3::video::WindowBuilder =
-        video.window(WINDOW_TITLE, arguments.width_px, arguments.height_px);
-    builder.high_pixel_density().resizable().position_centered();
-    let flags: u32 = builder.window_flags() | sdl3::sys::video::SDL_WINDOW_METAL.0 as u32;
-    let window: sdl3::video::Window = builder.set_window_flags(flags).build()?;
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
-    let view: sdl3::sys::metal::SDL_MetalView =
-        unsafe { sdl3::sys::metal::SDL_Metal_CreateView(window.raw()) };
-    if view.is_null() {
-        return Err(format!("SDL: couldn't make a Metal view: {}", sdl3::get_error()).into());
-    }
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A LAYER POINTER THAT ISN'T A CAMetalLayer WILL HAPPEN
-    let layer: &CAMetalLayer =
-        unsafe { &*sdl3::sys::metal::SDL_Metal_GetLayer(view).cast::<CAMetalLayer>() };
-    let device: Retained<ProtocolObject<dyn MTLDevice>> =
-        MTLCreateSystemDefaultDevice().ok_or("Metal: this Mac has no GPU Metal can use")?;
-    layer.setDevice(Some(&device));
-    layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
-    layer.setFramebufferOnly(false);
-    let mut painter: Painter = Painter::New(device)?;
-    let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
+    let mut window: MetalWindow = MetalWindow::Open(
+        WINDOW_TITLE,
+        (arguments.width_px, arguments.height_px),
+        WindowOptions::default(),
+    )?;
+    let mut painter: Painter = Painter::New(window.get_device())?;
     let mut shown: Option<(Vec<Shape>, (u32, u32))> = None;
     while !app.should_quit() {
-        for event in event_pump.poll_iter() {
+        let events: Vec<Event> = window.get_event_pump_mut().poll_iter().collect();
+        for event in events {
             match event {
                 Event::Quit { .. } => return Ok(()),
                 Event::KeyDown {
@@ -222,6 +204,15 @@ fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
                     scancode: Some(Scancode::Tab),
                     ..
                 } => app.set_map_held(false),
+                Event::MouseButtonDown {
+                    mouse_btn: sdl3::mouse::MouseButton::Left,
+                    x,
+                    y,
+                    ..
+                } => {
+                    let (width, height) = window.get_window().size();
+                    app.click([x, y], [width as f32, height as f32]);
+                }
                 _ => {}
             }
             if let Some(input) = get_menu_input(&event, app.is_rebinding()) {
@@ -231,15 +222,17 @@ fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
         app.update();
         let (shapes, page_size, pictures): (Vec<Shape>, [f32; 2], Vec<Option<Picture>>) =
             app.get_page();
-        let size_px: (u32, u32) = window.size_in_pixels();
+        let size_px: (u32, u32) = window.get_window().size_in_pixels();
         if shown.as_ref() != Some(&(shapes.clone(), size_px)) {
+            let layer: &CAMetalLayer = window.get_layer();
             layer.setDrawableSize(CGSize {
                 width: f64::from(size_px.0),
                 height: f64::from(size_px.1),
             });
             let pixels: Vec<u8> =
                 render_page(size_px, page_size, &shapes, &pictures, PixelOrder::Bgra)?;
-            if painter.paint(layer, &pixels, (size_px.0 as usize, size_px.1 as usize))? {
+            let size: (usize, usize) = (size_px.0 as usize, size_px.1 as usize);
+            if painter.paint(layer, window.get_device(), &pixels, size)? {
                 shown = Some((shapes, size_px));
             }
         }
