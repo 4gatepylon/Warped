@@ -8,7 +8,7 @@
 //! Interface: `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `MatchTimes`, `MatchClient`
 //! (`Connect`, `poll`, `send_play`, `send_settings`), `parse_hello`, `parse_play`, `make_play`, `stop_child`, `is_sitting_out`, `is_level_restart_due`,
 //! `describe_outcome`, `MatchBeacon`, `BeaconPhase`, `MatchAnnouncer`, `MatchListener`,
-//! `FoundMatch`, `update_found_matches`, `get_bind_ip`, `MATCH_PORT`, `MATCH_DISCOVERY_PORT`,
+//! `FoundMatch`, `update_found_matches`, `MATCH_PORT`, `MATCH_DISCOVERY_PORT`,
 //! `CLIENT_TIMEOUT_S`, `MAX_DATAGRAM_BYTES`, `SELF_PROGRAM`.
 //!
 //! Example: `let mut client = MatchClient::Connect(server, Some(Team::Blue))?; client.poll()?;`
@@ -21,7 +21,8 @@
 //!   `game_settings.rs`, answered with `settings <json>` instead of the view.
 //! - A beacon is `MATCH_BEACON_MAGIC`, a version byte, the match server's port and a summary of
 //!   its match, broadcast every `MATCH_BEACON_PERIOD_S` to UDP `MATCH_DISCOVERY_PORT`; a reader
-//!   ignores bytes after the fields it knows, so a later version can append fields.
+//!   ignores bytes after the fields it knows, so a later version can append fields. Loopback-only
+//!   programs (`network_scope`) send it to 127.0.0.1 instead of broadcasting it.
 
 use std::error::Error;
 use std::fs;
@@ -35,6 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::game_settings::{GameSettings, SettingsMessage, make_settings_message};
 use crate::match_state::{MatchState, Outcome, Team};
+use crate::network_scope;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -281,7 +283,7 @@ impl MatchClient {
     /// Example: `let client = MatchClient::Connect(server, Some(Team::Blue))?;`
     #[allow(non_snake_case)]
     pub fn Connect(server: SocketAddr, team: Option<Team>) -> Result<MatchClient> {
-        let socket: UdpSocket = UdpSocket::bind((get_bind_ip(server), 0))?;
+        let socket: UdpSocket = network_scope::bind_socket_toward(server)?;
         socket.set_nonblocking(true)?;
         Ok(MatchClient {
             socket,
@@ -509,8 +511,7 @@ impl MatchAnnouncer {
     /// Example: `let mut announcer = MatchAnnouncer::New("127.0.0.1:48301".parse()?)?;`
     #[allow(non_snake_case)]
     pub fn New(target: SocketAddr) -> Result<MatchAnnouncer> {
-        let socket: UdpSocket = UdpSocket::bind((get_bind_ip(target), 0))?;
-        socket.set_broadcast(target.ip() == Ipv4Addr::BROADCAST)?;
+        let socket: UdpSocket = network_scope::bind_socket_toward(target)?;
         Ok(MatchAnnouncer {
             socket,
             target,
@@ -520,13 +521,13 @@ impl MatchAnnouncer {
     }
 
     /// `OnNetwork` makes an announcer broadcasting to `MATCH_DISCOVERY_PORT` on the local
-    /// network.
+    /// network, or sending to it on 127.0.0.1 when `is_loopback_only`.
     ///
-    /// Example: `let mut announcer = MatchAnnouncer::OnNetwork()?;`
+    /// Example: `let mut announcer = MatchAnnouncer::OnNetwork(false)?;`
     #[allow(non_snake_case)]
-    pub fn OnNetwork() -> Result<MatchAnnouncer> {
+    pub fn OnNetwork(is_loopback_only: bool) -> Result<MatchAnnouncer> {
         MatchAnnouncer::New(SocketAddr::from((
-            Ipv4Addr::BROADCAST,
+            network_scope::get_beacon_ip(is_loopback_only),
             MATCH_DISCOVERY_PORT,
         )))
     }
@@ -561,18 +562,6 @@ pub struct FoundMatch {
     pub server: SocketAddr,
     pub beacon: MatchBeacon,
     pub heard_at: Instant,
-}
-
-/// `get_bind_ip` gives the address a socket talking to `peer` binds to: the loopback interface
-/// for a peer on this Mac (so tests and local games never open a port to the network), else every
-/// interface.
-///
-/// Example: `let socket = UdpSocket::bind((get_bind_ip(server), 0))?;`
-pub fn get_bind_ip(peer: SocketAddr) -> Ipv4Addr {
-    match peer.ip().is_loopback() {
-        true => Ipv4Addr::LOCALHOST,
-        false => Ipv4Addr::UNSPECIFIED,
-    }
 }
 
 /// `update_found_matches` adds the beacon `datagram` from its sender heard at `now` to `found`
@@ -674,7 +663,6 @@ mod tests {
     //! | Beacon from a view | waiting, intermission, playing, round over, over; a count above 255 | `beacons_summarise_the_view` |
     //! | Found list | a new server, the same server again (replaced), another server (sorted), a non-beacon, a server gone quiet | `found_matches_update_and_expire` |
     //! | Over loopback | a beacon sent to the listener's port is found at the sender's address (both on 127.0.0.1) | `a_listener_hears_an_announcer` |
-    //! | Bind address | a peer on this Mac (loopback only), on the network (every interface) | `sockets_to_this_mac_bind_loopback_only` |
 
     use super::*;
     use std::path::PathBuf;
@@ -801,18 +789,6 @@ mod tests {
         update_found_matches(&mut found, None, quiet);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].server.port(), 48_303);
-    }
-
-    #[test]
-    fn sockets_to_this_mac_bind_loopback_only() {
-        assert_eq!(
-            get_bind_ip("127.0.0.1:48300".parse().unwrap()),
-            Ipv4Addr::LOCALHOST
-        );
-        assert_eq!(
-            get_bind_ip("10.0.0.2:48300".parse().unwrap()),
-            Ipv4Addr::UNSPECIFIED
-        );
     }
 
     #[test]

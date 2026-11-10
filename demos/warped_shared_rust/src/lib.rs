@@ -27,6 +27,8 @@
 //! - `match_state`, `match_protocol`, `match_menu`: the match's rules, what its server and clients
 //!   share (levels file, view, client, network beacon) and its progression page.
 //! - `game_settings`: the game master's settings, overrides of each level's server settings.
+//! - `network_scope`: whether sockets reach the local network or stay on loopback
+//!   (`WARPED_LOOPBACK_ONLY=1`, for tests).
 //! - `page`: a menu page's shapes in the debug font, and drawing them with SDL.
 //! - `metal_window`: the one window a program draws in with Metal (SDL3 window, `CAMetalLayer`,
 //!   device, event pump), lent to a level as an `app::LevelWindow`.
@@ -63,6 +65,7 @@ pub mod mesh;
 #[cfg(target_os = "macos")]
 pub mod metal_window;
 pub mod movement;
+pub mod network_scope;
 #[cfg(target_os = "macos")]
 pub mod overlay;
 pub mod page;

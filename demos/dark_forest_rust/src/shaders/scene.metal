@@ -408,7 +408,17 @@ vertex ParticleVertexOut particle_vertex(uint vertex_id [[vertex_id]],
 }
 
 /**
- * @brief `particle_fragment` shades sparks, smoke, muzzle flashes and tracers procedurally.
+ * @brief A glowing ball (particle kind 4, a thrown wormhole's marker) is solid out to between `GLOW_BALL_EDGE.x` and
+ * `.y` of the sprite's half width, in a halo falling off as exp(−`GLOW_HALO_FALLOFF` r²) at `GLOW_HALO_FRAC` of its
+ * brightness that fades to nothing between `GLOW_FADE.x` and `.y`, so the sprite's square edge never shows.
+ */
+constant float2 GLOW_BALL_EDGE = float2(0.42, 0.5);
+constant float GLOW_HALO_FALLOFF = 5.0;
+constant float GLOW_HALO_FRAC = 0.5;
+constant float2 GLOW_FADE = float2(0.6, 1.0);
+
+/**
+ * @brief `particle_fragment` shades sparks, smoke, muzzle flashes, tracers and glowing balls procedurally.
  * Additive kinds return alpha 0 so that one premultiplied blend state serves every kind.
  * @par Example
  * @code
@@ -436,6 +446,11 @@ fragment float4 particle_fragment(ParticleVertexOut in [[stage_in]],
         float core = exp(-radius * radius * 9.0);
         float intensity = saturate(core + star) * (1.0 - smoothstep(0.85, 1.0, radius));
         return float4(color.rgb * intensity, 0.0);
+    }
+    if (in.kind == 4) {
+        float ball = 1.0 - smoothstep(GLOW_BALL_EDGE.x, GLOW_BALL_EDGE.y, radius);
+        float halo = exp(-radius * radius * GLOW_HALO_FALLOFF) * (1.0 - smoothstep(GLOW_FADE.x, GLOW_FADE.y, radius));
+        return float4(color.rgb * max(ball, halo * GLOW_HALO_FRAC), 0.0);
     }
     float glow = exp(-dot(in.local, in.local) * (in.kind == 3 ? 6.0 : 4.0));
     if (in.kind == 3) {

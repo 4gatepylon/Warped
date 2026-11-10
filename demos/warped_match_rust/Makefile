@@ -17,7 +17,7 @@
 #     make play-alone TEAM=<blue|red>: play a match without a second person: the match server, a bot that sits out every round, and your window (tools/play_with_bots.sh).
 #     make play-bots ALLIES=<0-4> ENEMIES=<0-5> BOT_OBJECTIVE=<consoles|fight> TEAM=<blue|red>: the same with bots on your team and the other (at most 7).
 #     make play-all-levels MATCH_PORT=<n> LEVEL_PORT=<n> LABEL=<label>: play a bot match steered through all five levels and check it (.artifacts/play_all_levels/).
-#     make e2e-match MATCH_PORT=<n> LEVEL_PORT=<n>: play a whole match of two bots, consoles off in 1 s (.artifacts/e2e_match/).
+#     make e2e-match MATCH_PORT=<n> LEVEL_PORT=<n>: play a whole match of two bots, consoles off in 1 s, on 127.0.0.1 only (.artifacts/e2e_match/).
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
@@ -206,6 +206,7 @@ join-match:
 bot-match:
 	cargo run --release -- --match $(SERVER_MATCH) --bot --team $(or $(TEAM),red)
 
+e2e-match: export WARPED_LOOPBACK_ONLY := 1
 e2e-match: levels
 	cargo build --release
 	mkdir -p $(E2E_MATCH_RUN)

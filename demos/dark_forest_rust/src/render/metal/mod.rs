@@ -8,7 +8,7 @@
 //! physical picture, and a resolve pass shows it in the drawable before the HUD.
 //!
 //! Example:
-//!     let mut renderer: MetalRenderer = MetalRenderer::new(layer);
+//!     let mut renderer: MetalRenderer = MetalRenderer::new(layer, device);
 //!     let timing: FrameTiming = renderer.render_frame(&frame, &settings);
 
 mod environment;
@@ -31,10 +31,10 @@ use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder,
-    MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLCullMode, MTLDevice, MTLDrawable,
-    MTLIndexType, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder,
-    MTLRenderPassDescriptor, MTLResourceOptions, MTLScissorRect, MTLStoreAction, MTLTexture,
-    MTLTextureType, MTLTextureUsage, MTLViewport, MTLWinding,
+    MTLCommandQueue, MTLCullMode, MTLDevice, MTLDrawable, MTLIndexType, MTLLoadAction,
+    MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
+    MTLResourceOptions, MTLScissorRect, MTLStoreAction, MTLTexture, MTLTextureType,
+    MTLTextureUsage, MTLViewport, MTLWinding,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
@@ -305,11 +305,12 @@ enum ScenePass {
 /// `MetalRenderer` renders frames into a `CAMetalLayer` with Metal.
 ///
 /// Example:
-///     let mut renderer: MetalRenderer = MetalRenderer::new(layer);
+///     let mut renderer: MetalRenderer = MetalRenderer::new(layer, device);
 pub struct MetalRenderer {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     layer: Retained<CAMetalLayer>,
+    layer_as_found: LayerState,
     pipelines: Pipelines,
     textures: Vec<Texture>,
     meshes: Vec<GpuMesh>,
@@ -510,13 +511,16 @@ fn gpu_particles(particles: &[Particle]) -> Vec<GpuParticle> {
 }
 
 impl MetalRenderer {
-    /// `new` sets up Metal on a layer and compiles every pipeline.
+    /// `new` sets up Metal with `device` on `layer` and compiles every pipeline; dropping the
+    /// renderer gives the layer back as it found it.
     ///
     /// Example:
-    ///     let renderer: MetalRenderer = MetalRenderer::new(layer);
-    pub fn new(layer: Retained<CAMetalLayer>) -> MetalRenderer {
-        let device: Retained<ProtocolObject<dyn MTLDevice>> =
-            MTLCreateSystemDefaultDevice().expect("this Mac has no Metal device");
+    ///     let renderer: MetalRenderer = MetalRenderer::new(layer, device);
+    pub fn new(
+        layer: Retained<CAMetalLayer>,
+        device: Retained<ProtocolObject<dyn MTLDevice>>,
+    ) -> MetalRenderer {
+        let layer_as_found: LayerState = LayerState::Read(&layer);
         let queue: Retained<ProtocolObject<dyn MTLCommandQueue>> = device
             .newCommandQueue()
             .expect("command queue creation failed");
@@ -570,6 +574,7 @@ impl MetalRenderer {
             device,
             queue,
             layer,
+            layer_as_found,
             pipelines,
             textures: Vec::new(),
             meshes: Vec::new(),
@@ -2397,6 +2402,47 @@ impl Drop for MetalRenderer {
         for (_, command_buffer) in self.in_flight.drain(..) {
             command_buffer.waitUntilCompleted();
         }
+        self.layer_as_found.write(&self.layer);
+    }
+}
+
+/// `LayerState` is what the renderer changes on its `CAMetalLayer`, read before it does, so that a
+/// layer lent by the one-window app goes back to the app as it was.
+struct LayerState {
+    device: Option<Retained<ProtocolObject<dyn MTLDevice>>>,
+    pixel_format: MTLPixelFormat,
+    is_framebuffer_only: bool,
+    maximum_drawable_count: usize,
+    is_display_sync_enabled: bool,
+    drawable_size: CGSize,
+}
+
+impl LayerState {
+    /// `Read` reads `layer`'s state.
+    ///
+    /// Example: `let as_found: LayerState = LayerState::Read(&layer);`
+    #[allow(non_snake_case)]
+    fn Read(layer: &CAMetalLayer) -> LayerState {
+        LayerState {
+            device: layer.device(),
+            pixel_format: layer.pixelFormat(),
+            is_framebuffer_only: layer.framebufferOnly(),
+            maximum_drawable_count: layer.maximumDrawableCount(),
+            is_display_sync_enabled: layer.displaySyncEnabled(),
+            drawable_size: layer.drawableSize(),
+        }
+    }
+
+    /// `write` sets `layer` back to this state.
+    ///
+    /// Example: `as_found.write(&layer);`
+    fn write(&self, layer: &CAMetalLayer) {
+        layer.setDevice(self.device.as_deref());
+        layer.setPixelFormat(self.pixel_format);
+        layer.setFramebufferOnly(self.is_framebuffer_only);
+        layer.setMaximumDrawableCount(self.maximum_drawable_count);
+        layer.setDisplaySyncEnabled(self.is_display_sync_enabled);
+        layer.setDrawableSize(self.drawable_size);
     }
 }
 

@@ -14,7 +14,7 @@
 //!   (`game_menu::get_level_shapes`); it follows the match exactly as a level will, through the
 //!   same `Navigator` moves.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -24,6 +24,7 @@ use warped_shared::match_protocol::{
     LevelEntry, MATCH_PORT, MatchClient, MatchListener, MatchView,
 };
 use warped_shared::match_state::Team;
+use warped_shared::network_scope;
 use warped_shared::page::{Shape, get_page_point};
 use warped_shared::player_settings::PerPlayerSettings;
 
@@ -178,10 +179,7 @@ impl App {
             manifest_path: manifest_path.to_path_buf(),
             pictures,
             listener: MatchListener::Bind(
-                match ports.is_loopback_only {
-                    true => Ipv4Addr::LOCALHOST,
-                    false => Ipv4Addr::UNSPECIFIED,
-                },
+                network_scope::get_listen_ip(ports.is_loopback_only),
                 ports.discovery_port,
             )
             .map_err(|error| error.to_string()),
@@ -282,6 +280,7 @@ impl App {
             kind,
             team.unwrap_or(Team::Blue),
             (self.ports.match_port, self.ports.level_port),
+            self.ports.is_loopback_only,
             &folder,
         )
         .map_err(|error| error.to_string())?;
