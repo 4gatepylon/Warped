@@ -169,6 +169,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-207 Better window text UI.** The user, 2026-11-10: "Better window text UI (things spaced apart more widely, color on hover, easier to understand hitboxes, better font, ideally nice background animation etc..)". Related: W-197 (menus that fit the game's look) and W-151 (menu layout and help tooltip).
 - [ ] **W-208 Hold an arrow or use the scroll wheel to scroll through settings.** The user, 2026-11-10: "be able to click and hold down arrow to scroll through settings (also scroll wheel)".
 - [ ] **W-210 Settings steps wrap around or stop at zero.** The user, 2026-11-10, on the game settings page (W-209, game settings checked when saved, with the reason): "add to wishlist wraparound for 0-1 range settings and cannot go under zero for positive value settings".
+- [ ] **W-212 Labels on world objects while playing.** The user, 2026-11-10: "the creation of an option that lets you toggle on in-map labeling (i.e. the ability to see the labels when you are playing to test this stuff above)". The labels are the unique names each level's world gives its objects (`game_design/worlds/`), so the names can be checked in play.
 
 ## Pending user review
 
