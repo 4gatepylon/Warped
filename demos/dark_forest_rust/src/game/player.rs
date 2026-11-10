@@ -576,7 +576,7 @@ mod tests {
                 movement.walk_m_per_s,
                 player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M,
             );
-            player.update(&input, &movement, &open_ground(), &[], dt_s);
+            player.update(&input, &movement, &open_ground(), &[], None, dt_s);
         }
         player.feet_m
     }
