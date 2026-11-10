@@ -52,7 +52,7 @@ where it came up, give the meanings you see, and say which one you would pick. N
 | Say | Meaning | Not |
 | --- | --- | --- |
 | **the app** | The official game as one program with one window (`warped`, or `Warped.app` on a Mac). | |
-| **window** | An operating-system window. The official game has exactly one; older demos opened one per level and one for the match. | |
+| **window** | An operating-system window. The official game has exactly one; older demos opened one per level and one for the match. The user also calls a menu or the game/match a window, and each of those is its own SWG. *Proposed*: say *OS window* when the operating-system one is meant. | |
 | **game server** | The headless program that hosts games and matches, and that players join. In the official game it is the program of `demos/warped_match_rust/` (its folder keeps the name "match"). *Proposed.* | "match server" |
 | **level server** | The headless program a game server starts to run one round's level: its players, shots and consoles. | |
 | **starter game** | The old 2D square game with its own `clients/starter/`, `game_server/` and `management_server/`. Historical, to be replaced soon. | |
@@ -63,45 +63,51 @@ where it came up, give the meanings you see, and say which one you would pick. N
 
 ## Screens and windows
 
-A *screen* is what the app shows in its window at one moment. A *page* is one tab of the menu.
+A *screen* is what the app shows in its window at one moment. A *page* is one tab of the menu. Everything the player
+sees that is not part of the 3D world forms the scene window graph.
 
 | Say | Meaning |
 | --- | --- |
+| **scene window graph (SWG)** | Pronounced "swig". A conceptual model of everything the player sees that is not part of the 3D world, as a tree like a web page's DOM: [`SCENE_WINDOW_GRAPH.md`](SCENE_WINDOW_GRAPH.md). Only its leaves are rendered, and each leaf is a render or a UIE. A menu and the game/match are different SWGs. During play the SWG has the scene render and the HUD, and the HUD has the minimap render and the bars. |
 | **main menu** | The app's first screen: the games on the network to join, hosting, playing alone or against bots, what to play, player settings, credits, quit. |
 | **game menu** | The app's menu around a game or match: its status, your team, rejoining, the game master's choice, game settings, player settings, leaving to the main menu. |
 | **lobby** | The team screen of a game: it says CONNECTING, then CONNECTED with each team's head count; `1` joins blue and `2` joins red. A player can't shoot from it. |
 | **loading screen** | The black screen, titled LOADING, with a bar, before the first frame. |
-| **level view** | What the level looks like from the player's eye, or from behind and above in third person: the ground, structures, robots, lasers, mouths and the sky. |
+| **render** | As a noun: a leaf of an SWG where the SWG stops and a "pure" graphical thing starts. As a verb: to show a node on the screen, nothing more. |
+| **scene render** | The render for the scene of the game: the rasterized representation of the match at the time of play, as you are playing it. |
+| **minimap render** | The render of the minimap. |
+| **UIE** | A UI element, pronounced "ooh-wee": a leaf of an SWG that is a piece of the interface itself, such as a bar. |
 | **menu** | What `Esc` opens inside a level, with the pages SCORES, SETTINGS, MAP, CREDITS and QUIT, and MATCH first in the app. The player stands still while it is open, and the game goes on. |
-| **MAP page** | The whole level from above, with a legend. It is a page of the menu and also shows over the game while `Tab` is held. |
+| **main map** | The picture of the whole level from above, as opposed to the minimap. It is a hidden part of the game/match SWG, shown while `Tab` is held and on the menu's MAP page. |
+| **MAP page** | The page of the menu that shows the main map, with a legend. |
 | **MATCH page** | The match's status: the level and round being played, who attacks, the scores. |
 | **game settings** | The game master's settings of a game, in sections, from the game menu. The file stays `server_settings.yaml`. |
 | **player settings** | A player's own keys and view (the SETTINGS page; the file `player_settings.yaml`). |
-| **banner** | A message drawn over the level view: YOU DIED with a countdown, `<TEAM> TEAM WINS`, and the connection messages (NO ANSWER FROM THE SERVER, SERVER RUNS ANOTHER VERSION, THE GAME IS FULL). |
+| **banner** | A message drawn over the scene render: YOU DIED with a countdown, `<TEAM> TEAM WINS`, and the connection messages (NO ANSWER FROM THE SERVER, SERVER RUNS ANOTHER VERSION, THE GAME IS FULL). |
 | **window title** | The text in the window's title bar: the frame rate, the render time, the GPU's time and the render scale. |
 | **tooltip** | The help the menu's `?` shows while the mouse is over it. |
 
-Retired: "title screen" for the main menu, "team screen" for the lobby, "map page" for the MAP page, "match
+Retired: "level view" for the scene render, "title screen" for the main menu, "team screen" for the lobby, "map page" for the MAP page, "match
 progression page" for the MATCH page.
 
 ## The HUD
 
-**HUD** (heads-up display): the information a player sees while walking normally, drawn on top of the level view:
+**HUD** (heads-up display): the information a player sees while walking normally, drawn on top of the scene render:
 the health, energy and ammo bars in the bottom left, and the minimap. The map itself is not the HUD. *Confirmed by
 the player, 2026-11-10.*
 
 | Part | What it is |
 | --- | --- |
 | **health bar**, **ammo bar**, **energy bar** | The bars in the bottom left: health, the sniper rifle's reload or the rifle's heat, and sprint energy. |
-| **minimap** | A disk in a corner (top right by default) showing the ground within 60 m, with players as dots and shots as lines. |
+| **minimap** | The minimap render: a disk in a corner (top right by default) showing the ground within 60 m, with players as dots and shots as lines. |
 | **crosshair**, **console bar**, **readouts** | The mark in the middle of the screen, where shots leave the eye toward; the bar below it that fills while the player holds `E` on a console; and text lines of numbers, such as speed, height, or how fast the player's time runs near a black hole. *Proposed* as HUD, because a player sees them while walking normally; the player hasn't named them. |
 | **pylon squares**, **own-team box** | At the top centre: one square per console of each team, an empty slot once it is turned off, and a box in the player's team's colour around their own team's squares. *Proposed* as HUD, for the same reason. |
 
 The HUD shows during normal play, while a player walks around a level. It does not show on the main menu, the game
 menu, the loading screen or the credits, which are not in a level.
 
-These are not the HUD, and each has its own name: the **MAP page** (the whole level from above, in the menu or while
-`Tab` is held), the **held weapon**, the **hit effect** (red and a blur from the screen's edges, with a shake),
+These are not the HUD, and each has its own name: the **main map** (the whole level from above, on the menu's MAP page or
+while `Tab` is held), the **held weapon**, the **hit effect** (red and a blur from the screen's edges, with a shake),
 **motion blur**, **head bob**, **banners**, the **menu** and its other pages, the **window title**, and everything
 inside the level (robots, lasers, mouths, pylons, consoles).
 
@@ -229,3 +235,5 @@ hole above the middle, a crater wall as its level edge, and bunkers, domes and a
    they are matches?
 8. **Pylon beam.** The wishlist calls a pylon's column of light a "beam", and DESIGN.md also says *beam* for a
    laser's drawn look and flicker. Is *pylon beam* the right name for the column of light?
+9. **The word window.** *Window* is the operating-system window here, and you also call a menu or the game/match a
+   window, each with its own SWG. Keep both meanings, and say *OS window* for the first? Proposed: yes.
