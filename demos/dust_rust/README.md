@@ -32,6 +32,7 @@ it); leave it unset to play across computers.
 | `--serve --port <p> [--map dust] --level-result-file <path>` | When a team has turned off all the other team's consoles, write `{"winner": "blue"}` or `{"winner": "red"}` to `<path>` once (`<path>.partial`, then renamed), and never start a new game. Also on `wormholes_server`. |
 | `--join <addr> --port <p> [--team blue\|red]` | Join that team at once instead of choosing in the lobby. |
 | `--join <addr> --port <p> --bot --exit-after-s <s> --team <t> --bot-objective consoles` | The bot walks to the other team's consoles and holds `E` on each once in reach (`console_bot.rs`; the server takes a hold only from within `consoles.reach_m`, aimed at it: `console_reach.rs`) until a team wins. |
+| `--bot --bot-hit-pictures` | The bot saves its view at each hit under `.artifacts/bot/<run_id>/`. Off by default, because drawing the pictures takes GPU and CPU time from the players on the same computer. |
 
 ## In the one-window app
 

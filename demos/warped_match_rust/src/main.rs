@@ -310,9 +310,13 @@ struct Arguments {
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route"])]
     serve: bool,
     /// With --join and --exit-after-s: play by itself without a window (walk, aim at the nearest
-    /// player and fire), to test a game; saves its view under .artifacts/bot/ at each hit.
+    /// player and fire), to test a game or to play against.
     #[arg(long)]
     bot: bool,
+    /// With --bot: save the bot's view under .artifacts/bot/ at each hit. Drawing the pictures
+    /// takes GPU and CPU time from the players on this computer.
+    #[arg(long, requires = "bot")]
+    bot_hit_pictures: bool,
     /// UDP port the server listens on (--host, --serve, and each round's level server with
     /// --serve-match), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
@@ -1586,8 +1590,9 @@ fn bench_voxel_views(
 }
 
 /// `run_bot` plays as a bot without a window for `--exit-after-s` seconds (see
-/// `multiplayer::run_bot`), saving its view at each hit under `.artifacts/bot/<run_id>/`, and
-/// prints how many players it hit and how often it was hit.
+/// `multiplayer::run_bot`), saving its view at each hit under `.artifacts/bot/<run_id>/` with
+/// `--bot-hit-pictures` (no renderer is made without it, so a bot leaves the GPU to the players),
+/// and prints how many players it hit and how often it was hit.
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments) -> Result<()> {
@@ -1604,18 +1609,25 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         .expect("validate_arguments checked --bot");
     let (hit_count, eliminated_count) = if map.structures.is_empty() {
         let world: World = World::FromMap(&map)?;
-        let mut renderer: Box<dyn Renderer> =
-            make_renderer(arguments.renderer, arguments.sampling)?;
+        let mut renderer: Option<Box<dyn Renderer>> = arguments
+            .bot_hit_pictures
+            .then(|| make_renderer(arguments.renderer, arguments.sampling))
+            .transpose()?;
         let mut saved_count: usize = 0;
         multiplayer::run_bot(&world, &mut client, duration_s, |data, id| {
+            let Some(renderer) = renderer.as_deref_mut() else {
+                return Ok(());
+            };
             saved_count += 1;
             let path: PathBuf = folder.join(format!("hit_{saved_count:03}_player_{id}.png"));
-            save_frame(&mut *renderer, FrameData::House(data), &path)
+            save_frame(renderer, FrameData::House(data), &path)
         })?
     } else {
         let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
-        let mut saver: PictureSaver<(VoxelFrame, u32)> =
-            start_hit_picture_saver(arguments.renderer, arguments.sampling, folder.clone());
+        let mut saver: Option<PictureSaver<(VoxelFrame, u32)>> =
+            arguments.bot_hit_pictures.then(|| {
+                start_hit_picture_saver(arguments.renderer, arguments.sampling, folder.clone())
+            });
         let counts: (u32, u32) = multiplayer::run_voxel_bot(
             &world,
             &mut client,
@@ -1624,13 +1636,19 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
             arguments.bot_objective.unwrap_or(BotObjective::Fight),
             &console_reach::find_console_places(&map)?,
             |frame, id| {
-                saver.submit((frame, id));
+                if let Some(saver) = &mut saver {
+                    saver.submit((frame, id));
+                }
                 Ok(())
             },
         )?;
-        let (_, dropped_count) = saver.finish()?;
-        if dropped_count > 0 {
-            println!("The renderer fell behind, so {dropped_count} hit pictures weren't saved.");
+        if let Some(saver) = saver {
+            let (_, dropped_count) = saver.finish()?;
+            if dropped_count > 0 {
+                println!(
+                    "The renderer fell behind, so {dropped_count} hit pictures weren't saved."
+                );
+            }
         }
         counts
     };
@@ -5416,12 +5434,24 @@ mod tests {
     //! | Depth in a mouth | at the throat (1), part way, outside (0) | `wormhole_shift_follows_depth_and_speed` |
     //! | Speed along the view | forward (blueshift), backward (redshift), still (none), past the cap (held at it) | `wormhole_shift_follows_depth_and_speed` |
     //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
+    //! | `--bot-hit-pictures` | a bot without it (off), a bot with it (on), without `--bot` (refused) | `bots_save_hit_pictures_only_when_asked` |
     //! | Gun in hand | laser (the bolt-action rifle), rifle (the revolver) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Window with `--team` | before loading (only asks the lobby), after loading (joins) | `windows_join_their_team_only_after_loading` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
+
+    #[test]
+    fn bots_save_hit_pictures_only_when_asked() {
+        let parse = |command_line: &str| -> Option<Arguments> {
+            Arguments::try_parse_from(command_line.split(' ')).ok()
+        };
+        assert!(!parse("x --bot").expect("a bot").bot_hit_pictures);
+        let with_pictures: Arguments = parse("x --bot --bot-hit-pictures").expect("a bot");
+        assert!(with_pictures.bot_hit_pictures);
+        assert!(parse("x --bot-hit-pictures").is_none());
+    }
 
     #[test]
     fn wormhole_shift_follows_depth_and_speed() {
