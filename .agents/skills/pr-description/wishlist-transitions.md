@@ -5,7 +5,8 @@ change in one line of the form below, so the user sees what moved by reading the
 diff. The statuses and the checklist's sections are defined in "The user's wishlist" in the `AGENTS.md` of
 the demo that owns the checklist (for example `demos/hyperbolic_wormholes_rust/AGENTS.md`). The rest of the
 commit rules are in the "Commits" section of [`SKILL.md`](SKILL.md). The history that goes below the line
-is in [`wishlist-history.md`](wishlist-history.md).
+is in [`wishlist-history.md`](wishlist-history.md), and the trailers that end the message are in
+[`commit-fields.md`](commit-fields.md).
 
 ## The line
 

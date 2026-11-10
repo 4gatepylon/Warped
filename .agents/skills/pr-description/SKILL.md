@@ -17,6 +17,8 @@ Files in this skill:
 - [`wishlist-history.md`](wishlist-history.md): the append-only history section below that line, and how to
   revert. Read it with the file above.
 - [`wishlist_history.py`](wishlist_history.py): the command that writes the history section.
+- [`commit-fields.md`](commit-fields.md): the subject and the trailers (kind, component, domain, area,
+  wishlist, read, verify) of every commit and PR, and their allowed values. Read it before any commit.
 
 > NOTE: If you modify this skill (at the user's request), keep every file in it under 400 lines. Split a longer
 > file by topic, for progressive disclosure, and have each file name the files to read for what it leaves out,
@@ -46,6 +48,14 @@ A PR's commits follow the "Commits" section below. That is critical for a PR wit
 ## Summary
 
 <1-3 sentences: what the PR changes and why.>
+
+## Categories
+
+- Kind: <kind>[, <kind>...]
+- Component: <component>[, <component>...]
+- Domain: <domain>[, <domain>...]
+- Area: <the demo or folder the PR mainly changes>
+- Wishlist: <None.> or <wishlist>/<id> (<short name>), one per item
 
 ## Changes
 
@@ -77,10 +87,14 @@ Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
 
 ### Filling it in
 
-- **Title**: short and specific, `<folder or area>: <what changes>` (e.g.
-  `physics: add curved-geodesic movement`). For a stack layer, no "1/2" numbering in the
-  title; the Stack section carries it.
+- **Title**: short and specific, `<kind>(<area>): <summary>` (e.g.
+  `feature(demos/hyperbolic_wormholes_rust): curved-geodesic movement`), the form of a commit
+  subject in `commit-fields.md`. For a stack layer, no "1/2" numbering in the title; the Stack
+  section carries it.
 - **Summary**: the why matters more than the what; the diff already shows the what.
+- **Categories**: the PR's own values for the fields of `commit-fields.md`, the main value first. They
+  cover all of the PR's commits, so each value of a commit's `Kind`, `Component` and `Domain` trailers
+  appears here.
 - **Changes**: concrete and complete, but no line-by-line narration of the diff.
 - **Decisions**: the choices you made without asking the user, each with a short rationale;
   otherwise `None.`.
@@ -134,6 +148,10 @@ Projects (classic) error (seen once with gh 2.55 on a Linux machine, 2026-10-30)
 
 ## Commits
 
+- **Every commit.** The subject is `<kind>(<area>): <summary>`, and a block of trailers at the end of the
+  message gives `Kind`, `Component`, `Domain`, `Area`, `Wishlist`, `Read` and `Verify`
+  ([`commit-fields.md`](commit-fields.md)). `git log` then shows what a commit changes, where, what
+  to read for it and how it was verified.
 - **Wishlist commits (critical).** A commit that changes a wishlist checklist (`USER_WISHLIST_CHECKLIST.md`)
   follows [`wishlist-transitions.md`](wishlist-transitions.md) exactly. Read that file before you commit. In
   short, such a commit:
