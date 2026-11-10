@@ -4,7 +4,8 @@
 //! heats); aiming's zoom; how much a hit weighs; and where the gun in hand is drawn (`make_wand`:
 //! its pose toward running, its dip and sway with each step, its jolt after a shot).
 //!
-//! Interface: `Gun`, `Weapons` (`New`, `switch_gun`, `is_firing`, `fire_sniper`, `tick`,
+//! Interface: `Gun`, `Weapons` (`New`, `switch_gun`, `note_moves`, `can_shoot`, `is_firing`,
+//! `fire_sniper`, `tick`,
 //! `update_aim`, `get_zoom`, `update_rifle`), `get_aim_zoom`, `take_hit_weight`, `make_wand`,
 //! `make_wand_camera_from_muzzle`, `get_sway`, `ease_frac`, `MUZZLE_M`.
 //!
@@ -12,12 +13,16 @@
 //!
 //! Must know:
 //! - Gotchas: `Weapons` only keeps time and state; the level traces each shot in its own space,
-//!   turns the view by a shot's recoil, and decides whether this player may shoot (`can_shoot`).
+//!   turns the view by a shot's recoil, and decides whether this player may shoot, adding its own
+//!   conditions to moving's (`can_shoot`).
 
 use glam::{DVec3, EulerRot, Mat3, Mat4, Vec3};
 
 use crate::overlay::OverlayWand;
-use crate::play_settings::{AimSettings, HeadBobSettings, RifleSettings, SniperSettings};
+use crate::play_settings::{
+    AimSettings, HeadBobSettings, MovementSettings, RifleSettings, ShootingSettings, SniperSettings,
+};
+use crate::shot_gate::{ShotGate, ShotMoves};
 use crate::shot_noise::{self, ShotNoise, ShotOffset};
 use crate::viewmodel::{BOLT_ACTION_RIFLE_MODELLED_LENGTH_M, GunModel};
 
@@ -71,8 +76,9 @@ impl Gun {
 /// trigger; the rifle's next shot, heat, overheating, whether its current shot has hit, its shot
 /// count (its recoil alternates sides) and its recoil; aiming; each shot's noise, stray and
 /// speckle; and the gun in hand's motion: its step phase, how much it steps, and how far it is in
-/// its running pose.
+/// its running pose; and how long ago a move last held a shot (`shot_gate`, the `shooting` rules).
 pub struct Weapons {
+    pub shot_gate: ShotGate,
     pub gun: Gun,
     pub is_laser_on: bool,
     pub shot_time_s: f64,
@@ -101,6 +107,7 @@ impl Weapons {
     #[allow(non_snake_case)]
     pub fn New(shot_noise: ShotNoise) -> Weapons {
         Weapons {
+            shot_gate: ShotGate::New(),
             gun: Gun::Rifle,
             is_laser_on: false,
             shot_time_s: 0.0,
@@ -128,6 +135,22 @@ impl Weapons {
     pub fn switch_gun(&mut self, gun: Gun) {
         self.gun = gun;
         self.shot_time_s = 0.0;
+    }
+
+    /// `note_moves` notes this step's `moves` for the shot gate (`ShotGate::note_moves`).
+    ///
+    /// Example: `weapons.note_moves(&moves, &settings.shooting, 1.0 / 60.0);`
+    pub fn note_moves(&mut self, moves: &ShotMoves, shooting: &ShootingSettings, dt_s: f64) {
+        self.shot_gate.note_moves(moves, shooting, dt_s);
+    }
+
+    /// `can_shoot` says whether moving lets this player shoot now: `movement.shoot_after_moving_s`
+    /// or more since a move that held a shot (`ShotGate::is_open`). A level adds its own conditions
+    /// (in the game, not holding `E`, no winner yet).
+    ///
+    /// Example: `if weapons.can_shoot(&settings.movement) { ... }`
+    pub fn can_shoot(&self, movement: &MovementSettings) -> bool {
+        self.shot_gate.is_open(movement)
     }
 
     /// `is_firing` says whether a shot hits this frame: the laser is held on or a shot is under

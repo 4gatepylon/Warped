@@ -53,7 +53,9 @@ switches gun, hold `E` aiming at the other team's console within reach to turn i
 middle), `Esc` opens the menu and frees the mouse (`Q`/`E` change page: scores, settings, map, credits, quit; `Esc` again
 closes it), holding `Tab` shows the whole map over the game while you keep playing, `-` and `=` lower and raise the render resolution. The HUD has Lunar's health,
 ammo and energy bars with their pulses, and Lunar's hit effects (red, blur and shake from the edges) whenever health
-drops; an eliminated player sees "YOU DIED" and a countdown and comes back at a spawn after `respawn.delay_s` (3 s).
+drops; an eliminated player sees "YOU DIED", a countdown and a bar filling over the wait, and comes back at a spawn
+after the server's growing respawn wait (`respawn`: 20 s, 10 s more every 5 minutes into the level; W-142 (growing
+respawn time)).
 The minimap (top right, placed by the player settings' `minimap`) shows the sphere seen from its centre around you, the
 way you face up, with straight Cartesian grid lines every 5 m: buildings, covers, each team's stairs in its colour,
 lifts and holes, consoles in team colours (grey when off), other players and shots in team colours, and you as the
@@ -120,7 +122,8 @@ it); leave it unset to play across computers.
   MetalFX upscaling when the render scale is below 1.
 - **Game** (`src/city.rs`): the window, the in-process server (when not joining), the network (the hyperbolic demo's
   `net.rs`: state, hits, consoles, the winner), the bot, `--bench-views` and `--play-route`.
-- **Settings**: `server_settings.yaml`'s new `glass` section (`max_bounce_count: 2`, `range_m: 90.0`) and
+- **Settings**: `server_settings.yaml`'s new `glass` section (`max_bounce_count: 2`, `range_m: 90.0`,
+  `reflectivity_frac: 1.0`, the share of the range left that each reflection keeps, W-158, per-map game settings) and
   `movement.walk_speed_per_map_speed: 1.2` and `movement.sprint_speed_per_map_speed: 1.44` (6 and 13 m/s, 40% slower than before, on the user's request); the rest are the hyperbolic demo's, line for line (a test checks it).
 - **Stairs** (`tools/make_map.py`): 48 steps a team, each a box standing on the street, from 2 to 4 m in front of the
   spawns up through a hole in the glass to the glass level, about 5 m short of the team's pylon, with the map's

@@ -44,7 +44,9 @@ use warped_shared::health::fade_effect_frac;
 use warped_shared::hud::{
     AmmoBar, HudBars, HudPulses, PylonSquare, make_hit_effect, make_pylon_square_rects,
 };
+use warped_shared::laser_drop::get_drop_curvature_per_m;
 use warped_shared::movement::get_crouched_height_frac;
+use warped_shared::shot_gate::ShotMoves;
 use warped_shared::third_person::{ThirdPersonCamera, ViewSwitch, place_camera_flat};
 use warped_shared::weapons::take_hit_weight;
 
@@ -216,7 +218,9 @@ fn get_flicker_scale(time_s: f32, index: usize, flicker_frac: f32) -> f32 {
     1.0 - flicker_frac * (0.5 + 0.5 * wave)
 }
 
-/// `Session` is one match.
+/// `Session` is one match. While the player is dead, `respawn_wait_s` is how long they wait in all:
+/// online the server's wait (`match_play.rs`), alone the settings' rule at `time_s` when they died
+/// (`RespawnSettings::get_wait_s`).
 pub struct Session {
     pub arena: Arena,
     pub nav: NavGraph,
@@ -224,13 +228,13 @@ pub struct Session {
     pub weapons: Weapons,
     pub settings: ServerSettings,
     pub movement: Movement,
-    since_movement_key_s: f32,
     pub bots: Vec<Bot>,
     pub view_switch: ViewSwitch,
     own_body: Bot,
     pub shot_eye: Mat4,
     pub kill_count: u32,
     pub death_count: u32,
+    pub respawn_wait_s: Option<f32>,
     pub time_s: f32,
     pub is_autopilot: bool,
     pub show_frame_ms: Option<f32>,
@@ -386,7 +390,6 @@ impl Session {
             nav,
             weapons: make_weapons(ShotNoise::FromClock()),
             movement,
-            since_movement_key_s: 0.0,
             settings: ServerSettings::Builtin(),
             bots,
             view_switch: ViewSwitch::FirstPerson(),
@@ -394,6 +397,7 @@ impl Session {
             shot_eye: Mat4::IDENTITY,
             kill_count: 0,
             death_count: 0,
+            respawn_wait_s: None,
             time_s: 0.0,
             is_autopilot,
             show_frame_ms: None,
@@ -477,6 +481,18 @@ impl Session {
         self.settings = settings;
     }
 
+    /// `get_shot_drop_per_m` gives how much a laser turns down per meter under the server
+    /// settings' bullet drop (`shooting.drop_m_per_s_per_s` at the sniper's beam speed; W-157
+    /// (bullet drop, by game setting)), 0 for straight shots.
+    ///
+    /// Example: `let drop_per_m: f32 = session.get_shot_drop_per_m();`
+    pub fn get_shot_drop_per_m(&self) -> f32 {
+        get_drop_curvature_per_m(
+            self.settings.shooting.drop_m_per_s_per_s,
+            self.settings.sniper.beam_speed_m_per_s,
+        ) as f32
+    }
+
     /// `respawn_player` brings the player back, whole, at their team's spawn farthest from the
     /// robots (`farthest_spawn`): after the respawn delay, and when they join
     /// a team.
@@ -493,6 +509,7 @@ impl Session {
             .map_or(0.0, |(_, yaw)| *yaw);
         self.spawn_counter += 1;
         self.player = Player::new(spawn_m, yaw_rad);
+        self.respawn_wait_s = None;
     }
 
     /// `random_signed` returns a pseudo-random number in [-1, 1].
@@ -687,6 +704,7 @@ impl Session {
             origin_m,
             direction,
             LASER_MAX_LENGTH_M,
+            self.get_shot_drop_per_m(),
             |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
                 let mut nearest_m: f32 = length_m;
                 let mut found: Option<ShotHit> = None;
@@ -1193,7 +1211,7 @@ impl Session {
                     && cast_ray(&scene.solids, eye_m, to_bot.normalize(), to_bot.length()).is_none()
                     && self
                         .warps
-                        .trace_beam(eye_m, to_bot, to_bot.length(), |_, _, _| None)
+                        .trace_beam(eye_m, to_bot, to_bot.length(), 0.0, |_, _, _| None)
                         .end_m
                         .distance(*aim_m)
                         < AUTOPILOT_AIM_SLACK_M
@@ -1283,11 +1301,13 @@ impl Session {
         }
         let is_walking_upright: bool =
             controls.player.move_axes != Vec2::ZERO && !controls.player.is_crouch_held;
-        self.since_movement_key_s = if is_walking_upright || controls.player.is_jump_pressed {
-            0.0
-        } else {
-            self.since_movement_key_s + dt_s
+        let shot_moves: ShotMoves = ShotMoves {
+            is_jumping: controls.player.is_jump_pressed,
+            is_walking_upright,
+            is_sprinting: self.player.moves.is_sprinting,
         };
+        self.weapons
+            .note_moves(&shot_moves, &self.settings.shooting, f64::from(dt_s));
         self.last_health = self.player.health;
         let bars: HudBars = self.get_hud_bars();
         self.hud_pulses
@@ -1353,7 +1373,7 @@ impl Session {
         let can_shoot: bool = self.player.is_alive()
             && self.console_hold_frac.is_none()
             && self.winner.is_none()
-            && f64::from(self.since_movement_key_s) >= self.settings.movement.shoot_after_moving_s;
+            && self.weapons.can_shoot(&self.settings.movement);
         let step: GunStep = GunStep {
             is_sprinting: self.player.moves.is_sprinting,
             bob_phase_rad: self.player.moves.bob_phase_rad,
@@ -1377,9 +1397,12 @@ impl Session {
         self.was_firing = is_firing;
         self.is_flashlight_on = controls.is_flashlight_held && self.player.is_alive();
         self.is_trigger_down = is_firing;
-        if self
-            .player
-            .should_respawn(self.settings.respawn.delay_s as f32)
+        if !self.player.is_alive() && self.respawn_wait_s.is_none() {
+            let wait_s: f64 = self.settings.respawn.get_wait_s(f64::from(self.time_s));
+            self.respawn_wait_s = Some(wait_s as f32);
+        }
+        if let Some(wait_s) = self.respawn_wait_s
+            && self.player.should_respawn(wait_s)
         {
             self.death_count += 1;
             self.respawn_player();
@@ -1601,6 +1624,7 @@ impl Session {
             origin_m,
             direction,
             LASER_MAX_LENGTH_M,
+            self.get_shot_drop_per_m(),
             |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
                 cast_ray(&scene.solids, start_m, piece_direction, length_m).map(|(index, hit)| {
                     hit_box = Some((index, hit.normal));

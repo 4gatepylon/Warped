@@ -6,7 +6,7 @@
 //! `../warped_match_rust/src/match_flow.rs`.
 //!
 //! Interface: `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `MatchTimes`, `MatchClient`
-//! (`Connect`, `poll`, `send_play`), `parse_hello`, `parse_play`, `make_play`, `stop_child`, `is_sitting_out`, `is_level_restart_due`,
+//! (`Connect`, `poll`, `send_play`, `send_settings`), `parse_hello`, `parse_play`, `make_play`, `stop_child`, `is_sitting_out`, `is_level_restart_due`,
 //! `describe_outcome`, `MatchBeacon`, `BeaconPhase`, `MatchAnnouncer`, `MatchListener`,
 //! `FoundMatch`, `update_found_matches`, `MATCH_PORT`, `MATCH_DISCOVERY_PORT`,
 //! `CLIENT_TIMEOUT_S`, `MAX_DATAGRAM_BYTES`, `SELF_PROGRAM`.
@@ -17,7 +17,8 @@
 //! - The protocol is one text datagram from each client every `HELLO_PERIOD_S`, `hello <team>`
 //!   (`blue`, `red` or `any`), answered with the `MatchView` as JSON. A client silent for
 //!   `CLIENT_TIMEOUT_S` no longer counts. Any client may also send `play <level>` or `play match`
-//!   (the game master's choice; no authentication yet).
+//!   (the game master's choice; no authentication yet), and the game settings messages of
+//!   `game_settings.rs`, answered with `settings <json>` instead of the view.
 //! - A beacon is `MATCH_BEACON_MAGIC`, a version byte, the match server's port and a summary of
 //!   its match, broadcast every `MATCH_BEACON_PERIOD_S` to UDP `MATCH_DISCOVERY_PORT`; a reader
 //!   ignores bytes after the fields it knows, so a later version can append fields. Loopback-only
@@ -33,6 +34,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::game_settings::{GameSettings, SettingsMessage, make_settings_message};
 use crate::match_state::{MatchState, Outcome, Team};
 use crate::network_scope;
 
@@ -54,8 +56,10 @@ const FOUND_MATCH_TIMEOUT_S: f64 = 3.0;
 /// `LevelEntry` is one level of the match's map in `match_levels.yaml`: its name, the demo folder
 /// and branch it comes from, whether it is playable yet (`status`), and how to run it: `program`
 /// (`self` for this demo's own binary, else a path from this demo's folder), the `--map` it
-/// takes, extra flags for its server and its clients, and its map picture for the progression
-/// page (`map_picture`, a PNG path from this demo's folder).
+/// takes, extra flags for its server and its clients, its map picture for the progression page
+/// (`map_picture`, a PNG path from this demo's folder), and its default server settings
+/// (`server_settings`, a path from the levels file's folder; the game master's settings,
+/// `game_settings.rs`, lay their overrides over them).
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct LevelEntry {
     pub name: String,
@@ -75,6 +79,8 @@ pub struct LevelEntry {
     pub takes_bot_label: bool,
     #[serde(default)]
     pub map_picture: Option<String>,
+    #[serde(default)]
+    pub server_settings: Option<String>,
 }
 
 /// `get_true` is serde's default for flags that are on unless a level turns them off.
@@ -256,14 +262,16 @@ pub fn make_play(choice: Option<usize>) -> Vec<u8> {
     }
 }
 
-/// `MatchClient` is a connection to a match server: the team it says it plays for, and the last
-/// `MatchView` the server sent and when it came (`view_at`).
+/// `MatchClient` is a connection to a match server: the team it says it plays for, the last
+/// `MatchView` the server sent and when it came (`view_at`), and the last game settings it sent
+/// (only after this client asked, `send_settings`).
 pub struct MatchClient {
     socket: UdpSocket,
     pub server: SocketAddr,
     pub team: Option<Team>,
     pub view: Option<MatchView>,
     pub view_at: Option<Instant>,
+    pub settings: Option<GameSettings>,
     last_hello: Option<Instant>,
     buffer: Vec<u8>,
 }
@@ -283,6 +291,7 @@ impl MatchClient {
             team,
             view: None,
             view_at: None,
+            settings: None,
             last_hello: None,
             buffer: vec![0; MAX_DATAGRAM_BYTES],
         })
@@ -297,7 +306,19 @@ impl MatchClient {
         Ok(())
     }
 
-    /// `poll` says hello every `HELLO_PERIOD_S` and keeps the newest view the server sent.
+    /// `send_settings` sends the match server a game settings message (`game_settings.rs`): a
+    /// request, or the game master's change, which it answers with the settings. A server older
+    /// than the game settings answers with its view instead.
+    ///
+    /// Example: `client.send_settings(&SettingsMessage::Request)?;`
+    pub fn send_settings(&mut self, message: &SettingsMessage) -> Result<()> {
+        self.socket
+            .send_to(&make_settings_message(message), self.server)?;
+        Ok(())
+    }
+
+    /// `poll` says hello every `HELLO_PERIOD_S` and keeps the newest view and game settings the
+    /// server sent.
     ///
     /// Example: `client.poll()?;`
     pub fn poll(&mut self) -> Result<()> {
@@ -313,8 +334,14 @@ impl MatchClient {
         loop {
             match self.socket.recv_from(&mut self.buffer) {
                 Ok((length, address)) if address == self.server => {
-                    self.view = Some(serde_json::from_slice(&self.buffer[..length])?);
-                    self.view_at = Some(Instant::now());
+                    let datagram: &[u8] = &self.buffer[..length];
+                    match GameSettings::FromAnswer(datagram) {
+                        Some(settings) => self.settings = Some(settings?),
+                        None => {
+                            self.view = Some(serde_json::from_slice(datagram)?);
+                            self.view_at = Some(Instant::now());
+                        }
+                    }
                 }
                 Ok(_) => {}
                 Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),

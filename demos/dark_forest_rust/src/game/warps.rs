@@ -11,6 +11,7 @@
 
 use glam::{DVec3, Mat3, Vec3};
 use warped_shared::gravity::{FlatWarp, get_flat_pull_m_per_s};
+use warped_shared::laser_drop::{DROP_PIECE_M, turn_flat};
 
 use crate::map::{self, Warp};
 use crate::settings::GravitySettings;
@@ -318,16 +319,19 @@ impl Warps {
     }
 
     /// `trace_beam` follows a laser from `origin_m` heading `direction` for `range_m`: straight
-    /// outside every mouth's reach, bent by its lens inside, and through a throat to its partner.
+    /// outside every mouth's reach (falling by `drop_per_m` per meter in pieces of `DROP_PIECE_M`,
+    /// W-157 (bullet drop, by game setting); 0 for straight), bent by its lens inside, and through
+    /// a throat to its partner.
     /// `hit(start, direction, length)` gives how far along a straight piece the laser first hits
     /// something, if it does; the laser stops there.
     ///
-    /// Example: `let path: BeamPath = warps.trace_beam(eye_m, forward, 200.0, |x, v, l| None);`
+    /// Example: `let path: BeamPath = warps.trace_beam(eye_m, forward, 200.0, 0.0, |x, v, l| None);`
     pub fn trace_beam(
         &self,
         origin_m: Vec3,
         direction: Vec3,
         range_m: f32,
+        drop_per_m: f32,
         mut hit: impl FnMut(Vec3, Vec3, f32) -> Option<f32>,
     ) -> BeamPath {
         let mut pieces: Vec<(Vec3, Vec3)> = Vec::new();
@@ -351,6 +355,11 @@ impl Warps {
                     v = (v + (g - g.dot(v) * v) * step_m).normalize();
                     step_m
                 }
+                None if drop_per_m > 0.0 => self
+                    .get_next_reach_entry_m(x, v)
+                    .map_or(left_m, |entry_m| entry_m + 0.01)
+                    .min(left_m)
+                    .min(DROP_PIECE_M as f32),
                 None => self
                     .get_next_reach_entry_m(x, v)
                     .map_or(left_m, |entry_m| entry_m + 0.01)
@@ -369,6 +378,15 @@ impl Warps {
             pieces.push((x, next_m));
             x = next_m;
             left_m -= step_m;
+            if inside.is_none() && drop_per_m > 0.0 {
+                v = turn_flat(
+                    v.as_dvec3(),
+                    DVec3::NEG_Y,
+                    f64::from(drop_per_m),
+                    f64::from(step_m),
+                )
+                .as_vec3();
+            }
             if let Some(index) = inside
                 && self.mouths[index].centre_m.distance(x) < self.mouths[index].get_lens_throat_m()
             {
@@ -440,6 +458,35 @@ mod tests {
         assert!(!warps.is_inside_horizon(Vec3::new(3.0, 10.0, 0.0)));
     }
 
+    /// `test_beams_fall_by_their_drop` checks a beam far from every warp goes straight without a
+    /// drop and, with one, falls about a t² / 2 over its length (W-157 (bullet drop, by game
+    /// setting)).
+    #[test]
+    fn test_beams_fall_by_their_drop() {
+        const RANGE_M: f32 = 100.0;
+        const DROP_M_PER_S_PER_S: f64 = 100.0;
+        const BEAM_SPEED_M_PER_S: f64 = 250.0;
+        let warps: Warps = warps();
+        let start_m: Vec3 = Vec3::new(0.0, 50.0, -100.0);
+        let straight: BeamPath =
+            warps.trace_beam(start_m, Vec3::NEG_Z, RANGE_M, 0.0, |_, _, _| None);
+        assert_eq!(straight.end_m, start_m + Vec3::NEG_Z * RANGE_M);
+        let drop_per_m: f32 = warped_shared::laser_drop::get_drop_curvature_per_m(
+            DROP_M_PER_S_PER_S,
+            BEAM_SPEED_M_PER_S,
+        ) as f32;
+        let falling: BeamPath =
+            warps.trace_beam(start_m, Vec3::NEG_Z, RANGE_M, drop_per_m, |_, _, _| None);
+        let t_s: f32 = RANGE_M / BEAM_SPEED_M_PER_S as f32;
+        let expected_m: f32 = 0.5 * DROP_M_PER_S_PER_S as f32 * t_s * t_s;
+        let fallen_m: f32 = start_m.y - falling.end_m.y;
+        assert!(
+            (fallen_m - expected_m).abs() < 0.15 * expected_m,
+            "{fallen_m} vs {expected_m}"
+        );
+        assert!(falling.pieces.len() > straight.pieces.len());
+    }
+
     /// `test_walking_into_a_mouth_steps_out_beyond_its_partner` checks a body entering mouth 0
     /// from +x steps out on the -x side of mouth 1, outside its throat.
     #[test]
@@ -467,8 +514,13 @@ mod tests {
     #[test]
     fn test_laser_through_a_mouth_comes_out_of_its_partner() {
         let warps: Warps = warps();
-        let path: BeamPath =
-            warps.trace_beam(Vec3::new(30.0, 1.0, 0.0), Vec3::NEG_X, 30.0, |_, _, _| None);
+        let path: BeamPath = warps.trace_beam(
+            Vec3::new(30.0, 1.0, 0.0),
+            Vec3::NEG_X,
+            30.0,
+            0.0,
+            |_, _, _| None,
+        );
         let (start_m, end_m) = *path.pieces.last().expect("a path");
         assert!(
             path.end_m.x > -18.0 && path.end_m.x < 10.0,
@@ -483,8 +535,13 @@ mod tests {
     #[test]
     fn test_laser_beside_a_mouth_bends_towards_it() {
         let warps: Warps = warps();
-        let path: BeamPath =
-            warps.trace_beam(Vec3::new(30.0, 1.0, 4.2), Vec3::NEG_X, 20.0, |_, _, _| None);
+        let path: BeamPath = warps.trace_beam(
+            Vec3::new(30.0, 1.0, 4.2),
+            Vec3::NEG_X,
+            20.0,
+            0.0,
+            |_, _, _| None,
+        );
         let (start_m, end_m) = *path.pieces.last().expect("a path");
         let direction: Vec3 = (end_m - start_m).normalize();
         assert!(
@@ -508,8 +565,13 @@ mod tests {
             .get_mouth_exit_feet_m(feet_m, feet_m + Vec3::Y * 0.9)
             .expect("inside the purple throat");
         assert!(exit_m.distance(green_m) < 3.0, "{exit_m:?}");
-        let path: BeamPath =
-            warps.trace_beam(purple_m + Vec3::Z * 10.0, Vec3::NEG_Z, 30.0, |_, _, _| None);
+        let path: BeamPath = warps.trace_beam(
+            purple_m + Vec3::Z * 10.0,
+            Vec3::NEG_Z,
+            30.0,
+            0.0,
+            |_, _, _| None,
+        );
         assert_eq!(path.crossed_mouths, [2]);
         assert!(
             (path.end_m.x - green_m.x).abs() < 0.5 && path.end_m.z < green_m.z,

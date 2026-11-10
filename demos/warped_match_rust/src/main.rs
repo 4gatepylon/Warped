@@ -57,12 +57,15 @@ mod voxel_world;
 mod world;
 mod zone_walls;
 
+use warped_shared::game_settings::GameSettings;
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, HudBars, HudPulses, describe_gun,
     get_crosshair_rects, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
+    make_respawn_bar_rects,
 };
 use warped_shared::menu_and_map::PlayOutcome;
+use warped_shared::shot_gate::ShotMoves;
 use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 use warped_shared::{
     app_bundle, avatar_model, fps_demo_assets, geometry, health, hud_bars, key_bindings,
@@ -762,8 +765,14 @@ fn run_match_server(arguments: &Arguments) -> Result<()> {
     };
     println!("Join with: make join-match SERVER=<this computer's address> (127.0.0.1 here)");
     println!("Run folder: {}", folder.display());
+    let manifest_folder: &Path = arguments
+        .match_levels
+        .parent()
+        .ok_or("--match-levels has no folder")?;
+    let settings: GameSettings = GameSettings::Load(&levels, manifest_folder)?;
     let state: match_state::MatchState = match_flow::serve_match(
         &levels,
+        settings,
         &times,
         &folder,
         arguments.match_port,
@@ -2468,7 +2477,6 @@ struct Session {
     total_frame_count: u64,
     total_gpu_ms: f64,
     last_output_px: (u32, u32),
-    since_movement_key_s: f64,
     settings: ServerSettings,
     player_settings: PerPlayerSettings,
     player_settings_path: Option<PathBuf>,
@@ -2664,13 +2672,14 @@ fn add_dust_burst(
 }
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
-/// started with `--host`, whether this player was hit and waits to rejoin, the number of the game
+/// started with `--host`, whether this player was hit and waits to rejoin (the server's wait and the time left), the number of the game
 /// it plays, the console this player holds `E` on, with the seconds held, and the team `--team`
 /// asked for, joined once the window has loaded (`join_after_loading`).
 struct Multiplayer {
     client: net::Client,
     server: Option<Child>,
     is_eliminated: bool,
+    respawn_wait_s: f64,
     respawn_in_s: f64,
     game_number: u32,
     disabling: Option<(u8, f64)>,
@@ -2769,6 +2778,7 @@ impl Session {
                 )?,
                 server,
                 is_eliminated: false,
+                respawn_wait_s: 0.0,
                 respawn_in_s: 0.0,
                 game_number: 0,
                 disabling: None,
@@ -2802,7 +2812,6 @@ impl Session {
             total_frame_count: 0,
             total_gpu_ms: 0.0,
             last_output_px: (0, 0),
-            since_movement_key_s: f64::INFINITY,
             weapons: Weapons::New(shot_noise::ShotNoise::FromClock()),
             is_flashlight_on: false,
             view_switch: third_person::ViewSwitch::FirstPerson(),
@@ -3436,15 +3445,16 @@ impl Session {
             .map_or_else(|| self.get_eye_frame(), |(_, shot_eye)| shot_eye)
     }
 
-    /// `can_shoot` says whether this player may shoot: once no movement key has been held for the
-    /// server settings' `movement.shoot_after_moving_s` (walking crouched doesn't count, and
-    /// standing, falling or flying with no key held may shoot), and, in a game on a server, only
+    /// `can_shoot` says whether this player may shoot: once moving allows it (`Weapons::can_shoot`:
+    /// `movement.shoot_after_moving_s` after the last jump, upright walk or sprint that the server
+    /// settings' `shooting` rules hold a shot for; walking crouched, standing, falling or flying never
+    /// hold one), and, in a game on a server, only
     /// once in the game (welcomed, so not in the lobby, while joining or while out after a hit),
     /// not while holding `E` on a console, and not once a team has won.
     ///
     /// Example: `if self.can_shoot() { ... }`
     fn can_shoot(&self) -> bool {
-        self.since_movement_key_s >= self.settings.movement.shoot_after_moving_s
+        self.weapons.can_shoot(&self.settings.movement)
             && self.multiplayer.as_ref().is_none_or(|m| {
                 m.client.id.is_some() && m.disabling.is_none() && m.client.game.winner.is_none()
             })
@@ -3555,8 +3565,9 @@ impl Session {
         (multiplayer.client.game.off_mask, disabling_fracs)
     }
 
-    /// `update_gun` counts the time since this player last held a movement key (moving without
-    /// crouching on a voxel map, or jumping), dropping a shot in flight while one is held, and
+    /// `update_gun` notes this step's moves for the shot gate (`Weapons::note_moves`: a jump, an
+    /// upright walk or a sprint the `shooting` rules hold a shot for), dropping a shot in flight
+    /// while this player can't shoot, and
     /// moves the gun: its step phase while walking or
     /// running on the ground (on a voxel map the head bob's, so the gun steps with the eye), how
     /// far into stepping it is (`step_frac`: easing in and out over the head bob's `fade_s`), and
@@ -3573,11 +3584,13 @@ impl Session {
             None => (input.sprint && is_moving, self.player.is_on_ground),
         };
         let is_walking_upright: bool = is_moving && !(input.crouch && self.voxel.is_some());
-        self.since_movement_key_s = if is_walking_upright || input.up {
-            0.0
-        } else {
-            self.since_movement_key_s + dt_s
+        let moves: ShotMoves = ShotMoves {
+            is_jumping: input.up,
+            is_walking_upright,
+            is_sprinting: is_running,
         };
+        self.weapons
+            .note_moves(&moves, &self.settings.shooting, dt_s);
         if !self.can_shoot() {
             self.weapons.shot_time_s = 0.0;
         }
@@ -3758,10 +3771,12 @@ impl Session {
                     victim_id,
                     shooter_id,
                     is_self,
+                    respawn_wait_s,
                 } => {
                     if is_self {
                         multiplayer.is_eliminated = true;
-                        multiplayer.respawn_in_s = self.settings.respawn.delay_s;
+                        multiplayer.respawn_wait_s = respawn_wait_s;
+                        multiplayer.respawn_in_s = respawn_wait_s;
                         multiplayer.disabling = None;
                         self.weapons.is_laser_on = false;
                         self.weapons.shot_time_s = 0.0;
@@ -3908,7 +3923,7 @@ impl Session {
             poses.truncate(players.len() + usize::from(own_body.is_some()));
             let corpses: Vec<(DMat4, usize, (avatar_model::AvatarClip, f64))> = self
                 .avatars
-                .get_corpses(now_s, self.settings.respawn.delay_s)
+                .get_corpses(now_s, self.settings.respawn.start_s)
                 .into_iter()
                 .map(|(corpse, pose)| (corpse.feet, corpse.team as usize, pose))
                 .collect();
@@ -4457,6 +4472,7 @@ impl Session {
     /// holding `E` on one). On a voxel map, at the top centre, a square per console, dark once
     /// off, with a box around this player's team's (`make_pylon_square_rects`; W-146, pylon
     /// squares and own-team box).
+    /// Under "YOU DIED", the respawn bar fills over the server's wait.
     ///
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
@@ -4470,6 +4486,16 @@ impl Session {
             &self.settings.rifle,
             &self.hud_pulses,
         ));
+        if let Some(multiplayer) = &self.multiplayer
+            && self.menu_and_map.get_cover() == menu_and_map::Cover::Nothing
+            && multiplayer.is_eliminated
+            && self.get_banner_lines() == Some(get_death_lines(multiplayer.respawn_in_s))
+        {
+            rects.extend(make_respawn_bar_rects(
+                multiplayer.respawn_in_s,
+                multiplayer.respawn_wait_s,
+            ));
+        }
         if let Some(voxel) = &self.voxel {
             let (off_mask, _) = self.get_console_states();
             let pylons: Vec<warped_shared::hud::PylonSquare> = (voxel.world.consoles.iter())

@@ -39,6 +39,7 @@ use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
 use warped_shared::gravity::{HyperbolicWarp, add_pull, get_hyperbolic_pull_m_per_s};
+use warped_shared::laser_drop::{DROP_PIECE_M, get_drop_curvature_per_m, turn_hyperbolic};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -344,6 +345,7 @@ pub struct VoxelWorld {
     pub gravity_m_per_s2: f64,
     map_player: PlayerSettings,
     map_gravity_m_per_s2: f64,
+    map_wind_k: f64,
     pub settings: ServerSettings,
     pub head_bob: HeadBobSettings,
     pub spawns: Vec<DMat4>,
@@ -1039,6 +1041,10 @@ impl VoxelWorld {
             gravity_m_per_s2: map.gravity_m_per_s2,
             map_player: map.player,
             map_gravity_m_per_s2: map.gravity_m_per_s2,
+            map_wind_k: map
+                .atmosphere
+                .and_then(|a| a.wind)
+                .map_or(0.0, |wind| WindField::FromMap(&wind, r).k),
             settings: ServerSettings::Builtin(),
             head_bob: PerPlayerSettings::Builtin().view.head_bob,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
@@ -1078,10 +1084,14 @@ impl VoxelWorld {
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
-    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
+    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows);
+    /// and the sandstorm's wind at `sandstorm.wind_per_map_wind` times the map's.
     ///
     /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
     pub fn set_settings(&mut self, settings: ServerSettings) {
+        if let Some(wind) = &mut self.wind {
+            wind.k = self.map_wind_k * settings.sandstorm.wind_per_map_wind;
+        }
         let movement = &settings.movement;
         let half_jump_s: f64 = self.map_player.jump_m_per_s / self.map_gravity_m_per_s2
             * movement.jump_time_per_map_jump_time;
@@ -2014,7 +2024,8 @@ impl VoxelWorld {
     }
 
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between the
-    /// warps, bent inside them, through throats, to a block, the ground, a horizon or
+    /// warps (falling by the server settings' `shooting.drop_m_per_s_per_s` in pieces of
+    /// `DROP_PIECE_M`, `laser_drop.rs`), bent inside them, through throats, to a block, the ground, a horizon or
     /// `LASER_MAX_LENGTH_M` (through glass). The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where
     /// the window draws the tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
@@ -2022,6 +2033,15 @@ impl VoxelWorld {
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
     pub fn trace_laser(&self, camera: DMat4) -> Shot {
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
+        let drop_per_m: f64 = get_drop_curvature_per_m(
+            self.settings.shooting.drop_m_per_s_per_s,
+            self.settings.sniper.beam_speed_m_per_s,
+        );
+        let drop_piece_s: f64 = if drop_per_m > 0.0 {
+            DROP_PIECE_M / self.r
+        } else {
+            f64::INFINITY
+        };
         let laser_wind: Option<WindField> = self.wind.map(|wind| wind.get_laser_wind());
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
@@ -2035,12 +2055,18 @@ impl VoxelWorld {
             }
             let Some(w) = inside else {
                 let segment_s: f64 = laser_wind.map_or(f64::INFINITY, |wind| wind.segment_s);
-                let s_max: f64 = (max_s - travelled).min(segment_s);
+                let s_max: f64 = (max_s - travelled).min(segment_s).min(drop_piece_s);
                 if let Some(wind) = &laser_wind {
                     v = wind.kick(x, v, 0.5 * s_max);
                 }
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_max);
+                }
                 let (s_end, entering) = self.find_warp_entry(x, v, s_max);
-                if let Some(found) = self.trace_scene(x, v, s_end, None) {
+                if let Some(found) = self
+                    .trace_scene(x, v, s_end, None)
+                    .filter(|found| found.s.is_finite())
+                {
                     pieces
                         .last_mut()
                         .expect("a piece")
@@ -2056,9 +2082,12 @@ impl VoxelWorld {
                 pieces.last_mut().expect("a piece").push(x);
                 if let Some(wind) = &laser_wind {
                     v = wind.kick(x, v, 0.5 * s_end);
-                    if entering.is_none() {
-                        continue;
-                    }
+                }
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_end);
+                }
+                if entering.is_none() && (laser_wind.is_some() || drop_per_m > 0.0) {
+                    continue;
                 }
                 if entering.is_none() {
                     break;
@@ -2068,6 +2097,9 @@ impl VoxelWorld {
             };
             let ds: f64 = self.choose_bend_step(self.compute_bend(w, x, v).1);
             let (v0, x1, v1, rho) = self.step_bent(w, x, v, ds);
+            if !(ds.is_finite() && rho.is_finite()) {
+                break;
+            }
             if let Some(found) = self.trace_scene(x, v0, ds, Some(w)) {
                 pieces
                     .last_mut()
@@ -4053,8 +4085,25 @@ mod parity_tests {
     const LUNAR_SETTINGS_PATH: &str = "../hyperbolic_wormholes_rust/server_settings.yaml";
     const DUST_ONLY_SETTINGS: [&str; 2] =
         ["jump_time_per_map_jump_time", "curvature_per_map_curvature"];
+    const LEVEL_OWN_SECTIONS: [&str; 2] = ["sandstorm:", "surface:"];
     const DUST_JUMP_AT_M: [f64; 2] = [-95.0, 6.0];
     const LUNAR_JUMP_AT_M: [f64; 2] = [-27.0, 0.0];
+
+    /// `load_lunar_settings` reads Lunar Surface's server settings without its own `surface`
+    /// section (W-158), which Dust's don't have.
+    fn load_lunar_settings() -> ServerSettings {
+        let text: String = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
+        )
+        .expect("Lunar Surface's server settings");
+        let mut yaml: serde_yaml::Value = serde_yaml::from_str(&text).expect("YAML");
+        yaml.as_mapping_mut()
+            .expect("sections")
+            .remove("surface")
+            .expect("Lunar Surface's own section");
+        ServerSettings::FromJson(&serde_json::to_vec(&yaml).expect("JSON"))
+            .expect("Lunar Surface's server settings")
+    }
 
     /// `load_dust` builds Dust's world as the game does, with Dust's server settings.
     fn load_dust() -> VoxelWorld {
@@ -4091,12 +4140,7 @@ mod parity_tests {
         let lunar_map: Map =
             Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
         let mut lunar: VoxelWorld = VoxelWorld::FromMap(&lunar_map).expect("a voxel world");
-        lunar.set_settings(
-            ServerSettings::Load(
-                &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
-            )
-            .expect("Lunar Surface's server settings"),
-        );
+        lunar.set_settings(load_lunar_settings());
         let (lunar_apex_m, lunar_step_count) = measure_jump(&lunar, LUNAR_JUMP_AT_M);
         let (dust_apex_m, dust_step_count) = measure_jump(&load_dust(), DUST_JUMP_AT_M);
         assert!(
@@ -4144,6 +4188,11 @@ mod parity_tests {
             std::fs::read_to_string(root.join(path))
                 .expect("a settings file")
                 .lines()
+                .take_while(|line| {
+                    !LEVEL_OWN_SECTIONS
+                        .iter()
+                        .any(|section| line.starts_with(section))
+                })
                 .filter(|line| {
                     !DUST_ONLY_SETTINGS
                         .iter()

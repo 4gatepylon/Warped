@@ -3,8 +3,9 @@
 //! straight, stop at the street, buildings and the core, and reflect off the glass shell's inner
 //! side.
 //!
-//! Interface: `CityWorld::Builtin`, `CityWorld::FromJson`, `BoundaryPlane`, `CityPlayer`, `CityInput`, `Shot`,
-//! `ShotHit`, `CityWorld::trace_shot`, `CityWorld::move_player`, `Side`, `get_up`.
+//! Interface: `CityWorld::Builtin`, `CityWorld::FromJson`, `BoundaryPlane`, `CityPlayer`,
+//! `CityInput`, `Shot`, `Bounces`, `ShotHit`, `CityWorld::trace_shot`, `CityWorld::move_player`,
+//! `Side`, `get_up`.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -14,10 +15,11 @@ use glam::{DMat3, DMat4, DQuat, DVec3};
 use serde::Deserialize;
 
 use warped_shared::gravity::{FlatWarp, get_flat_pull_m_per_s};
+use warped_shared::laser_drop::{DROP_PIECE_M, turn_flat};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState};
 
 use crate::play_settings::HeadBobSettings;
-use crate::settings::ServerSettings;
+use crate::settings::{GlassSettings, ServerSettings};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -381,6 +383,44 @@ pub struct CityWorld {
     pub mouths: Vec<FlatWarp>,
     /// `boundary_planes` are the team boundary planes from the map's zones (W-148).
     pub boundary_planes: Vec<BoundaryPlane>,
+}
+
+/// `Bounces` is how a shot meets the glass's inner side (`CityWorld::trace_shot`): at most
+/// `max_count` reflections, each keeping `reflectivity_frac` of the range left.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Bounces {
+    pub max_count: u32,
+    pub reflectivity_frac: f64,
+}
+
+impl Bounces {
+    /// `NONE` stops a shot at the glass's first meeting.
+    pub const NONE: Bounces = Bounces {
+        max_count: 0,
+        reflectivity_frac: 1.0,
+    };
+
+    /// `Perfect` reflects at most `max_count` times off a perfect mirror.
+    ///
+    /// Example: `let bounces = Bounces::Perfect(2);`
+    #[allow(non_snake_case)]
+    pub fn Perfect(max_count: u32) -> Bounces {
+        Bounces {
+            max_count,
+            reflectivity_frac: 1.0,
+        }
+    }
+
+    /// `FromGlass` reflects as the server settings' `glass` section says.
+    ///
+    /// Example: `let bounces = Bounces::FromGlass(&settings.glass);`
+    #[allow(non_snake_case)]
+    pub fn FromGlass(glass: &GlassSettings) -> Bounces {
+        Bounces {
+            max_count: glass.max_bounce_count,
+            reflectivity_frac: glass.reflectivity_frac,
+        }
+    }
 }
 
 /// `Side` is which level a point is on: the street, under the glass, or the glass level, on the
@@ -824,24 +864,52 @@ impl CityWorld {
 
     /// `trace_shot` follows a shot from `origin` along `direction` for up to `range_m`: it stops
     /// at the street, boxes, the core, a target (not `shooter_id`) or the glass from outside, and
-    /// reflects off the glass's inner side about its normal at most `max_bounce_count` times (the
-    /// next meeting with the glass stops it).
+    /// reflects off the glass's inner side about its normal at most `bounces.max_count` times (the
+    /// next meeting with the glass stops it), each reflection keeping `bounces.reflectivity_frac`
+    /// of the range left.
     ///
-    /// Example: `let shot = world.trace_shot(eye, forward, 80.0, 2, &targets, Some(my_id));`
+    /// Example: `let shot = world.trace_shot(eye, forward, 80.0, Bounces::Perfect(2), &targets, Some(my_id));`
     pub fn trace_shot(
         &self,
         origin: DVec3,
         direction: DVec3,
         range_m: f64,
-        max_bounce_count: u32,
+        bounces: Bounces,
         targets: &[Target],
         shooter_id: Option<u32>,
+    ) -> Shot {
+        self.trace_falling_shot(
+            origin, direction, range_m, bounces, targets, shooter_id, 0.0,
+        )
+    }
+
+    /// `trace_falling_shot` is `trace_shot` for a shot that falls toward the street (outward)
+    /// by `drop_per_m` per meter (`laser_drop::get_drop_curvature_per_m`, W-157 (bullet drop, by
+    /// game setting)): it goes in straight pieces of at most `DROP_PIECE_M`, turning down between
+    /// them (`turn_flat`), each piece a point of the shot; 0 is `trace_shot`'s straight shot.
+    ///
+    /// Example: `let shot = world.trace_falling_shot(eye, forward, 80.0, Bounces::Perfect(2), &targets, Some(my_id), 0.00016);`
+    #[allow(clippy::too_many_arguments)]
+    pub fn trace_falling_shot(
+        &self,
+        origin: DVec3,
+        direction: DVec3,
+        range_m: f64,
+        bounces: Bounces,
+        targets: &[Target],
+        shooter_id: Option<u32>,
+        drop_per_m: f64,
     ) -> Shot {
         let mut points: Vec<DVec3> = vec![origin];
         let (mut o, mut d, mut left_m, mut bounce_count) =
             (origin, direction.normalize(), range_m, 0);
         loop {
-            let mut best: (f64, ShotHit, Option<DVec3>) = (left_m, ShotHit::Range, None);
+            let piece_m: f64 = if drop_per_m > 0.0 {
+                left_m.min(DROP_PIECE_M)
+            } else {
+                left_m
+            };
+            let mut best: (f64, ShotHit, Option<DVec3>) = (piece_m, ShotHit::Range, None);
             let mut consider = |t: f64, hit: ShotHit, reflect: Option<DVec3>| {
                 if t > SHOT_START_M && t < best.0 {
                     best = (t, hit, reflect);
@@ -871,7 +939,7 @@ impl CityWorld {
                     let reflect: Option<DVec3> = (shell.is_reflective_inside
                         && is_from_inside
                         && !shell.is_ball()
-                        && bounce_count < max_bounce_count)
+                        && bounce_count < bounces.max_count)
                         .then(|| d - 2.0 * d.dot(normal) * normal);
                     consider(
                         t,
@@ -916,9 +984,15 @@ impl CityWorld {
             let end: DVec3 = o + d * t;
             points.push(end);
             left_m -= t;
+            if matches!(hit, ShotHit::Range) && reflect.is_none() && left_m > 0.0 {
+                d = turn_flat(d, end.normalize_or(DVec3::Y), drop_per_m, t);
+                o = end;
+                continue;
+            }
             match reflect {
                 Some(new_d) => {
                     bounce_count += 1;
+                    left_m *= bounces.reflectivity_frac;
                     d = new_d.normalize();
                     o = end + d * SURFACE_OFFSET_M;
                 }
@@ -1332,7 +1406,7 @@ mod tests {
     //! | A player stands on the street and falls outward onto it | `players_fall_outward_onto_the_street` |
     //! | A player spawns where no other player stands (none near: the next in turn; one on the first: the other) | `spawns_keep_clear_of_other_players` |
     //! | A lift carries a player up onto the glass level, and they stand on the glass | `lifts_carry_players_onto_the_glass` |
-    //! | A shot from the glass level reflects off the glass, at most the set number of times | `shots_reflect_off_the_glass_up_to_the_limit` |
+    //! | A shot from the glass level reflects off the glass, at most the set number of times, each reflection keeping the reflectivity's share of the range (0, 0.5) | `shots_reflect_off_the_glass_up_to_the_limit` |
     //! | A shot from the street stops at the glass | `street_shots_stop_at_the_glass` |
     //! | A shot from the glass level goes straight across and hits a player | `glass_shots_cross_the_sphere` |
     //! | Range ends a shot | `range_ends_shots` |
@@ -1582,16 +1656,37 @@ mod tests {
         let origin: DVec3 = DVec3::new(0.3, 0.2, 1.0).normalize() * (glass_r - 1.6);
         let direction: DVec3 = DVec3::new(0.2, 1.0, 0.4).normalize();
         for max_bounce_count in 0..=2 {
-            let shot: Shot =
-                world.trace_shot(origin, direction, 500.0, max_bounce_count, &[], None);
+            let shot: Shot = world.trace_shot(
+                origin,
+                direction,
+                500.0,
+                Bounces::Perfect(max_bounce_count),
+                &[],
+                None,
+            );
             assert_eq!(shot.bounce_count, max_bounce_count);
             assert_eq!(shot.points.len() as u32, max_bounce_count + 2);
         }
-        let shot: Shot = world.trace_shot(origin, direction, 500.0, 1, &[], None);
+        let shot: Shot = world.trace_shot(origin, direction, 500.0, Bounces::Perfect(1), &[], None);
         let (a, b, c) = (shot.points[0], shot.points[1], shot.points[2]);
         let normal: DVec3 = b.normalize();
         let (incoming, outgoing) = ((b - a).normalize(), (c - b).normalize());
         assert!((incoming.dot(normal) + outgoing.dot(normal)).abs() < 1e-6);
+        let first_leg_m: f64 = (b - a).length();
+        let range_m: f64 = first_leg_m + 4.0;
+        for reflectivity_frac in [0.0, 0.5] {
+            let bounces: Bounces = Bounces {
+                max_count: 1,
+                reflectivity_frac,
+            };
+            let dimmed: Shot = world.trace_shot(origin, direction, range_m, bounces, &[], None);
+            let second_leg_m: f64 = (dimmed.points[2] - dimmed.points[1]).length();
+            assert_eq!(dimmed.hit, ShotHit::Range, "{dimmed:?}");
+            assert!(
+                (second_leg_m - SURFACE_OFFSET_M - 4.0 * reflectivity_frac).abs() < 1e-6,
+                "{second_leg_m}"
+            );
+        }
     }
 
     #[test]
@@ -1605,7 +1700,7 @@ mod tests {
             eye.w_axis.truncate(),
             -eye.z_axis.truncate(),
             500.0,
-            2,
+            Bounces::Perfect(2),
             &[],
             None,
         );
@@ -1629,7 +1724,7 @@ mod tests {
             height_frac: 1.0,
         };
         let aim: DVec3 = (feet + target.up * TORSO_HEIGHT_M - a).normalize();
-        let shot: Shot = world.trace_shot(a, aim, 500.0, 2, &[target], Some(1));
+        let shot: Shot = world.trace_shot(a, aim, 500.0, Bounces::Perfect(2), &[target], Some(1));
         assert_eq!(
             shot.hit,
             ShotHit::Player {
@@ -1644,7 +1739,7 @@ mod tests {
     fn range_ends_shots() {
         let world: CityWorld = world();
         let origin: DVec3 = DVec3::new(0.0, 0.0, 10.0);
-        let shot: Shot = world.trace_shot(origin, DVec3::Y, 1.0, 2, &[], None);
+        let shot: Shot = world.trace_shot(origin, DVec3::Y, 1.0, Bounces::Perfect(2), &[], None);
         assert_eq!(shot.hit, ShotHit::Range);
         assert!((shot.points[1] - origin - DVec3::Y).length() < 1e-9);
     }
@@ -1703,8 +1798,14 @@ mod tests {
             let glass_eye: DVec3 =
                 get_beside(&hole, SHOOTER_SIDE_M, 0.0, level_m - world.eye_height_m);
             for (eye, bounce_count) in [(street_eye, 0), (glass_eye, 1)] {
-                let shot: Shot =
-                    world.trace_shot(eye, (beside - eye).normalize(), 500.0, 1, &[], None);
+                let shot: Shot = world.trace_shot(
+                    eye,
+                    (beside - eye).normalize(),
+                    500.0,
+                    Bounces::Perfect(1),
+                    &[],
+                    None,
+                );
                 assert!(
                     (shot.points[1] - beside).length() < EDGE_M
                         && shot.bounce_count == bounce_count,
@@ -1712,7 +1813,8 @@ mod tests {
                 );
             }
             let eye: DVec3 = hole.direction * (level_m - world.eye_height_m);
-            let down: Shot = world.trace_shot(eye, hole.direction, 500.0, 1, &[], None);
+            let down: Shot =
+                world.trace_shot(eye, hole.direction, 500.0, Bounces::Perfect(1), &[], None);
             assert_eq!(
                 down.hit,
                 ShotHit::Surface {

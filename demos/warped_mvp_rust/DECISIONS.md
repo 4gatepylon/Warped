@@ -46,6 +46,31 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   use their own copies until they become libraries, which should switch them over. The app's page
   edits every key binding and the in-level menu's nine numbers with the shared
   `settings_editor`, which the game master's settings page will use too.
+- **Game settings are sections by key, not by level definition** (W-158, per-map game settings):
+  a key at least two levels' settings files have is in the shared section, laid over every level
+  that has it; any other is its level's own. So Lunar Surface's gravity, City Sphere's glass, Dust's
+  wind and Snow Planet's blizzard are their levels' sections, Dark Forest's is empty, and a setting
+  another change adds shows up by itself. The shared section shows the value most levels have,
+  marked "(levels differ)" where they don't; setting it gives every level that value (each level's
+  own walking speed among them), and R gives each its own back. When the declarative level
+  definitions land (W-143), the sections can come from them instead. **Weigh in.**
+- **The new per-level settings** (W-158), each 1 by default, so play is unchanged until the game
+  master changes them, and each missing from an older settings file takes 1:
+  - Lunar Surface `surface.gravity_per_jump_gravity`: the ground's pull, with the jump's launch
+    speed kept, so 0.5 jumps twice as high and twice as long. A heuristic: walking speed, crouching
+    and the dust's fall don't change. **Weigh in.**
+  - City Sphere `glass.reflectivity_frac`: the share of a shot's range left that each reflection
+    off the glass keeps ("reflectivity"); 1 is a perfect mirror. `glass.max_bounce_count` is the
+    number of bounces. It doesn't change how the glass looks. **Weigh in** if "reflectivity" meant
+    the glass's look.
+  - Dust `sandstorm.wind_per_map_wind`: the wind's strength (how much it bends light and lasers,
+    and how fast a shot's dust drifts), 0 for calm air; the gusts' pattern doesn't change.
+  - Snow Planet `blizzard.radius_per_map_radius`: the blizzard's width ("snowstorm size"), on the
+    server (where it slows and freezes) and in every window; its height doesn't change.
+- **Any non-negative number is allowed** in the game settings, whole where the default is (the
+  lead's rule). A level that refuses one (most numbers must be above 0) fails to start its round,
+  which stops the hosted game with the level's error in its log (`round_<n>_server.log`). **Weigh
+  in** on whether the match server should instead check each level's ranges.
 - **Children's logs** go to `.artifacts/warped/<run_id>/` in the checkout and to
   `~/Library/Logs/Warped/warped/<run_id>/` from `Warped.app` (the match server's to
   `~/Library/Logs/Warped/serve_match/`).

@@ -20,6 +20,7 @@ pub enum Screen {
     MainMenu,
     JoinByAddress,
     PlayerSettings,
+    GameSettings,
     Credits,
     GameMenu,
     Level,
@@ -63,7 +64,7 @@ impl Navigator {
     }
 
     /// `open` shows a page over the screen shown now (`JoinByAddress`, `PlayerSettings`,
-    /// `Credits`, `LevelMenu`); the game menu and the level have their own entries.
+    /// `GameSettings`, `Credits`, `LevelMenu`); the game menu and the level have their own entries.
     ///
     /// Example: `navigator.open(Screen::PlayerSettings);`
     pub fn open(&mut self, page: Screen) {
@@ -181,6 +182,7 @@ mod tests {
         for page in [
             Screen::JoinByAddress,
             Screen::PlayerSettings,
+            Screen::GameSettings,
             Screen::Credits,
             Screen::LevelMenu,
         ] {
