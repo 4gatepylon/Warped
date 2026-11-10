@@ -6,14 +6,20 @@ once and drawn and simulated the same way everywhere. Gameplay that changes duri
 state) is not part of a map.
 
 A map is a folder `common/maps/<name>/` holding `map.json`, a JSON manifest that [`map.schema.json`](map.schema.json)
-describes. `validate_map.py` checks a map against this page (`make validate-maps`).
+describes. `validate_map.py` checks a map against this page (`make validate-maps`). A map is a level's layout; the
+level itself (its engine, rules, settings overrides and how menus show it) is the `level.json` beside it, specified in
+[`LEVELS.md`](LEVELS.md), with `levels.json` naming the engines and the matches.
 
 | Map | Made by | What it is |
 | --- | --- | --- |
 | [`house_demo/`](house_demo/) | `demos/hyperbolic_wormholes_rust` (`--export-map`) | the Rust wormholes demo's house, rails and pylons in H³ (R = 8 m), three wormholes |
 | [`lunar_surface/`](lunar_surface/) | `demos/levels/lunar_surface/export_map.mjs` | the Lunar Surface level in H³ (R = 40 m), a crater, 25 smooth-shape structures, a black hole and a wormhole |
+| [`dust/`](dust/) | `demos/dust_rust/tools/make_dust_map.py` | the Dust level in H³ (R = 50 m), a desert basin under a sandstorm whose wind bends light, a wormhole pair |
+| [`snow_planet/`](snow_planet/) | `demos/snow_planet_rust/tools/make_map.py` | the Snow Planet level on a flat torus, five black holes, a wormhole pair, one blizzard |
+| [`city_sphere/`](city_sphere/) | `demos/city_sphere_rust/tools/make_map.py` | the City Sphere level inside a hollow sphere in E³, streets under a glass shell |
+| [`dark_forest/`](dark_forest/) | `demos/dark_forest_rust/src/forest_layout.rs` (`--export-map`) | the Dark Forest level in E³, a bamboo maze with treehouses, ladders, bridges and five wormhole pairs |
 
-Both are exported from the programs that first built them; the map files are what other programs read.
+Each is exported from the program that first built it; the map files are what other programs read.
 
 ## Conventions
 
@@ -64,12 +70,17 @@ Both are exported from the programs that first built them; the map files are wha
 | `regions` | zones and the boundary (below), optional |
 | `appearance` | `{"style": name, ...}`: how the renderer details surfaces (below) |
 | `scatter` (optional) | `{"seed", "spacing_m", "grow_frac"}`: how the map's generator scattered its decorative plants (seed, grid step before jitter, chance a clear point grows one), so the layout can be regenerated or re-seeded |
-| `laser` (optional) | `{"rgb": [r, g, b]}`: the linear colour every team's lasers share on this map; without it, lasers take team colours |
+| `laser` (optional, old) | `{"rgb": [r, g, b]}`: the colour every team's lasers share on this map; without it, lasers take team colours. One of three old ways to give the laser colour, which moves to `level.json`'s `laser_color` ([`LEVELS.md`](LEVELS.md)) |
+| `atmosphere` (optional) | fog, blowing sand and wind (below) |
 
 ### Materials
 
 `{"id", "name", "color": [r, g, b], "kind"}`, ids from 0 to 255, each once. `kind` is `empty` (id 0 only), `solid`,
 `glass` (see-through for light and lasers; stops players) or `light` (solid and glowing in its own colour, unlit).
+
+A `light` material named `<team> console <n>` (`blue console 1`, numbered from 1 in each team) is a console of that
+team, and each structure or box made of one is one of the team's pylons ([`LEVELS.md`](LEVELS.md), Names engines
+read). Other names may mean something to a style (same page).
 
 ### Structures
 
@@ -155,7 +166,6 @@ An optional `"flicker_frac"` (0 to 1) makes it a flame: its brightness wavers, d
   circle. Both are unit directions in the world origin's local frame, perpendicular to each other. How the band looks
   (brightness, colour, dust) is the appearance style's.
 - `fog_m` (optional): a surface d meters away keeps e^(−d/`fog_m`) of its colour, and the rest is `horizon_color`.
-- `appearance.laser_color` (optional, a colour): every team's lasers in this one colour (Snow Planet: green); without it, each team's lasers are in its team's colour.
 - `snow_per_m3` (optional, 0 to 1): light snow falling everywhere, as the chance that a cubic meter of air holds a flake (Snow Planet, 0.04). A program without falling snow ignores it.
 
 ### Sphere ground and shells
@@ -173,6 +183,31 @@ For maps inside a sphere (City Sphere), in Euclidean space with the origin at th
   missing within that angle of the unit `direction`, so players and shots pass. A shell with `thickness_m` equal to its
   `radius_m` is a solid ball.
 
+### Atmosphere
+
+`atmosphere` (optional, Dust): `{"fog", "sand", "wind"}`, each optional.
+
+- `fog`: `{"color", "start_m", "distance_m", "max_frac"}`: a sandstorm's haze of `color`, starting `start_m` from
+  the eye and thickening with e-folding distance `distance_m`, which hides at most `max_frac` of what is behind it.
+- `sand`: `{"gust_frac", "streak_frac", "sheet_frac"}`, each 0 to 1: how much blowing sand thickens the fog in gusts,
+  streaks near the eye and sheets drifting downwind.
+- `wind`: `{"direction", "log_index_gradient_per_m", "segment_m", "gust", "laser_gradient_per_view_gradient"}`: a
+  refractive index ln n = k d, with d the signed distance to the plane through the origin perpendicular to the
+  horizontal unit `direction` and k `log_index_gradient_per_m`, so light bends downwind; rays follow it in chords of
+  `segment_m`. `gust` (optional) `{"seed", "strength_frac", "size_m", "speed_m_per_s"}` varies its strength (not its
+  direction) by up to `strength_frac`, with three waves `size_m` across drifting downwind on the shared UTC clock.
+  `laser_gradient_per_view_gradient` (optional, default 1) is how many times more lasers bend than light.
+  `demos/dust_rust/README.md` gives the details.
+
+### Blizzards and the torus
+
+- `regions.blizzards` (optional, Snow Planet): `[{"name", "u_m", "v_m", "radius_m", "height_m", "speed_frac",
+  "freeze_health_per_s", "shot_reach_m", "fog_per_m", "snow_per_m3"}]`: an upright cylinder at Fermi (u, v), inside
+  which players move at `speed_frac` of their speed and lose `freeze_health_per_s` of their health a second, a laser
+  goes only `shot_reach_m` in, and the air holds fog and snow of those densities.
+- `space.torus_periods_m` (optional, euclidean only): `[x, z]`, the periods of a flat torus T² × ℝ along the world's
+  x and z. Today's engine ends the level at its edge rather than looping it.
+
 ### Variation
 
 - `variation` (optional): `{"seed": N}`, the seed of a map's small random variation (block offsets and heights,
@@ -181,9 +216,10 @@ For maps inside a sphere (City Sphere), in Euclidean space with the origin at th
 
 ### Lasers
 
-- `lasers` (optional): the colour of every laser shot on this map, either `{"color": [r, g, b]}` for every team (a
-  golden-white map) or `{"team_colors": [[r, g, b], [r, g, b]]}`, blue's then red's. Without it, shots take the
-  game's team colours.
+- `lasers` (optional, old): the colour of every laser shot on this map, either `{"color": [r, g, b]}` for every
+  team (a golden-white map) or `{"team_colors": [[r, g, b], [r, g, b]]}`, blue's then red's. Without it, shots take
+  the game's team colours. It, `laser` and `appearance.laser_color` are three old ways to say one thing: the colour
+  moves to `level.json`'s `laser_color` ([`LEVELS.md`](LEVELS.md)), and a level may set it in one place only.
 
 ### Spawns
 
@@ -223,8 +259,8 @@ renderers choose the fade and the glow.
   `{"model": "ambient_sun", "ambient", "sun"}` (a constant plus Lambert sunlight) or
   `{"model": "lunar_lambert", "lommel_seeliger_frac", "ambient", "earthshine", "sun_intensity", "shadows": bool}`
   (that mix of Lommel–Seeliger and Lambert reflectance, with straight shadow rays toward the sun if `shadows`).
-  `appearance.laser_color` (optional, display RGB 0 to 1) is one laser colour every team fires on the map (Dust's
-  golden white); without it each team fires its own colour.
+  `appearance.laser_color` (optional, old, 0 to 1) is one laser colour every team fires on the map (Dust's golden
+  white, Snow Planet's green); without it each team fires its own colour (see Lasers).
 
 ## Models
 
@@ -265,4 +301,5 @@ make -C common/maps test
 ## Changing the format
 
 A change that existing readers can ignore (a new optional field, a new style) keeps `version`; any other change
-raises it, updates this page, the schema, the validator and every map and reader in the same stack of PRs.
+raises it, updates this page, the schema, the validator and every map and reader in the same stack of PRs. The same
+holds for `level.json` and `levels.json` ([`LEVELS.md`](LEVELS.md)).

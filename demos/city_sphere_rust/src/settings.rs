@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[cfg(target_os = "macos")]
-use crate::key_bindings::KeyBindings;
+use crate::key_bindings::{self, KeyBindings};
 pub use crate::play_settings::{
     AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
     MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
@@ -357,6 +357,8 @@ impl PerPlayerSettings {
     /// `view.wormhole_tint_frac` and `view.milky_way_brightness_frac` at most 1. The keys in
     /// `REMOVED_PLAYER_KEYS`, which older versions saved, are dropped (`drop_removed_keys`), and those in `ADDED_PLAYER_KEYS`, which
     /// older versions didn't save, take their built-in values when missing (`add_missing_keys`).
+    /// Keys saved before W-140 (hold Tab for the map, Esc for the menu) are upgraded
+    /// (`key_bindings::upgrade_saved_names`).
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
@@ -367,8 +369,9 @@ impl PerPlayerSettings {
         let defaults: serde_yaml::Value = serde_yaml::from_str(BUILTIN_PLAYER_YAML)
             .expect("the built-in player_settings.yaml is YAML (tested)");
         add_missing_keys(&mut yaml, &defaults, &ADDED_PLAYER_KEYS);
-        let file: PlayerFile =
+        let mut file: PlayerFile =
             serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
+        key_bindings::upgrade_saved_names(&mut file.keys);
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         for (key, value_frac) in [
@@ -438,6 +441,7 @@ mod tests {
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
     //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`, the four `view.head_bob` sway and swing keys) | present (built in), missing in an old save (gets its built-in value), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
+    //! | Menu and map keys (W-140, hold Tab for the map, Esc for the menu) | current (built in), saved before (`release_mouse`, `open_menu` on `Tab`: loads with `Escape` for the menu and `Tab` for the map), `release_mouse` beside `show_map` (fails) | `builtin_settings_read_and_survive_json`, `saves_from_before_the_held_map_open_the_menu_with_escape` |
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
@@ -689,5 +693,34 @@ mod tests {
             .expect("a key that wasn't added later still fails when missing")
             .to_string();
         assert!(error.contains("flashlight"), "{error}");
+    }
+
+    #[test]
+    fn saves_from_before_the_held_map_open_the_menu_with_escape() {
+        const SHOW_MAP_LINE: &str = "  show_map: [Tab]";
+        const OPEN_MENU_LINE: &str = "  open_menu: [Escape]";
+        const OLD_RELEASE_MOUSE_LINE: &str = "  release_mouse: [Escape]";
+        let old_save: String = BUILTIN_PLAYER_YAML
+            .replacen(SHOW_MAP_LINE, OLD_RELEASE_MOUSE_LINE, 1)
+            .replacen(OPEN_MENU_LINE, "  open_menu: [Tab]", 1);
+        assert!(!old_save.contains("show_map") && old_save.contains("open_menu: [Tab]"));
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
+        assert!(
+            loaded
+                .keys
+                .matches(Action::OpenMenu, Control::Key(Scancode::Escape))
+        );
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let both: String = BUILTIN_PLAYER_YAML.replacen(
+            SHOW_MAP_LINE,
+            &format!("{SHOW_MAP_LINE}\n{OLD_RELEASE_MOUSE_LINE}"),
+            1,
+        );
+        let error: String = PerPlayerSettings::FromYaml(&both, "test")
+            .err()
+            .expect("release_mouse beside show_map still fails")
+            .to_string();
+        assert!(error.contains("release_mouse"), "{error}");
     }
 }

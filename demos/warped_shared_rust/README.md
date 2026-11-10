@@ -33,7 +33,7 @@ the settings sections, `weapons`, `movement` (through `Ground`), `gait`, `avatar
 | `movement` | the rules of moving (`MoveState::step`): crouching, sprint energy, the head bob's steps, a hit's and crouching's slow; each level moves the player in its own space (`VoxelPlayer::step`, City Sphere's `CityWorld::move_player`, Dark Forest's `Forest` through the `Ground` trait and a step's `MoveIntent`); a crouch's height share and its 4-bit network level (`get_crouched_height_frac`, `encode_crouch_level`) | yes |
 | `mesh`, `avatar_model` | glTF models of the maps' structures and the players' robot body, posed by a clip, and squashed for a crouched player (`make_squashed`) | yes |
 | `spaceships` | the spaceships in the sky | yes |
-| `key_bindings`, `exit_prompt` | a player's controls (SDL), and the "leave the game?" prompt | no (SDL) |
+| `key_bindings`, `menu_and_map` | a player's controls (SDL), with saved ones from older builds upgraded (`upgrade_saved_names`); what covers the view (`MenuAndMap`: the menu on `Esc`, which frees the mouse and whose QUIT page leaves the level, and the map while `Tab` is held, over the game going on; W-140, hold Tab for the map, Esc for the menu), and the menu's tab bar with its optional MATCH page (`format_tab_bar`, `MATCH_PAGE_NAME`) | no (SDL) |
 | `texture_arrays` | mipmapped Metal texture arrays from image files | no (Metal) |
 | `render_mesh` | the maps' models as GPU buffers for the voxel renderer | no (Metal) |
 | `viewmodel` (+ `viewmodel.metal`) | the gun held in hand, drawn over the scene | no (Metal) |
@@ -42,6 +42,12 @@ the settings sections, `weapons`, `movement` (through `Ground`), `gait`, `avatar
 | `hud` | the HUD: the crosshair, the bars (health, ammo or heat, sprint energy, the console being turned off; `HudBars`, `make_bar_rects`) and their pulses (`HudPulses`), the hit effect's look (`make_hit_effect`), the banner's lobby and "YOU DIED" lines, the HUD line's gun | no (Metal) |
 | `gait` | which of the robot's clips another player shows, and where in it, from their speed over the ground and take-off (Lunar's `avatar_animation` rules; every level's) | yes |
 | `third_person` | the third-person view's switch (`ViewSwitch`: `V`, eased, back to the eye while aiming) and its boom in flat space (`place_camera_flat`, City Sphere's and Dark Forest's); Lunar Surface's copies place it in their curved space themselves | yes |
+| `app` | the interface between the one-window app (`../warped_mvp_rust/`) and a level: `LevelJoin`, `LevelEnd`, `MatchLink`, `LevelWindow`, `play_level_fn_t` | yes (`LevelWindow` macOS) |
+| `metal_window` | the one window a program draws in with Metal: `MetalWindow` (`Open`: SDL3, a window made with `SDL_WINDOW_METAL`, its `CAMetalLayer` in `BGRA8Unorm`, not framebuffer-only, on the system's Metal device, and the event pump; full screen or hidden by `WindowOptions`), lent to a level with `get_level_window` (`NoMatchLink` for a level run alone); `set_window_title` through a shared reference. The one-window app and every level run alone open their window with it | no (SDL, Metal) |
+| `match_state`, `match_protocol`, `match_menu` | the match's rules (and free play on one level), what its server and clients share (levels file, view, `MatchClient`, the game master's `play` message, the network beacon) and its progression page and MATCH page lines; moved from `../warped_match_rust/` | yes |
+| `page` | a menu page's shapes in the debug font, drawn with SDL (`draw_shapes`) | yes (`draw_shapes` macOS) |
+| `player_settings` | `player_settings.yaml`: reading (old saves upgraded), checking, saving, and the numbers a settings page edits; the levels' own copies switch to it when they become libraries | no (SDL keys) |
+| `settings_editor` | a settings page any menu shows: numbers (stepped or typed), key bindings, buttons, over a settings file's keys | yes |
 | `weapons` | the two guns' state (`Weapons`: fire, reload, heat and overheat, recoil, aim, each shot's noise), `Gun`, how much a hit weighs, the gun in hand's place and sway (`make_wand`, `get_sway`; `make_wand_camera_from_muzzle` for a level that draws a gun model there), `MUZZLE_M` | no (Metal) |
 
 `overlay` and `texture_arrays` are parts of files that differ per level, taken out verbatim: the overlay types of
@@ -85,8 +91,8 @@ warped_shared = { path = "../warped_shared_rust" }
 
 ```rust
 // src/main.rs, beside the level's own `mod` lines
-use warped_shared::{app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, hud_bars, key_bindings, mesh,
-    overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel};
+use warped_shared::{app_bundle, avatar_model, fps_demo_assets, geometry, hud_bars, key_bindings,
+    menu_and_map, mesh, overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel};
 use warped_shared::hud::get_crosshair_rects;
 use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 ```

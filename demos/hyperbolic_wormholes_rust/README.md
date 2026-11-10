@@ -25,16 +25,19 @@ make join-game SERVER=127.0.0.1
   the chosen game as itself with that game's flags, logs it to `~/Library/Logs/Warped/`, and shows a pop-up if
   it fails. An online game asks once for the game's password and keeps it in
   `~/Library/Application Support/Warped/game_password`; a server that refuses it makes the game ask again.
-- Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
-  `Esc` or `N` goes back to the game). The window's close button quits at once.
+- Click to capture the mouse. `Esc` opens the menu and frees the mouse, and `Esc` again closes it and captures the
+  mouse; the menu's QUIT page leaves the game with `Return` or `Y`. The window's close button quits at once.
+- Hold `Tab` to see the whole map over the game (the menu's MAP page, below): the game goes on and you can still move
+  and look; let go to hide it (W-140, hold Tab for the map, Esc for the menu).
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
   (`--player-settings`) to `make join-game`.
-- `Tab` opens the menu on its SCORES page (below); `E` turns to the settings page, of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
+- `Esc` opens the menu on its SCORES page (below); `E` turns to the settings page, of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
-  (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
+  (or the `--player-settings` file), which later games load by themselves. `Esc` closes it. Your player
   stands still while it is open, but the game goes on.
-- `Q` and `E` turn the menu's pages: SCORES, SETTINGS (above), MAP and CREDITS. MAP is the whole map from above with you on it as a disk in
+- `Q` and `E` turn the menu's pages: SCORES, SETTINGS (above), MAP, CREDITS and QUIT (`Return` or `Y` leaves the
+  game; in the one-window app, back to its game menu). MAP is the whole map from above with you on it as a disk in
   your team's colour pointing the way you face: the ground's relief, structures brighter the higher they are,
   consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
   zones' edges (dashed) and the playable boundary. The map is drawn in its Fermi coordinates

@@ -24,7 +24,14 @@ make join-match TEAM=red                # terminal 3: red's (or: make bot-match 
 popd
 ```
 
-Alone: `make serve-match`, `make join-match TEAM=blue`, `make bot-match TEAM=red`. The bot turns
+Alone, in one command: `make play-alone` (the match server, a bot on red that sits out every round
+so rounds can start, and your window), or with bots: `make play-bots ALLIES=2 ENEMIES=3
+BOT_OBJECTIVE=fight` (bots on your team and on the other, 0 to 4 and 0 to 5, at most 7 since a level
+takes 8 players; `consoles` or `fight`), both `tools/play_with_bots.sh`, logs in
+`.artifacts/play_with_bots/<run_id>/`. **Click a level on the progression page to play it now**
+(free play on that level, round after round; the wavefronts still show the match's way); the
+"back to the match" button or `M` goes back to the match. By hand: `make serve-match`,
+`make join-match TEAM=blue`, `make bot-match TEAM=red`. The bot turns
 off blue's consoles (10 s each, 3 on Lunar Surface), so be quick. From another Mac on the same
 network: `make join-match SERVER=<server's address> TEAM=red`. Without `TEAM`, press 1 (blue) or
 2 (red) in the match window.
@@ -77,6 +84,16 @@ wins becomes the attacker, at its own wavefront (wavefronts never move back). Ci
 played once. 30 minutes without a winner is a tie. Unit tests: the design doc's worked example
 row by row, and every win sequence up to 14 rounds (866) against a separate reading of the
 rules.
+
+## The one-window app and the game master
+
+`../warped_mvp_rust/` (the official MVP) hosts and joins matches from one window. For it the match
+server announces itself on UDP 47851 (a `WARPMTCH` beacon every 0.5 s: port, players per team,
+phase, round), and takes a `play <level>` or `play match` datagram from any client (the game
+master): free play on one level, round after round with each team's wins counted, or back to the
+match where it was; either ends the round under way, and every client follows into the next. The
+match's state, protocol and progression page live in `warped_shared` (`match_state`,
+`match_protocol`, `match_menu`); this crate's files of those names re-export them.
 
 ## Level interface
 

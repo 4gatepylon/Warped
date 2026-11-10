@@ -11,6 +11,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-143 Declarative levels.** The user, 2026-11-09: "Please use proper dry and come up with a clear way to specify maps. Imagine—in the future we want to be able to DEFINE new maps. Not yet, but that will be out there in the future. to enable that, you will ned to set things up a declarative format properly for that. Assume we won't need to support new map topologies/space/types than waht is currently therE". Design in #485 (`common/maps/LEVELS.md`). Claimed by Claude Code (the lead's subagent, worktree agent-a6fba5f1c56b9a7c3), branch `claude/declarative-levels-validator`, 2026-11-09. Spec #485 (merged), validator #489.
+  - **Where the work is:** worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a6fba5f1c56b9a7c3` on the user's Mac; branch `claude/declarative-levels-validator` (pushed): the validator's level checks and their tests. Step 2 (moving each level onto `level.json`, `common/maps/LEVELS.md`'s migration plan) waits for the levels-as-libraries PRs. State on 2026-11-09.
 - [~] **W-126 Same play in every level.** "it looks like in Space Station you don't have the same health bars and
   stuff. All the different levels should have the health bars and the weapons and sort of the same stuff that we made
   happen in Lunar, including even the speckled noise for the lasers and the head bobbing and stuff like that when
@@ -51,7 +53,8 @@ is in [`AGENTS.md`](AGENTS.md).
     sprint energy, crouch, jump, air control, step, a hit's slowing, the shot delay after moving, the settings'
     respawn delay; Lunar's flashlight and exit prompt; `claude/dark-forest-movement`, open, 2026-11-09) and #455
     (Lunar's beam looks and speckle, in gold; `claude/dark-forest-beams`, open, 2026-11-08); still missing there: the
-    Tab pages, the minimap, third person, thrown wormholes.
+    Tab pages, the minimap, third person, thrown wormholes. Dark Forest's thrown wormholes (`Q`): #479
+    (`claude/dark-forest-thrown-wormholes`, open, 2026-11-09).
     Shared code: #447 (`demos/warped_shared_rust/`, the files identical in Lunar Surface, Dust, Snow Planet, City
     Sphere and the match, moved into one library they all use, no change in play or pictures;
     `claude/shared-level-code`, merged); its `PLAN.md` is the next step, one movement, guns, health, HUD and robots
@@ -104,9 +107,6 @@ is in [`AGENTS.md`](AGENTS.md).
   them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
   when turning inside a wormhole, which the house already paints from the pixels around it; "it doesn't need to be
   100% correct physically"), and Lunar Surface should match the WebGL level.
-- [ ] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
-  together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
-  Mac over loopback.
 - [ ] **W-44 Smooth wormhole interior.** Inside a wormhole, looking sideways shows a grainy texture; it should look
   pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
 - [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
@@ -117,9 +117,41 @@ is in [`AGENTS.md`](AGENTS.md).
 - [?] **W-139 Dark Forest thrown-wormhole sheet.** A bug found by agents on 2026-11-09: in Dark Forest's `spawn` view, a hard straight-edged sheet covers part of a thrown wormhole's lens (upper right), like a clipping glitch in the lens capture.
   #478: it was red's lift mouth on its deck, its lens reaching through the deck; no lens is drawn from below a
   mouth's floor now, so the deck's underside (the sheet) hides it whole.
+- [?] **W-141 One window for the whole game.** The user, 2026-11-09: "please make it so that all this stuff is one window (if you need to make it one app thats fine, yuo can make a new demo for that and in the main readme say that the official mvp version is in that new folder)", and "thing 2 is to be able to play against gbots or alone selecting from the game itself". Also: "please also make sure to make it possible to hop into any of the maps", and "from the menu (game menu) it should be possible to see which map we are on (where the wavefronts) and stuff like that", "game menu and also in-game menu I mean". The app shell (main menu, game menu, any one level, the match status in both menus) is in `demos/warped_mvp_rust/` (#490; the levels in the window, game settings and the Mac app follow).
+- [ ] **W-144 Gravity toward black holes and wormholes.** The user, 2026-11-09: "make gravitational attraction to black holes and wormholes", "it should be relatively weak, but noticeable; i.e if you run towards a black hole you are sped up, if you are runing aw4ay you are slowed", "the acceleration should be elss than walking speed but can be more than coruch speed (in all maps, so it might vary)".
+- [ ] **W-145 No walls at map edges.** The user, 2026-11-09: "on all maps there are NOT walls on the ends and as you walk off the edges of the map you get slowd with the same efefct as dust and lunar (i.e. it should zenos paradox you basically)", "also you can get rid of the toroidal topology to have just euclidean specificalyl for dark forest and snow planet", "(so snow planet and dark forest have perma slow mechanics", "since dark forest wont have a wall it needs to be such that you are slowed in teh forest so that you see trees in front of you as you walk off the map (ie you should never see empty space", "(you an put a caveat in game design that the toroidal maps are not actually toroidal and that that is a worok in progress btw)".
+- [ ] **W-147 Shooting while moving, by game setting.** The user, 2026-11-09: "add to wishlist the ability to toggle via game settings whether you can shoot while jumping, and seperately while moving laterally (i.e. while walking) and seperately while sprinting".
+- [ ] **W-148 Team boundary planes in every level.** The user, 2026-11-09: "all levels should have the red/blue boundary planes that slightly shine (blue red)". Lunar Surface has them already (W-64 (zone planes)).
+- [ ] **W-149 Shimmer through boundary planes.** The user, 2026-11-09: "the visuals through those boundary planes should shimmer a little bit until you cross them". Builds on W-148 (team boundary planes in every level).
+- [ ] **W-150 Arrow keys and clicks for menu pages.** The user, 2026-11-09: "enabling arrow keys for switching between menu panes and also enabling clicking on them".
+- [ ] **W-151 Menu layout and help tooltip.** The user, 2026-11-09: "menu page have menu name at the top and the options BELOW it (i.e. the panes "which pane you are in" with brackets and the pane names", "there should also be a question mark that fi you hver tells you the tooltip for how to navigate the menu instea edof showing by default the instruction Q/E".
+- [ ] **W-152 Pylons stay off, as a setting.** The user, 2026-11-09: "pylons once turned off are turned off forever and that this is a toggled setting (put that in wishlist, dont impl yet)", "that way if you jump back to a level that was previously played that you just barely lost, it takes less time to win again in theory". Not to be built yet.
+- [ ] **W-153 Shot through a wormhole looks wrong on the other side.** A bug the user found playtesting, 2026-11-09: "a bug where bug shot across a wormhole shows up with the wrong visuals on the other side (looks like it's dust right on the surface of teh wormhole, but it shouldk be warped instead)". The user: "do NOT fix this yet".
+- [ ] **W-154 Voice agent for map variants.** The user, 2026-11-09: "a way to use a voice agent to spin up map variants or modify levels even while they are running". Builds on W-143 (declarative levels).
+- [?] **W-155 Play against bots.** The user, 2026-11-09: "add to wishlist ability to play against bots". Also asked for in W-141 (one window for the whole game): "thing 2 is to be able to play against gbots or alone selecting from the game itself"; being built in the app (play alone and play against bots from the main menu, and `make play-alone` / `make play-bots` for the match). And: "note wishlist paly agaisnt bots includes playing with multiple allied and enemy bots so that you can play 5v5 or smth like that". #515: `make play-alone`, `make play-bots ALLIES= ENEMIES= BOT_OBJECTIVE=` in the match, and bots on your team and the other from the app's main menu (at most 7: a level takes 8 players).
+- [ ] **W-156 Friendly fire, by game setting.** The user, 2026-11-09: "add setting in game settings to toggle whether or not friendly fire is possible".
+- [ ] **W-157 Bullet drop, by game setting.** The user, 2026-11-09: "add setting in game settings for bullet drop".
+- [ ] **W-158 Per-map game settings.** The user, 2026-11-09: "settings that are custom for maps: Gravity on lunar; Reflectivity and n bounces in sphere; wind speed on dust; snowstorm size in ice planet; nothing in dark forest but it should still have that menu /(and have it be empty)". A per-level section of the game settings in the game menu, from each level's definition (W-143 (declarative levels)).
+- [ ] **W-159 Tell wormhole pairs apart.** The user, 2026-11-09: "some way to tell apart which pairs of portals go together" (portals being wormholes), "because sometimes it's highly non-obvious where will go where". And: "note how we might use colors per player or per team or something else for this identiifcation and that it should be possible to toggle/switch around". Ideas to choose from: one colour per wormhole pair (a rim or glow shared by both mouths), the thrower's player colour for thrown pairs, team colours, or a matching symbol or number on both mouths; which one is used is a setting the player can toggle.
+- [ ] **W-160 Play any variant or commit quickly.** The user, 2026-11-09: "skills to be able to run multiple differnt game variants side by side and/or have some "link to be able to play the game at this specific commit hash" where that link is always available in every commit (or easy to erive i.e. by pasting hash into some site)", "this way it's super easy to test super quickly". This extends the `interactive-review` skill (`.agents/skills/interactive-review/`), whose review lanes are the first step: the user, "interactive-review skill is like the fiorst step towards what I just describedcl".
+- [ ] **W-161 Real toroidal flat space.** The user, 2026-11-09: "actually implemneting toroidal flat space". For now Snow Planet and Dark Forest are plain euclidean with slowing edges (W-145 (no walls at map edges)); Snow Planet's looping world is parked on its stack (#423, #424, #430, #438, #446), over budget at 3440x1440 when it stopped.
+- [ ] **W-162 Shots come sideways from the crosshair.** A bug the user found playtesting, 2026-11-09: "bullets come sideways from the crosshair in dust (at least dust but unsure about toehrs)". To check: whether it is Dust's wind bend (2.4x, by design, which makes shots land off the crosshair even at 10 m), the shot's stray (sniper noise, rifle heat), the beam drawn from the gun's muzzle rather than the eye, or third person's aim.
+- [ ] **W-163 Aim through a scope.** The user, 2026-11-09: "being able to aim through a scope for both rifles". Today aiming zooms the view (2.5x sniper, 1.5x rifle) without a scope picture.
+- [ ] **W-164 More weapons.** The user, 2026-11-09: "adding more weapons". Today there are two guns, the sniper and the rifle.
+- [ ] **W-165 Money to buy wormholes.** The user, 2026-11-09: "money mechanics that allow you buy wormholes". Today each player has two thrown wormholes (Q) for free.
+- [ ] **W-166 Clear rules for destroying thrown wormholes.** The user, 2026-11-09: "generally understanding and determinising the user wormhole destruction mechanics (Can be they be destroyed after placement?) and how to do it right so taht the wormhole doesn't have wierd non-determinism about whether it bends bullets or is killed by them". Today (Lunar's rules, also in Dark Forest since #479) a shot through an enemy pair's throat damages it (2 sniper or 5 rifle hits break it) while the shot is also carried through, and a shot at a lone mouth's ball destroys it at once; first step: write down exactly when a shot bends, damages or both, on server and window, and make it the same every time.
+- [ ] **W-167 Ownership over wormholes.** The user, 2026-11-09: "being having ownership over wormholes". Related: W-159 (tell wormhole pairs apart), W-165 (money to buy wormholes) and W-166 (clear rules for destroying thrown wormholes).
+- [ ] **W-168 Fading out into a black hole.** The user, 2026-11-09: "a graphical effect where the world gets darker and arker from outside in (and dims broadly, blurring) when you are pulled into a dark hole (NOT worm hole))". Related: W-144 (gravity toward black holes and wormholes).
+- [ ] **W-169 Better sounds.** The user, 2026-11-09: "getting sounds for all the guns etc.. and that the sounds should be better than what they are right now". New sounds come through the adding-assets skill (approval and credits).
+- [ ] **W-170 Wishlist to GitHub issues.** The user, 2026-11-09: "switching from wishlist markdown to github issues". Issues follow the github-issue skill (title format, template, labels); the agents' rules about the wishlist (in each demo's AGENTS.md) would move with it.
+- [ ] **W-171 The game out of demos/.** The user, 2026-11-09: "refactoring the code to not be in demos/ but instead to be in the main location as the main game". Related: the open refactor plan PR #375 (`game/REFACTOR_PLAN.md`: a `game/` workspace with warped-core, client and server), and the one-window app in `demos/warped_mvp_rust/` (W-141 (one window for the whole game)).
 
 ## Pending user review
 
+- [?] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
+  #486: in every level (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest): holding `Tab`
+  shows the map over the game while play goes on; `Esc` opens the menu (freeing the mouse), `Esc` again closes it;
+  the menu's new QUIT page leaves the level, and a MATCH page shows the app's match status. Shared `warped_shared::menu_and_map`; old saved key bindings upgrade.
 - [?] **W-138 No aliasing.** The user, 2026-11-09, about W-136 (sharp centre, soft edges): "I think middle sharp is fine but there has to be enough blur to remove aliasing elsewhere", "aliasing is a big issue", "like no one ever ever like aliasing so you gota figure out how to deal with. that in particular". Applies to every level: the soft edges, half-resolution lenses and the rest of the image.
   #469: Lunar Surface, the match, Dust and Snow Planet: soft edges and Lunar's half-resolution lens shown through a
   smooth cubic B-spline, lasers kept sharp in lenses, and FXAA on every frame (0.2-0.8 ms at 3440x1440).
@@ -376,6 +408,11 @@ are here too, since the user hadn't confirmed them.
 ## Done
 
 Confirmed by the user after testing.
+
+- [x] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
+  together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
+  Mac over loopback.
+  Confirmed by the user, 2026-11-09: "it ahs been tested between multiple players on mac and it owrks".
 
 - [x] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
   get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the

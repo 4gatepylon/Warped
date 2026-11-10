@@ -289,18 +289,27 @@ inline float3 grade_display(float3 color) {
  * partner, floor height), and (mouth count, 1 while capturing, atlas rows, unused); then each
  * mouth's live slot plus 1 (0 for none, negative when a robot is within its reach), the robots'
  * bounding spheres, (unused, sphere count, near plane, glow segment count), and the lasers' and other
- * glows' segments (start and end, w their radius).
+ * glows' segments (start and end, w their radius); then, for each thrown mouth (the mouths after the atlas's
+ * rows), its view's slot and the tint (linear RGB) of what shows through it.
  */
 struct LensUniforms {
-    float4 centres[16];
-    float4 shapes[16];
+    float4 centres[32];
+    float4 shapes[32];
     float4 params;
-    float4 live_slots[4];
+    float4 live_slots[8];
     float4 movers[16];
     float4 live_params;
     float4 glow_starts[24];
     float4 glow_ends[24];
+    float4 thrown_looks[16];
 };
+
+/**
+ * @brief `THROWN_TINT_FRAC` and `THROWN_TINT_FLOOR` tint what shows through a thrown mouth in its colour, as Lunar
+ * Surface's `render_voxel.metal` does: mixed this far toward the tint scaled by the colour's luminance plus the floor.
+ */
+constant float THROWN_TINT_FRAC = 0.45;
+constant float THROWN_TINT_FLOOR = 0.08;
 
 /**
  * @brief `LENS_DEPTH_NEAR_M` and `LENS_DEPTH_FAR_M` bound the atlas's log-encoded alpha (the static
@@ -585,26 +594,106 @@ static float3 get_display_color(constant FrameUniforms& frame, float3 color) {
 }
 
 /**
+ * @brief `get_thrown_index` is mouth w's index among the thrown mouths, −1 for a map's mouth (an atlas row).
+ * @par Example
+ * @code
+ * int k = get_thrown_index(lens, w);
+ * @endcode
+ */
+static int get_thrown_index(constant LensUniforms& lens, int w) {
+    return w - int(lens.params.z + 0.5);
+}
+
+/**
+ * @brief `sample_thrown_view` is the static world (scene-linear HDR) seen from thrown mouth k's centre in direction
+ * d, from its view's slot: a cubic B-spline of the 4 × 4 nearest texels of the face d falls on, in four bilinear
+ * taps kept inside that face, so the small view magnified through the throat stays smooth (W-138, no aliasing).
+ * @par Example
+ * @code
+ * float3 hdr = sample_thrown_view(lens, thrown_color, k, d);
+ * @endcode
+ */
+static float3 sample_thrown_view(constant LensUniforms& lens, texture2d_array<float> thrown_color, int k, float3 d) {
+    constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+    float2 size = float2(thrown_color.get_width(), thrown_color.get_height());
+    float axis_cos;
+    float2 uv = get_lens_face_uv(d, size.y, axis_cos);
+    float face_start_px = floor(uv.x * 6.0) * size.y;
+    float2 p = uv * size - 0.5, i = floor(p), f = p - i, f2 = f * f, f3 = f2 * f;
+    float2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    float2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0, w3 = f3 / 6.0;
+    float2 g0 = w0 + w1, g1 = w2 + w3;
+    float2 lo = float2(face_start_px + 0.5, 0.5), hi = float2(face_start_px + size.y - 0.5, size.y - 0.5);
+    float2 h0 = clamp(i - 0.5 + w1 / g0, lo, hi) / size, h1 = clamp(i + 1.5 + w3 / g1, lo, hi) / size;
+    uint slice = uint(lens.thrown_looks[k].x + 0.5);
+    float4 c = g0.y * (g0.x * thrown_color.sample(linear_sampler, h0, slice)
+                       + g1.x * thrown_color.sample(linear_sampler, float2(h1.x, h0.y), slice))
+        + g1.y * (g0.x * thrown_color.sample(linear_sampler, float2(h0.x, h1.y), slice)
+                  + g1.x * thrown_color.sample(linear_sampler, h1, slice));
+    return c.rgb;
+}
+
+/**
+ * @brief `sample_mouth_view` is the static world seen from mouth w's centre in direction d, display-encoded: a
+ * map mouth's from its atlas row, a thrown mouth's from its view, graded as the frame is.
+ * @par Example
+ * @code
+ * float3 color = sample_mouth_view(frame, lens, atlas, thrown_color, w, d);
+ * @endcode
+ */
+static float3 sample_mouth_view(constant FrameUniforms& frame, constant LensUniforms& lens, texture2d<float> atlas,
+                                texture2d_array<float> thrown_color, int w, float3 d) {
+    int k = get_thrown_index(lens, w);
+    if (k < 0) {
+        return sample_lens_atlas(lens, atlas, w, d);
+    }
+    return get_display_color(frame, sample_thrown_view(lens, thrown_color, k, d));
+}
+
+/**
+ * @brief `get_mouth_static_distance_m` is how far the static world is from mouth w's centre in direction d: a
+ * map mouth's from its atlas row's alpha, a thrown mouth's from its view's depth (the sky is 1e30 m away).
+ * @par Example
+ * @code
+ * float wall_m = get_mouth_static_distance_m(lens, atlas, thrown_depth, w, d);
+ * @endcode
+ */
+static float get_mouth_static_distance_m(constant LensUniforms& lens, texture2d<float> atlas,
+                                         depth2d_array<float> thrown_depth, int w, float3 d) {
+    int k = get_thrown_index(lens, w);
+    if (k < 0) {
+        return get_static_distance_m(atlas, w, d);
+    }
+    float face_px = float(thrown_depth.get_height());
+    float axis_cos;
+    float2 uv = get_lens_face_uv(d, face_px, axis_cos);
+    uint2 texel = uint2(uv.x * float(thrown_depth.get_width()), uv.y * face_px);
+    float depth = thrown_depth.read(texel, uint(lens.thrown_looks[k].x + 0.5));
+    return depth > 0.0 ? lens.live_params.z / depth / axis_cos : 1e30;
+}
+
+/**
  * @brief `add_live_color` puts what live slot `slot` shows over the atlas color `color` of mouth w:
  * the robot at `hit_offset` from w's centre if the ray hit one that the static world doesn't hide
  * (`is_hit`), otherwise, if the ray passes a laser or glow (`has_glow`), its light at `glow_offset` from w's
  * centre, unless the static world hides it.
  * @par Example
  * @code
- * color = add_live_color(frame, atlas, live_color, live_depth, lens, w, slot, is_hit, hit_offset, has_glow,
- *                        glow_offset, color);
+ * color = add_live_color(frame, atlas, live_color, live_depth, thrown_depth, lens, w, slot, is_hit, hit_offset,
+ *                        has_glow, glow_offset, color);
  * @endcode
  */
 static float3 add_live_color(constant FrameUniforms& frame, texture2d<float> atlas,
                              texture2d_array<float> live_color, depth2d_array<float> live_depth,
-                             constant LensUniforms& lens, int w, int slot, bool is_hit,
+                             depth2d_array<float> thrown_depth, constant LensUniforms& lens, int w, int slot, bool is_hit,
                              float3 hit_offset, bool has_glow, float3 glow_offset, float3 color) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float face_px = float(live_color.get_width()) / 6.0;
     float axis_cos;
     if (is_hit) {
         float robot_m = get_live_distance_m(lens, live_depth, slot, hit_offset);
-        if (robot_m > get_static_distance_m(atlas, w, hit_offset) * (1.0 + LENS_DEPTH_SLACK_FRAC)) {
+        if (robot_m > get_mouth_static_distance_m(lens, atlas, thrown_depth, w, hit_offset) *
+                          (1.0 + LENS_DEPTH_SLACK_FRAC)) {
             return color;
         }
         float2 uv = get_lens_face_uv(hit_offset, face_px, axis_cos);
@@ -612,7 +701,8 @@ static float3 add_live_color(constant FrameUniforms& frame, texture2d<float> atl
         float coverage = saturate(robot.a);
         return mix(color, get_display_color(frame, robot.rgb / max(coverage, 1e-4)), coverage);
     }
-    if (!has_glow || length(glow_offset) > get_static_distance_m(atlas, w, glow_offset) * (1.0 + LENS_DEPTH_SLACK_FRAC)) {
+    if (!has_glow || length(glow_offset) > get_mouth_static_distance_m(lens, atlas, thrown_depth, w, glow_offset) *
+                                              (1.0 + LENS_DEPTH_SLACK_FRAC)) {
         return color;
     }
     float2 uv = get_lens_face_uv(glow_offset, face_px, axis_cos);
@@ -673,15 +763,17 @@ static int find_lens_mouth(constant FrameUniforms& frame, constant LensUniforms&
  * mouth from there (W-139).
  * Where the ray ends near a mouth with a live slot, it also shows the first robot on its way (bent
  * or straight, unless the static world hides it) and the lasers drawn there. From inside a mouth's visible
- * sphere, the lens covers the scene as far as it bends the ray (fully through the throat).
+ * sphere, the lens covers the scene as far as it bends the ray (fully through the throat). A thrown mouth's far
+ * side comes from its view (`sample_mouth_view`), and what shows through a thrown mouth's throat takes its tint.
  * @par Example
  * @code
- * float4 lensed = get_lens_color(frame, lens, atlas, live_color, live_depth, in.uv);
+ * float4 lensed = get_lens_color(frame, lens, atlas, live_color, live_depth, thrown_color, thrown_depth, in.uv);
  * @endcode
  */
 static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniforms& lens,
                              texture2d<float> atlas, texture2d_array<float> live_color,
-                             depth2d_array<float> live_depth, float2 uv) {
+                             depth2d_array<float> live_depth, texture2d_array<float> thrown_color,
+                             depth2d_array<float> thrown_depth, float2 uv) {
     float entry_m, closest_m;
     float3 dir;
     int w = find_lens_mouth(frame, lens, uv, entry_m, closest_m, dir);
@@ -700,6 +792,7 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
     int current = w;
     bool is_hit = false;
     bool has_crossed = false;
+    int tint_index = -1;
     for (int k = 0; k < LENS_MAX_STEP_COUNT && !is_hit; k++) {
         float3 offset = x - lens.centres[current].xyz;
         float rho = length(offset);
@@ -716,6 +809,8 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
             float3 mirror = float3(1.0, 1.0, -1.0);
             v = normalize((v - 2.0 * dot(v, n) * n) * mirror);
             x = lens.centres[partner].xyz + n * mirror * (lens.centres[partner].w * pt / max(rho, 1e-4));
+            int crossed_index = get_thrown_index(lens, current);
+            tint_index = crossed_index >= 0 ? crossed_index : tint_index;
             current = partner;
             has_crossed = true;
             continue;
@@ -738,7 +833,7 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
         t = min(t, floor_t);
     }
     float3 d = normalize(x + v * max(t, 0.0) - c);
-    float3 color = sample_lens_atlas(lens, atlas, current, d);
+    float3 color = sample_mouth_view(frame, lens, atlas, thrown_color, current, d);
     int slot = get_live_slot(lens, current);
     if (slot >= 0) {
         float3 hit_offset = x - c;
@@ -751,8 +846,12 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
         bool has_glow = !is_hit && find_live_glow_offset(lens, current, float(live_color.get_width()) / 6.0, x, v,
                                                          lens.shapes[current].x, min(floor_t, LENS_MOVER_FAR_M),
                                                          glow_offset);
-        color = add_live_color(frame, atlas, live_color, live_depth, lens, current, slot, is_hit, hit_offset,
-                               has_glow, glow_offset, color);
+        color = add_live_color(frame, atlas, live_color, live_depth, thrown_depth, lens, current, slot, is_hit,
+                               hit_offset, has_glow, glow_offset, color);
+    }
+    if (tint_index >= 0) {
+        float3 tint = linear_to_srgb(saturate(lens.thrown_looks[tint_index].yzw));
+        color = mix(color, tint * (dot(color, LUMA) + THROWN_TINT_FLOOR), THROWN_TINT_FRAC);
     }
     float weight = 1.0 - smoothstep(LENS_FADE_FRAC * reach, LENS_VISIBLE_FRAC * reach, closest_m);
     float inside_frac = smoothstep(LENS_VISIBLE_FRAC * reach, LENS_VISIBLE_FRAC * reach - LENS_INSIDE_BLEND_M,
@@ -775,8 +874,10 @@ fragment float4 lens_fragment(FullscreenVertexOut in [[stage_in]],
                               constant LensUniforms& lens [[buffer(2)]],
                               texture2d<float> atlas [[texture(0)]],
                               texture2d_array<float> live_color [[texture(1)]],
-                              depth2d_array<float> live_depth [[texture(2)]]) {
-    return get_lens_color(frame, lens, atlas, live_color, live_depth, in.uv);
+                              depth2d_array<float> live_depth [[texture(2)]],
+                              texture2d_array<float> thrown_color [[texture(3)]],
+                              depth2d_array<float> thrown_depth [[texture(4)]]) {
+    return get_lens_color(frame, lens, atlas, live_color, live_depth, thrown_color, thrown_depth, in.uv);
 }
 
 /**

@@ -18,6 +18,13 @@ notes/              # notes to keep for future reference: knowledge, thoughts, b
 
 Components may use different languages, so `common/` holds specifications, not shared code.
 
+## The official MVP: one window for the whole game
+
+The official MVP of the game is [`demos/warped_mvp_rust/`](demos/warped_mvp_rust/README.md): one
+window with a main menu (games on the network, hosting, playing alone or against bots, the
+five-level match or any one level), a game menu, and each round's level. On a Mac with Rust:
+`make -C demos/warped_mvp_rust run-warped`.
+
 ## Play the starter game on your Wi-Fi
 
 On one Mac, start the servers; the first line it prints is the management server's URL:

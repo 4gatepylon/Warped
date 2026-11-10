@@ -3,8 +3,10 @@
 It checks `map.json` against `map.schema.json`, then what the schema can't say: the name matches the folder,
 material ids are unique with 0 (and only 0) empty, every material used exists, frames are isometries of the map's
 space, points lie in the space, shapes' rounding fits inside them, wormhole mouths pair up, tapered warps'
-reach spheres don't overlap, directions are unit vectors, and the Milky Way's core is perpendicular to its pole. It
-prints one line per map (or `--json`) and exits 1 if any map is invalid.
+reach spheres don't overlap, directions are unit vectors, and the Milky Way's core is perpendicular to its pole. A
+folder that also holds a `level.json` is a level, which it checks as `LEVELS.md` says: the level and `levels.json`
+against their schemas, and the map against the level's engine, pylons, spawns and laser colour. It prints one line
+per map (or `--json`) and exits 1 if any map is invalid.
 
 Interface:
     uv run python validate_map.py <map folder>... [--json]
@@ -14,6 +16,7 @@ Example:
 """
 
 import json
+import re
 from pathlib import Path
 
 import click
@@ -27,6 +30,15 @@ TOLERANCE: float = 1e-6
 EMPTY_ID: int = 0
 MINKOWSKI: np.ndarray = np.diag([1.0, 1.0, 1.0, -1.0])
 CURVED_KINDS: tuple[str, ...] = ("hyperbolic", "spherical")
+LEVEL_NAME: str = "level.json"
+LEVEL_SCHEMA_PATH: Path = Path(__file__).parent / "level.schema.json"
+LEVELS_PATH: Path = Path(__file__).parent / "levels.json"
+LEVELS_SCHEMA_PATH: Path = Path(__file__).parent / "levels.schema.json"
+REPOSITORY_FOLDER: Path = Path(__file__).resolve().parents[2]
+TEAMS: tuple[str, ...] = ("blue", "red")
+CONSOLE_NAME_PATTERN: re.Pattern = re.compile(r"^(blue|red) console( [0-9]+)?$")
+LASER_COLOR_PATHS: tuple[str, ...] = ("laser", "lasers", "appearance.laser_color")
+MIN_MATCH_LEVEL_COUNT: int = 3
 
 
 def _get_frame_errors(name: str, values: list[float], space_kind: str) -> list[str]:
@@ -253,6 +265,211 @@ def _get_geometry_errors(manifest: dict) -> list[str]:
     return errors
 
 
+def _get_schema_errors(document: dict, schema: dict) -> list[str]:
+    """`_get_schema_errors` checks a JSON document against a JSON schema.
+
+    Args:
+        document: The document.
+        schema: The schema.
+
+    Returns:
+        One message per problem, each starting with the path of the value at fault.
+
+    Example:
+        >>> _get_schema_errors({}, {"required": ["name"]})
+        ["top level: 'name' is a required property"]
+    """
+    return [
+        f"{'/'.join(str(p) for p in error.absolute_path) or 'top level'}: {error.message}"
+        for error in jsonschema.Draft202012Validator(schema).iter_errors(document)
+    ]
+
+
+def _has_path(value: object, keys: list[str]) -> bool:
+    """`_has_path` says whether a JSON value has the nested keys `keys`, where a list has them if any item does.
+
+    Args:
+        value: The JSON value.
+        keys: The keys from the outside in, such as `["lights", "flicker_frac"]`.
+
+    Returns:
+        Whether the keys are there.
+
+    Example:
+        >>> _has_path({"lights": [{"flicker_frac": 0.3}]}, ["lights", "flicker_frac"])
+        True
+    """
+    if not keys:
+        return True
+    if isinstance(value, list):
+        return any(_has_path(item, keys) for item in value)
+    return isinstance(value, dict) and keys[0] in value and _has_path(value[keys[0]], keys[1:])
+
+
+def _count_pylons(manifest: dict) -> dict[str, int]:
+    """`_count_pylons` counts each team's pylons: the structures and boxes made of a console material.
+
+    Args:
+        manifest: The map's manifest (already valid against the schema).
+
+    Returns:
+        The number of pylons of each team in `TEAMS`.
+
+    Example:
+        >>> _count_pylons(json.loads((Path("lunar_surface") / "map.json").read_text()))
+        {'blue': 3, 'red': 3}
+    """
+    console_teams: dict[int, str] = {
+        material["id"]: match.group(1)
+        for material in manifest["materials"]
+        if (match := CONSOLE_NAME_PATTERN.match(material["name"])) is not None
+    }
+    items: list[set[int]] = [
+        {shape["material"] for shape in structure["shapes"]}
+        for structure in (manifest["structures"] if "structures" in manifest else [])
+    ] + [{box["material"]} for box in (manifest["boxes"] if "boxes" in manifest else [])]
+    counts: dict[str, int] = {team: 0 for team in TEAMS}
+    for materials in items:
+        for team in {console_teams[id_] for id_ in materials if id_ in console_teams}:
+            counts[team] += 1
+    return counts
+
+
+def _get_levels_errors(levels: dict, levels_schema: dict, maps_folder: Path) -> list[str]:
+    """`_get_levels_errors` checks the levels manifest: its schema, that each engine's crate exists, and that each
+    match is an odd number of distinct levels, at least `MIN_MATCH_LEVEL_COUNT`, each a folder with a `level.json`.
+
+    Args:
+        levels: The manifest.
+        levels_schema: The manifest's JSON schema.
+        maps_folder: The folder that holds the levels' folders.
+
+    Returns:
+        One message per problem.
+
+    Example:
+        >>> _get_levels_errors(json.loads(LEVELS_PATH.read_text()), json.loads(LEVELS_SCHEMA_PATH.read_text()), Path("."))
+        []
+    """
+    errors: list[str] = _get_schema_errors(levels, levels_schema)
+    if errors:
+        return errors
+    for name, match in levels["matches"].items():
+        names: list[str] = match["levels"]
+        if len(names) < MIN_MATCH_LEVEL_COUNT or len(names) % 2 == 0 or len(set(names)) != len(names):
+            errors.append(
+                f"match {name!r}: needs an odd number of distinct levels, at least {MIN_MATCH_LEVEL_COUNT}, got {names}"
+            )
+        errors += [
+            f"match {name!r}: {level!r} has no {LEVEL_NAME}"
+            for level in names
+            if not (maps_folder / level / LEVEL_NAME).exists()
+        ]
+    return errors + [
+        f"engine {name!r}: its crate {engine['crate']} isn't a folder of the repository"
+        for name, engine in levels["engines"].items()
+        if not (REPOSITORY_FOLDER / engine["crate"]).is_dir()
+    ]
+
+
+def _get_level_errors(folder: Path, manifest: dict, levels: dict, schemas: tuple[dict, dict]) -> list[str]:
+    """`_get_level_errors` checks a level's `level.json` against its schema and its map: the same name, an engine
+    that can draw the map's space, style, lighting and features and the level's features, the black hole that grows,
+    one laser colour at most, as many pylons for each team (at least 1), a spawn for each team, and the map picture.
+
+    Args:
+        folder: The level's folder.
+        manifest: The level's map (already valid).
+        levels: The levels manifest (already valid).
+        schemas: The level's and the levels manifest's JSON schemas.
+
+    Returns:
+        One message per problem.
+
+    Example:
+        >>> _get_level_errors(Path("dust"), dust_map, levels, (level_schema, levels_schema))
+        []
+    """
+    level: dict = json.loads((folder / LEVEL_NAME).read_text())
+    errors: list[str] = [f"{LEVEL_NAME}: {error}" for error in _get_schema_errors(level, schemas[0])]
+    if errors:
+        return errors
+    if level["name"] != manifest["name"]:
+        errors.append(f"{LEVEL_NAME}: name {level['name']!r} isn't the map's {manifest['name']!r}")
+    if level["engine"] not in levels["engines"]:
+        return errors + [f"{LEVEL_NAME}: engine {level['engine']!r} isn't one of {sorted(levels['engines'])}"]
+    engine: dict = levels["engines"][level["engine"]]
+    uses: list[tuple[str, str, list[str]]] = [
+        ("space", manifest["space"]["kind"], engine["spaces"]),
+        ("style", manifest["appearance"]["style"], engine["styles"]),
+        ("lighting model", manifest["appearance"]["lighting"]["model"], engine["lighting_models"]),
+    ]
+    uses += [
+        ("map feature", path, engine["map_features"])
+        for path in schemas[1]["$defs"]["map_feature"]["enum"]
+        if _has_path(manifest, path.split("."))
+    ]
+    uses += [
+        ("level feature", key, engine["level_features"])
+        for key in schemas[1]["$defs"]["level_feature"]["enum"]
+        if key in level
+    ]
+    errors += [
+        f"engine {level['engine']!r} can't draw the {what} {value!r}"
+        for what, value, known in uses
+        if value not in known
+    ]
+    errors += [
+        f"engine {level['engine']!r} needs the map feature {path!r}"
+        for path in engine["required_map_features"]
+        if not _has_path(manifest, path.split("."))
+    ]
+    if "black_hole_growth" in level:
+        hole_name: str = level["black_hole_growth"]["warp"]
+        warps: list[dict] = manifest["warps"] if "warps" in manifest else []
+        if [w["kind"] for w in warps if w["name"] == hole_name] != ["black_hole"]:
+            errors.append(f"black_hole_growth: the map needs exactly one warp named {hole_name!r}, a black hole")
+    laser_sources: list[str] = [p for p in LASER_COLOR_PATHS if _has_path(manifest, p.split("."))]
+    laser_sources += [f"{LEVEL_NAME}'s laser_color"] if "laser_color" in level else []
+    if len(laser_sources) > 1:
+        errors.append(f"laser colour: set in {laser_sources}; set it once, in {LEVEL_NAME}'s laser_color")
+    pylon_counts: dict[str, int] = _count_pylons(manifest)
+    if pylon_counts["blue"] != pylon_counts["red"] or pylon_counts["blue"] == 0:
+        errors.append(f"pylons: each team needs as many as the other, at least 1, got {pylon_counts}")
+    spawn_teams: set[str] = {spawn["team"] for spawn in manifest["spawns"]}
+    errors += [f"spawns: none for {team}" for team in TEAMS if not spawn_teams & {team, "any"}]
+    if "map_picture" in level and not (folder / level["map_picture"]).is_file():
+        errors.append(f"map_picture: {level['map_picture']} isn't in {folder}")
+    return errors
+
+
+def _validate_level(folder: Path, levels_path: Path) -> list[str]:
+    """`_validate_level` checks a level folder, one with a `map.json` and a `level.json` (`_get_level_errors`), and
+    the levels manifest at `levels_path` that names its engine (`_get_levels_errors`).
+
+    Args:
+        folder: The level's folder.
+        levels_path: The levels manifest.
+
+    Returns:
+        One message per problem; empty if the level is valid.
+
+    Example:
+        >>> _validate_level(Path("dust"), LEVELS_PATH)
+        []
+    """
+    map_errors: list[str] = _validate_map(folder, json.loads(SCHEMA_PATH.read_text()))
+    if map_errors:
+        return map_errors
+    schemas: tuple[dict, dict] = (json.loads(LEVEL_SCHEMA_PATH.read_text()), json.loads(LEVELS_SCHEMA_PATH.read_text()))
+    levels: dict = json.loads(levels_path.read_text())
+    levels_errors: list[str] = _get_levels_errors(levels, schemas[1], levels_path.parent)
+    if levels_errors:
+        return [f"{levels_path.name}: {error}" for error in levels_errors]
+    manifest: dict = json.loads((folder / MANIFEST_NAME).read_text())
+    return _get_level_errors(folder, manifest, levels, schemas)
+
+
 def _validate_map(folder: Path, schema: dict) -> list[str]:
     """`_validate_map` checks one map folder.
 
@@ -271,10 +488,7 @@ def _validate_map(folder: Path, schema: dict) -> list[str]:
     if not path.exists():
         return [f"{MANIFEST_NAME}: missing in {folder}"]
     manifest: dict = json.loads(path.read_text())
-    schema_errors: list[str] = [
-        f"{'/'.join(str(p) for p in error.absolute_path) or 'map'}: {error.message}"
-        for error in jsonschema.Draft202012Validator(schema).iter_errors(manifest)
-    ]
+    schema_errors: list[str] = _get_schema_errors(manifest, schema)
     if schema_errors:
         return schema_errors
     errors: list[str] = []
@@ -294,9 +508,14 @@ def _validate_map(folder: Path, schema: dict) -> list[str]:
 @click.argument("folders", nargs=-1, required=True, type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--json", "is_json", is_flag=True, help="Print the results as one JSON object.")
 def main(folders: tuple[Path, ...], is_json: bool) -> None:
-    """`main` validates each map folder and prints whether it follows the map format."""
+    """`main` validates each map folder, as a level if it has a `level.json`, and prints whether it is valid."""
     schema: dict = json.loads(SCHEMA_PATH.read_text())
-    results: dict[str, list[str]] = {str(folder): _validate_map(folder, schema) for folder in folders}
+    results: dict[str, list[str]] = {
+        str(folder): _validate_level(folder, LEVELS_PATH)
+        if (folder / LEVEL_NAME).exists()
+        else _validate_map(folder, schema)
+        for folder in folders
+    }
     if is_json:
         click.echo(json.dumps({"maps": results, "is_valid": not any(results.values())}))
     else:

@@ -1,18 +1,18 @@
-//! `match_flow.rs` runs a match across the levels: the match server (`serve_match`) keeps the
+//! `match_flow.rs` runs a match server across the levels (`serve_match`): it keeps the
 //! `MatchState`, starts each round's level server (a separate program, see `LevelEntry`), reads
-//! the level's winner back from the file the level writes, and tells the match clients
-//! (`MatchClient`) what is on, so each client can start and stop its level window.
+//! the level's winner back from the file the level writes, tells the match clients what is on, so
+//! each client can start and stop its level, and announces the match on the local network
+//! (`MatchAnnouncer`). What the server and its clients share (the levels file, the view, the
+//! client, the beacon) is `warped_shared::match_protocol`, re-exported here.
 //!
-//! Interface: `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `serve_match`, `MatchClient`
-//! (`Connect`, `poll`), `make_level_client_command`, `is_sitting_out`, `is_level_restart_due`,
-//! `MATCH_PORT`.
+//! Interface: `serve_match`, `make_level_client_command`, and from `match_protocol`:
+//! `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `MatchTimes`, `MatchClient`,
+//! `describe_outcome`, `is_sitting_out`, `is_level_restart_due`, `stop_child`, `MATCH_PORT`,
+//! `SELF_PROGRAM`.
 //!
 //! Example: `serve_match(&levels, &MatchTimes::default(), &run_folder, MATCH_PORT, 47852)?;`
 //!
 //! Must know:
-//! - The protocol is one text datagram from each client every `HELLO_PERIOD_S`, `hello <team>`
-//!   (`blue`, `red` or `any`), answered with the `MatchView` as JSON. A client silent for
-//!   `CLIENT_TIMEOUT_S` no longer counts.
 //! - A level program is started as `<program> --serve --port <port> [--map <map>]
 //!   --level-result-file <path> <server_args>` and joined as `<program> --join <address> --port
 //!   <port> [--map <map>] --team <team> <client_args>` (README, "Level interface").
@@ -25,127 +25,21 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use crate::match_state::{MatchState, Outcome, Team};
+use crate::match_state::{MatchState, Team};
+use warped_shared::match_protocol::{
+    CLIENT_TIMEOUT_S, MAX_DATAGRAM_BYTES, MatchAnnouncer, MatchBeacon, parse_hello, parse_play,
+};
+pub use warped_shared::match_protocol::{
+    LevelEntry, LoadLevels, MATCH_PORT, MatchClient, MatchTimes, MatchView, Phase, SELF_PROGRAM,
+    describe_outcome, is_level_restart_due, is_sitting_out, stop_child,
+};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-pub const MATCH_PORT: u16 = 47_850;
-const HELLO_PERIOD_S: f64 = 0.5;
-const CLIENT_TIMEOUT_S: f64 = 3.0;
 const SOCKET_TIMEOUT_MS: u64 = 50;
-const MAX_DATAGRAM_BYTES: usize = 65_000;
-pub const SELF_PROGRAM: &str = "self";
-
-/// `LevelEntry` is one level of the match's map in `match_levels.yaml`: its name, the demo folder
-/// and branch it comes from, whether it is playable yet (`status`), and how to run it: `program`
-/// (`self` for this demo's own binary, else a path from this demo's folder), the `--map` it
-/// takes, extra flags for its server and its clients, and its map picture for the progression
-/// page (`map_picture`, a PNG path from this demo's folder).
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct LevelEntry {
-    pub name: String,
-    pub folder: String,
-    pub branch: String,
-    pub status: String,
-    pub program: String,
-    pub map: Option<String>,
-    #[serde(default)]
-    pub server_args: Vec<String>,
-    #[serde(default)]
-    pub client_args: Vec<String>,
-    #[serde(default)]
-    pub stand_in_for: Option<String>,
-    /// Whether the level's bots take `--label` (the name of their artifact folder).
-    #[serde(default = "get_true")]
-    pub takes_bot_label: bool,
-    #[serde(default)]
-    pub map_picture: Option<String>,
-}
-
-/// `get_true` is serde's default for flags that are on unless a level turns them off.
-fn get_true() -> bool {
-    true
-}
-
-/// `LevelFile` is `match_levels.yaml`: the map's levels, blue's deepest first.
-#[derive(Deserialize)]
-struct LevelFile {
-    levels: Vec<LevelEntry>,
-}
-
-/// `LoadLevels` reads the match's levels from a `match_levels.yaml` and checks there are an odd
-/// number, at least 3.
-///
-/// Example: `let levels = LoadLevels(Path::new("match_levels.yaml"))?;`
-#[allow(non_snake_case)]
-pub fn LoadLevels(path: &Path) -> Result<Vec<LevelEntry>> {
-    let text: String = fs::read_to_string(path)
-        .map_err(|error| format!("can't read the levels file {}: {error}", path.display()))?;
-    let file: LevelFile = serde_yaml::from_str(&text)
-        .map_err(|error| format!("{} isn't a levels file: {error}", path.display()))?;
-    if file.levels.len() < 3 || file.levels.len().is_multiple_of(2) {
-        return Err(format!(
-            "{} has {} levels; a match needs an odd number, at least 3",
-            path.display(),
-            file.levels.len()
-        )
-        .into());
-    }
-    Ok(file.levels)
-}
-
-/// `Phase` is what the match is doing: waiting for a player on each team, a pause before the next
-/// round, a round being played (on the level server's `port`), the pause after a round's win
-/// while its level still shows the win, or over.
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub enum Phase {
-    WaitingForTeams,
-    Intermission {
-        left_s: f64,
-    },
-    Playing {
-        round: usize,
-        level: usize,
-        port: u16,
-    },
-    RoundOver {
-        round: usize,
-        left_s: f64,
-    },
-    Over,
-}
-
-/// `MatchView` is everything a match client shows: the match state, the phase, the levels, how
-/// many clients each team has, and the match's time left (`None` before its first round).
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct MatchView {
-    pub state: MatchState,
-    pub phase: Phase,
-    pub levels: Vec<LevelEntry>,
-    pub team_counts: [u32; 2],
-    pub match_left_s: Option<f64>,
-}
-
-/// `MatchTimes` is how long the pauses and the match last.
-#[derive(Clone, Copy, Debug)]
-pub struct MatchTimes {
-    pub intermission_s: f64,
-    pub round_over_s: f64,
-    pub match_s: f64,
-}
-
-impl Default for MatchTimes {
-    fn default() -> MatchTimes {
-        MatchTimes {
-            intermission_s: 10.0,
-            round_over_s: 5.0,
-            match_s: 30.0 * 60.0,
-        }
-    }
-}
 
 /// `resolve_program` gives the program a level runs: this binary for `self`, else the path from
 /// this demo's folder.
@@ -235,70 +129,13 @@ fn read_level_result(path: &Path) -> Result<Option<Team>> {
     }
 }
 
-/// `stop_child` kills a level process and waits for it to end.
-///
-/// Example: `stop_child(&mut level_server);`
-pub fn stop_child(child: &mut Option<Child>) {
-    if let Some(mut process) = child.take() {
-        let _ = process.kill();
-        let _ = process.wait();
-    }
-}
-
-/// `is_sitting_out` says whether `team`'s bot joins no level in round `round` (from 1) of a
-/// steered match: `round_winners`, each round's winner in turn, names the other team there. An
-/// unsteered bot (no `round_winners`) never sits out; a round past the list is an error.
-///
-/// Example: `assert!(is_sitting_out(&[Team::Blue], 1, Team::Red)?);`
-pub fn is_sitting_out(round_winners: &[Team], round: usize, team: Team) -> Result<bool> {
-    if round_winners.is_empty() {
-        return Ok(false);
-    }
-    let winner: Team = *round_winners.get(round - 1).ok_or_else(|| {
-        format!(
-            "round {round} started, but --bot-round-winners names only {} rounds",
-            round_winners.len()
-        )
-    })?;
-    Ok(winner != team)
-}
-
-/// `is_level_restart_due` says whether a match client may start a level again that stopped by
-/// itself at `stopped_at`: only once a view came (`view_at`) `restart_s` after the stop, so it
-/// shows whether the round goes on. An older view may still say a round is on that the stopped
-/// level has just won (City Sphere's bot quits when its team wins).
-///
-/// Example: `if is_level_restart_due(stopped_at, client.view_at, 1.0) { ... }`
-pub fn is_level_restart_due(
-    stopped_at: Option<Instant>,
-    view_at: Option<Instant>,
-    restart_s: f64,
-) -> bool {
-    match (stopped_at, view_at) {
-        (Some(stopped_at), Some(view_at)) => {
-            view_at >= stopped_at + Duration::from_secs_f64(restart_s)
-        }
-        _ => false,
-    }
-}
-
-/// `parse_hello` gives the team a client's `hello <team>` datagram names (`None` for `any`), or
-/// an error for any other datagram.
-///
-/// Example: `assert_eq!(parse_hello(b"hello red")?, Some(Team::Red));`
-fn parse_hello(datagram: &[u8]) -> Result<Option<Team>> {
-    match datagram {
-        b"hello blue" => Ok(Some(Team::Blue)),
-        b"hello red" => Ok(Some(Team::Red)),
-        b"hello any" => Ok(None),
-        _ => Err("not a hello".into()),
-    }
-}
-
 /// `serve_match` runs one match on `levels` until it ends and `times.round_over_s` more (so the
 /// clients see the result), on UDP `match_port`, each round's level server on `level_port`, its
 /// results and logs in `run_folder`. A round starts `times.intermission_s` after a player is on
-/// each team; the match ends in a tie `times.match_s` after its first round started.
+/// each team; the match ends in a tie `times.match_s` after its first round started. A client's
+/// `play <level>` (the game master's) sets the match aside for free play on that level, round
+/// after round, and `play match` goes back to it; either ends the round being played and starts
+/// the next after an intermission, so every client follows.
 ///
 /// Example: `serve_match(&levels, &MatchTimes::default(), &folder, MATCH_PORT, 47852)?;`
 pub fn serve_match(
@@ -318,7 +155,10 @@ pub fn serve_match(
     let mut over_at: Option<Instant> = None;
     let mut clients: Vec<(SocketAddr, Option<Team>, Instant)> = Vec::new();
     let mut level_server: Option<Child> = None;
+    let mut round_result_path: Option<PathBuf> = None;
+    let mut free_round_total: usize = 0;
     let mut buffer: Vec<u8> = vec![0; MAX_DATAGRAM_BYTES];
+    let mut announcer: MatchAnnouncer = MatchAnnouncer::OnNetwork()?;
     println!("Match server on UDP port {match_port}; levels on port {level_port}.");
     loop {
         let received: Option<(usize, SocketAddr)> = match socket.recv_from(&mut buffer) {
@@ -335,6 +175,34 @@ pub fn serve_match(
             clients.retain(|client| client.0 != address);
             clients.push((address, team, Instant::now()));
         }
+        if let Some((length, _)) = received
+            && let Ok(choice) = parse_play(&buffer[..length], levels.len())
+            && choice != state.get_free_play().map(|free_play| free_play.level)
+        {
+            match choice {
+                Some(level) => {
+                    println!("The game master chose free play on {}.", levels[level].name);
+                    state.start_free_play(level);
+                }
+                None => {
+                    println!("The game master went back to the match.");
+                    state.end_free_play();
+                }
+            }
+            stop_child(&mut level_server);
+            over_at = None;
+            phase = match phase {
+                Phase::WaitingForTeams => Phase::WaitingForTeams,
+                Phase::Over if choice.is_none() => Phase::Over,
+                _ => {
+                    phase_ends_at =
+                        Some(Instant::now() + Duration::from_secs_f64(times.intermission_s));
+                    Phase::Intermission {
+                        left_s: times.intermission_s,
+                    }
+                }
+            };
+        }
         let team_counts: [u32; 2] = [Team::Blue, Team::Red].map(|team| {
             clients
                 .iter()
@@ -348,7 +216,8 @@ pub fn serve_match(
         };
         let match_left_s: Option<f64> =
             match_started_at.map(|at| (times.match_s - at.elapsed().as_secs_f64()).max(0.0));
-        if state.outcome().is_none() && match_left_s == Some(0.0) {
+        if state.get_free_play().is_none() && state.outcome().is_none() && match_left_s == Some(0.0)
+        {
             println!("The match's time ran out: a tie.");
             state.end_in_tie();
             stop_child(&mut level_server);
@@ -363,24 +232,43 @@ pub fn serve_match(
                 }
             }
             Phase::Intermission { .. } if left_s(phase_ends_at) == 0.0 => {
-                let level: usize = state
-                    .get_next_level()
-                    .expect("an unfinished match has a next round");
-                let round: usize = state.rounds().len() + 1;
-                let result_path: PathBuf = run_folder.join(format!("round_{round}.json"));
-                let log_path: PathBuf = run_folder.join(format!("round_{round}_server.log"));
+                let (level, round, file_stem): (usize, usize, String) = match state.get_free_play()
+                {
+                    Some(free_play) => {
+                        free_round_total += 1;
+                        let round: usize = free_play.round_count + 1;
+                        (
+                            free_play.level,
+                            round,
+                            format!("free_round_{free_round_total}"),
+                        )
+                    }
+                    None => {
+                        let level: usize = state
+                            .get_next_level()
+                            .expect("an unfinished match has a next round");
+                        let round: usize = state.rounds().len() + 1;
+                        match_started_at.get_or_insert_with(Instant::now);
+                        (level, round, format!("round_{round}"))
+                    }
+                };
+                let result_path: PathBuf = run_folder.join(format!("{file_stem}.json"));
+                let log_path: PathBuf = run_folder.join(format!("{file_stem}_server.log"));
                 level_server = Some(start_level_server(
                     &levels[level],
                     level_port,
                     &result_path,
                     &log_path,
                 )?);
-                match_started_at.get_or_insert_with(Instant::now);
-                println!(
-                    "Round {round}: {}, attacker {:?}",
-                    levels[level].name,
-                    state.get_attacker()
-                );
+                round_result_path = Some(result_path);
+                match state.get_free_play() {
+                    Some(_) => println!("Free round {round}: {}", levels[level].name),
+                    None => println!(
+                        "Round {round}: {}, attacker {:?}",
+                        levels[level].name,
+                        state.get_attacker()
+                    ),
+                }
                 Phase::Playing {
                     round,
                     level,
@@ -391,7 +279,9 @@ pub fn serve_match(
                 left_s: left_s(phase_ends_at),
             },
             Phase::Playing { round, level, port } => {
-                let result_path: PathBuf = run_folder.join(format!("round_{round}.json"));
+                let result_path: &Path = round_result_path
+                    .as_deref()
+                    .expect("a round being played has its result file");
                 if let Some(status) = level_server
                     .as_mut()
                     .and_then(|child| child.try_wait().ok().flatten())
@@ -402,11 +292,20 @@ pub fn serve_match(
                     )
                     .into());
                 }
-                match read_level_result(&result_path)? {
+                match read_level_result(result_path)? {
                     Some(winner) => {
-                        state.record_round(winner);
+                        let prefix: &str = match state.get_free_play() {
+                            Some(_) => {
+                                state.record_free_round(winner);
+                                "Free round"
+                            }
+                            None => {
+                                state.record_round(winner);
+                                "Round"
+                            }
+                        };
                         println!(
-                            "Round {round}: {} won {}",
+                            "{prefix} {round}: {} won {}",
                             winner.get_name(),
                             levels[level].name
                         );
@@ -422,7 +321,7 @@ pub fn serve_match(
             }
             Phase::RoundOver { round, .. } if left_s(phase_ends_at) == 0.0 => {
                 stop_child(&mut level_server);
-                if let Some(outcome) = state.outcome() {
+                if let (None, Some(outcome)) = (state.get_free_play(), state.outcome()) {
                     println!("The match is over: {outcome:?}");
                     Phase::Over
                 } else {
@@ -440,92 +339,23 @@ pub fn serve_match(
             },
             other => other,
         };
+        let view: MatchView = MatchView {
+            state: state.clone(),
+            phase: phase.clone(),
+            levels: levels.to_vec(),
+            team_counts,
+            match_left_s,
+        };
+        announcer.announce(&MatchBeacon::FromView(&view, match_port));
         if let Some((_, address)) = received {
-            let view: MatchView = MatchView {
-                state: state.clone(),
-                phase: phase.clone(),
-                levels: levels.to_vec(),
-                team_counts,
-                match_left_s,
-            };
             socket.send_to(&serde_json::to_vec(&view)?, address)?;
         }
-        if phase == Phase::Over {
+        if phase == Phase::Over && state.get_free_play().is_none() {
             let at: Instant = *over_at.get_or_insert_with(Instant::now);
             if at.elapsed().as_secs_f64() >= times.round_over_s + CLIENT_TIMEOUT_S {
                 return Ok(state);
             }
         }
-    }
-}
-
-/// `MatchClient` is a connection to a match server: the team it says it plays for, and the last
-/// `MatchView` the server sent and when it came (`view_at`).
-pub struct MatchClient {
-    socket: UdpSocket,
-    pub server: SocketAddr,
-    pub team: Option<Team>,
-    pub view: Option<MatchView>,
-    pub view_at: Option<Instant>,
-    last_hello: Option<Instant>,
-    buffer: Vec<u8>,
-}
-
-impl MatchClient {
-    /// `Connect` makes a client of the match server at `server` playing for `team` (`None` until
-    /// the player picks one).
-    ///
-    /// Example: `let client = MatchClient::Connect(server, Some(Team::Blue))?;`
-    #[allow(non_snake_case)]
-    pub fn Connect(server: SocketAddr, team: Option<Team>) -> Result<MatchClient> {
-        let socket: UdpSocket = UdpSocket::bind(("0.0.0.0", 0))?;
-        socket.set_nonblocking(true)?;
-        Ok(MatchClient {
-            socket,
-            server,
-            team,
-            view: None,
-            view_at: None,
-            last_hello: None,
-            buffer: vec![0; MAX_DATAGRAM_BYTES],
-        })
-    }
-
-    /// `poll` says hello every `HELLO_PERIOD_S` and keeps the newest view the server sent.
-    ///
-    /// Example: `client.poll()?;`
-    pub fn poll(&mut self) -> Result<()> {
-        if self
-            .last_hello
-            .is_none_or(|at| at.elapsed().as_secs_f64() >= HELLO_PERIOD_S)
-        {
-            let team: &str = self.team.map_or("any", Team::get_name);
-            self.socket
-                .send_to(format!("hello {team}").as_bytes(), self.server)?;
-            self.last_hello = Some(Instant::now());
-        }
-        loop {
-            match self.socket.recv_from(&mut self.buffer) {
-                Ok((length, address)) if address == self.server => {
-                    self.view = Some(serde_json::from_slice(&self.buffer[..length])?);
-                    self.view_at = Some(Instant::now());
-                }
-                Ok(_) => {}
-                Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
-                Err(error) if error.kind() == ErrorKind::ConnectionRefused => return Ok(()),
-                Err(error) => return Err(error.into()),
-            }
-        }
-    }
-}
-
-/// `describe_outcome` gives a finished match's result for a line of text.
-///
-/// Example: `let text = describe_outcome(Outcome::Tie);`
-pub fn describe_outcome(outcome: Outcome) -> String {
-    match outcome {
-        Outcome::Won(team) => format!("{} wins the match", team.get_name()),
-        Outcome::Tie => "a tie (the match's time ran out)".to_string(),
     }
 }
 
@@ -535,46 +365,124 @@ mod tests {
     //!
     //! | Behaviour | Cases | Test |
     //! | --- | --- | --- |
-    //! | Levels file | the shipped one, an even count | `the_shipped_levels_file_loads`, `an_even_level_count_is_refused` |
+    //! | Levels file | the shipped one (an even count: `warped_shared::match_protocol`) | `the_shipped_levels_file_loads` |
     //! | Level result | none yet, blue, red, garbage | `level_results_are_read` |
-    //! | Hello | each team, any, garbage | `hellos_name_a_team` |
-    //! | Steered bot | unsteered, its team's round, the other's, past the list | `steered_bots_sit_out_the_other_teams_rounds` |
-    //! | Level restart | none stopped, no view, a view from before the stop, too soon after, late enough | `a_stopped_level_restarts_only_on_a_fresh_view` |
+    //! | Game master's choice | free play on a level (every round there, wins counted, no match round), back to the match (its next level) | `the_game_master_switches_levels_and_everyone_follows` |
 
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use warped_shared::match_state::FreePlay;
 
-    #[test]
-    fn a_stopped_level_restarts_only_on_a_fresh_view() {
-        let stopped_at: Instant = Instant::now();
-        let restart_s: f64 = 1.0;
-        let after = |seconds: f64| Some(stopped_at + Duration::from_secs_f64(seconds));
-        assert!(!is_level_restart_due(None, after(5.0), restart_s));
-        assert!(!is_level_restart_due(Some(stopped_at), None, restart_s));
-        assert!(!is_level_restart_due(
-            after(1.0),
-            Some(stopped_at),
-            restart_s
-        ));
-        assert!(!is_level_restart_due(
-            Some(stopped_at),
-            after(0.5),
-            restart_s
-        ));
-        assert!(is_level_restart_due(
-            Some(stopped_at),
-            after(1.0),
-            restart_s
-        ));
+    const TEST_MATCH_PORT: u16 = 48_302;
+    const TEST_LEVEL_PORT: u16 = 48_303;
+    const TEST_TIMEOUT_S: f64 = 20.0;
+    const FAKE_LEVEL_SCRIPT: &str = "#!/bin/sh\nwhile [ \"$1\" != --level-result-file ]; do shift; done\nsleep 0.3\nprintf '{\"winner\": \"blue\"}' > \"$2.partial\" && mv \"$2.partial\" \"$2\"\nexec sleep 5\n";
+
+    /// `make_fake_levels` writes a level program that wins for blue 0.3 s after it starts, and
+    /// gives a three-level match of it.
+    ///
+    /// Example: `let levels = make_fake_levels(&folder);`
+    fn make_fake_levels(folder: &Path) -> Vec<LevelEntry> {
+        let program: PathBuf = folder.join("fake_level.sh");
+        fs::write(&program, FAKE_LEVEL_SCRIPT).unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        ["A", "B", "C"]
+            .map(|name| LevelEntry {
+                name: name.to_string(),
+                folder: String::new(),
+                branch: String::new(),
+                status: String::new(),
+                program: program.display().to_string(),
+                map: None,
+                server_args: Vec::new(),
+                client_args: Vec::new(),
+                stand_in_for: None,
+                takes_bot_label: true,
+                map_picture: None,
+            })
+            .to_vec()
+    }
+
+    /// `poll_until` polls both clients until `is_done` holds for blue's view, failing after
+    /// `TEST_TIMEOUT_S`; it gives every playing level blue saw on the way.
+    ///
+    /// Example: `let played = poll_until(&mut clients, |view| view.phase == Phase::Over);`
+    fn poll_until(
+        clients: &mut [MatchClient; 2],
+        is_done: impl Fn(&MatchView) -> bool,
+    ) -> Vec<usize> {
+        let deadline: Instant = Instant::now() + Duration::from_secs_f64(TEST_TIMEOUT_S);
+        let mut played: Vec<usize> = Vec::new();
+        loop {
+            for client in clients.iter_mut() {
+                client.poll().unwrap();
+            }
+            if let Some(view) = &clients[0].view {
+                if let Phase::Playing { level, .. } = view.phase
+                    && played.last() != Some(&level)
+                {
+                    played.push(level);
+                }
+                if is_done(view) {
+                    return played;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out; last view {:?}",
+                clients[0].view
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]
-    fn steered_bots_sit_out_the_other_teams_rounds() {
-        let winners: [Team; 2] = [Team::Blue, Team::Red];
-        assert!(!is_sitting_out(&[], 7, Team::Red).unwrap());
-        assert!(!is_sitting_out(&winners, 1, Team::Blue).unwrap());
-        assert!(is_sitting_out(&winners, 1, Team::Red).unwrap());
-        assert!(is_sitting_out(&winners, 2, Team::Blue).unwrap());
-        assert!(is_sitting_out(&winners, 3, Team::Red).is_err());
+    fn the_game_master_switches_levels_and_everyone_follows() {
+        let folder: PathBuf =
+            std::env::temp_dir().join(format!("serve_match_test_{}", std::process::id()));
+        fs::create_dir_all(&folder).unwrap();
+        let levels: Vec<LevelEntry> = make_fake_levels(&folder);
+        let times: MatchTimes = MatchTimes {
+            intermission_s: 0.2,
+            round_over_s: 0.2,
+            match_s: 600.0,
+        };
+        let server_folder: PathBuf = folder.clone();
+        std::thread::spawn(move || {
+            let result: Result<MatchState> = serve_match(
+                &levels,
+                &times,
+                &server_folder,
+                TEST_MATCH_PORT,
+                TEST_LEVEL_PORT,
+            );
+            result.map(|_| ()).map_err(|error| error.to_string())
+        });
+        let server: SocketAddr = SocketAddr::from(([127, 0, 0, 1], TEST_MATCH_PORT));
+        let mut clients: [MatchClient; 2] = [
+            MatchClient::Connect(server, Some(Team::Blue)).unwrap(),
+            MatchClient::Connect(server, Some(Team::Red)).unwrap(),
+        ];
+        poll_until(&mut clients, |view| view.team_counts == [1, 1]);
+        clients[0].send_play(Some(0)).unwrap();
+        let free: Vec<usize> = poll_until(&mut clients, |view| {
+            view.state
+                .get_free_play()
+                .is_some_and(|free_play: FreePlay| free_play.wins[0] >= 2)
+        });
+        let first_free: usize = free.iter().position(|&level| level == 0).unwrap();
+        assert!(
+            free[first_free..].iter().all(|&level| level == 0),
+            "{free:?}"
+        );
+        clients[1].send_play(None).unwrap();
+        let back: Vec<usize> = poll_until(&mut clients, |view| {
+            view.state.get_free_play().is_none() && matches!(view.phase, Phase::Playing { .. })
+        });
+        let view: &MatchView = clients[0].view.as_ref().unwrap();
+        assert_eq!(back.last().copied(), view.state.get_next_level());
+        assert!(view.state.rounds().len() <= 1, "{:?}", view.state.rounds());
+        let _ = fs::remove_dir_all(&folder);
     }
 
     #[test]
@@ -595,17 +503,6 @@ mod tests {
     }
 
     #[test]
-    fn an_even_level_count_is_refused() {
-        let path: PathBuf =
-            std::env::temp_dir().join(format!("even_levels_{}.yaml", std::process::id()));
-        let level: &str =
-            "  - {name: A, folder: a, branch: b, status: s, program: self, map: lunar-surface}\n";
-        fs::write(&path, format!("levels:\n{}", level.repeat(4))).unwrap();
-        assert!(LoadLevels(&path).is_err());
-        fs::remove_file(&path).unwrap();
-    }
-
-    #[test]
     fn level_results_are_read() {
         let path: PathBuf =
             std::env::temp_dir().join(format!("level_result_{}.json", std::process::id()));
@@ -620,13 +517,5 @@ mod tests {
         fs::write(&path, "{\"winner\": \"green\"}").unwrap();
         assert!(read_level_result(&path).is_err());
         fs::remove_file(&path).unwrap();
-    }
-
-    #[test]
-    fn hellos_name_a_team() {
-        assert_eq!(parse_hello(b"hello blue").unwrap(), Some(Team::Blue));
-        assert_eq!(parse_hello(b"hello red").unwrap(), Some(Team::Red));
-        assert_eq!(parse_hello(b"hello any").unwrap(), None);
-        assert!(parse_hello(b"join").is_err());
     }
 }

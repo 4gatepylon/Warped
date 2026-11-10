@@ -1,0 +1,95 @@
+# Warped, the one-window app (the official MVP)
+
+`warped` is the whole game in one window, like a normal game (W-141, one window for the whole
+game): a main menu, a game menu, and each round's level in the same window. The match server, the
+level servers and the bots are headless programs that the app starts as its own child processes; no
+second window opens.
+
+## Play
+
+```bash
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+pushd demos/warped_mvp_rust
+make run-warped                     # builds the match server and the five levels, then opens the app
+popd
+```
+
+## Screens
+
+- **Main menu**: the games on this network (each match server's beacon, UDP 47851) to join; joining
+  a game by its address; the game to start, the five-level match or any one level of the levels
+  manifest (Left/Right on "Game"), hosted for others, played alone, or with bots (on your team, 0
+  to 4, and on the other, 0 to 5, at most 7 together since a level takes 8 players; turning off
+  consoles or fighting; you play blue); while this app hosts a game, going back to it or
+  stopping it; player settings; credits; quit.
+- **Game menu**: the match's status (the progression page shared with the match window: the level
+  being played and its map picture, the wavefronts, the round, who attacks and defends, free play's
+  wins, players per team); your team and switching it; rejoining the round being played; the game
+  master's choice of what everyone plays (the match, or any one level: Left/Right on its row, or
+  click a level on the match's status, and "back to the match" there; no authentication yet, so
+  anyone may set it); game settings (next update); player settings; leaving to the main menu.
+- **Level**: a round's level. Escape opens the in-level menu (the same match status; resume, player
+  settings, exit to the game menu, quit); holding Tab shows the map. **Until the levels are
+  libraries, the level is a stand-in screen** that follows the match exactly as a level will.
+- **Player settings**, from every menu: every key binding and the in-level menu's numbers, saved to
+  `~/.config/warped/player_settings.yaml`, the file every level reads (`--player-settings` for
+  another file).
+
+Escape never quits: in a level it opens the in-level menu, in the in-level menu it resumes, in the
+game menu it goes to the main menu (the user's rule), and on the main menu it does nothing. A game
+the app hosts keeps running on the main menu until "Stop hosting" or quitting.
+
+## Flags
+
+| Flag | Default | What |
+| --- | --- | --- |
+| `--width-px`, `--height-px` | 1280, 800 | the window's starting size in points (the screen pictures' in pixels) |
+| `--player-settings <path>` | `~/.config/warped/player_settings.yaml` | the player's settings file |
+| `--match-port`, `--level-port` | 47850, 47852 | UDP ports of a game this app hosts |
+| `--discovery-port` | 47851 | UDP port it listens on for match beacons |
+| `--save-screen-pictures` | | draw every screen without a window, and exit |
+| `--label <label>` | | a suffix for the run folder's name |
+
+## How it fits together
+
+- **Levels manifest**: the app reads the levels from one file, today
+  `../warped_match_rust/match_levels.yaml`, through `src/levels_manifest.rs` alone, so it never
+  names a level; the declarative level definitions (W-143, `common/maps/LEVELS.md`) replace it there.
+- **The level interface** (`warped_shared::app`): a level crate's `lib.rs` exposes one
+  `play_level_fn_t`; the app calls it with a `LevelWindow` (SDL, the window, its event pump, its
+  `CAMetalLayer` and Metal device, and a `MatchLink`) and a `LevelJoin` (the manifest entry, the
+  level server's address, the team, the player's settings file). It returns a `LevelEnd`: the
+  round is over, `LeaveLevel` or `CloseWindow` (the in-level menu's `PlayOutcome`). Each frame the
+  level calls `match_link.is_round_over()`, where the app keeps the match client alive, and feeds
+  `match_link.get_match_lines()` to its menu's MATCH page.
+- **Children** (`src/children.rs`): hosting runs `hyperbolic-wormholes --serve-match` from
+  `../warped_match_rust/.build/release/` (built by `make build-children`); each bot is a match client
+  with `--bot`. Playing alone adds one bot on the other team that sits out every round, since a
+  round starts only when each team has a player.
+- **The game master's choice**: the game menu sends the match server `play <level>` or
+  `play match`; the server sets the match aside for free play on that level (round after round,
+  counting each team's wins) or goes back to it, ends the round under way, and every client follows
+  into the next round (`warped_shared::match_protocol`, `../warped_match_rust/src/match_flow.rs`).
+- **Drawing**: menus are pages of shapes in SDL's 8x8 debug font (the match window's look),
+  drawn on the CPU and copied into the window's Metal layer only when they change.
+
+## Tests
+
+`make test` covers the screens' navigation (every Escape and exit rule), the main menu (every
+manifest level can be chosen, each game kind and its bots), the game menu (teams, rejoining, the
+game master choosing every level, the in-level menu), the app following a match server's views into
+and out of a round's level and sending the game master's choice until it is taken (against a stand-in
+server on UDP 48304 to 48307), the children's command lines, the player settings page (saving only
+changes, every setting has a row) and the menu keys. The shared crate tests the beacons (bytes,
+expiry, a listener hearing an announcer on UDP 48301), the play messages and free play; the match
+crate tests that a match server switches levels on the game master's word and everyone follows (a
+fake level program, UDP 48302 and 48303).
+
+## Folders
+
+`cargo` writes to `.build/` (`make clean`). `.artifacts/warped/<run_id>/` holds the logs of the
+games this app hosts (`match_server.log`, `bot_<n>_<team>.log`; in `Warped.app`,
+`~/Library/Logs/Warped/<run_id>/`), and `.artifacts/screen_pictures/<run_id>/` the screen pictures;
+`make reset-artifacts YES_TO_RESET_ARTIFACTS=1` deletes them.
+
+Decisions are in [`DECISIONS.md`](DECISIONS.md).

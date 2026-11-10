@@ -13,7 +13,6 @@ mod asset_manifest;
 mod assets;
 mod console_reach;
 mod credits;
-mod exit_prompt;
 mod forest_layout;
 mod game;
 mod map;
@@ -34,6 +33,7 @@ mod thrown_wormholes;
 mod title;
 
 use warped_shared::hud::get_death_lines;
+use warped_shared::menu_and_map::{Cover, MenuAndMap};
 use warped_shared::shot_noise;
 
 use std::path::{Path, PathBuf};
@@ -47,7 +47,6 @@ use sdl3::keyboard::Scancode;
 use sdl3::mouse::MouseButton;
 use shot_noise::ShotNoise;
 
-use exit_prompt::{ExitOutcome, ExitPrompt};
 use game::audio::Audio;
 use game::console_bot::BotWalker;
 use game::guns::{Gun, GunInput, make_weapons};
@@ -308,6 +307,80 @@ struct Args {
     /// to the arena and save it to this PNG for the menu's map page, then quit.
     #[arg(long)]
     map_picture: Option<PathBuf>,
+    /// Throw both wormhole mouths by script (for tests and pictures): the purple one turned to the
+    /// first yaw (radians), the green one turned to the second, at the times of `THROW_SCRIPT_S`.
+    #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
+    throw_yaws_rad: Option<Vec<f32>>,
+    /// From this simulated time on, stop holding the player at --camera-pose and walk them into
+    /// their purple thrown mouth.
+    #[arg(long)]
+    walk_into_thrown_at_s: Option<f32>,
+    /// From this simulated time on, aim at the nearest thrown mouth (another player's, else this
+    /// player's own) and hold the trigger.
+    #[arg(long)]
+    shoot_thrown_at_s: Option<f32>,
+}
+
+/// `THROW_SCRIPT_S` are the simulated times at which `--throw-yaws-rad` throws the purple and the
+/// green mouth.
+const THROW_SCRIPT_S: [f32; 2] = [0.5, 1.5];
+/// `MESSAGE_PICTURE_PX` is the size of the picture of a message (a wormhole placed or destroyed),
+/// `MESSAGE_HEIGHT_FRAC` the most of the window's height it takes, and `MESSAGE_TOP_FRAC` how far
+/// down the window its top is.
+const MESSAGE_PICTURE_PX: (u32, u32) = (480, 16);
+const MESSAGE_HEIGHT_FRAC: f32 = 0.035;
+const MESSAGE_TOP_FRAC: f32 = 0.62;
+
+/// `script_wormholes` plays the wormhole flags of `args` into this frame's `controls`: the scripted
+/// throws (`--throw-yaws-rad`), walking into the purple mouth (`--walk-into-thrown-at-s`), and
+/// shooting at the nearest thrown mouth (`--shoot-thrown-at-s`); it turns the player as each needs.
+///
+/// Example: `let controls: Controls = script_wormholes(&args, &mut session, controls, dt_s);`
+fn script_wormholes(args: &Args, session: &mut Session, controls: Controls, dt_s: f32) -> Controls {
+    let mut controls: Controls = controls;
+    let (now_s, next_s) = (session.time_s, session.time_s + dt_s);
+    if let Some(yaws_rad) = &args.throw_yaws_rad {
+        assert_eq!(yaws_rad.len(), 2, "--throw-yaws-rad takes two yaws");
+        for (yaw_rad, at_s) in yaws_rad.iter().zip(THROW_SCRIPT_S) {
+            if now_s <= at_s && at_s < next_s {
+                session.player.yaw_rad = *yaw_rad;
+                controls.is_throw_pressed = true;
+            }
+        }
+    }
+    let is_due = |at_s: Option<f32>| at_s.is_some_and(|at_s| now_s >= at_s);
+    if is_due(args.walk_into_thrown_at_s)
+        && let Some(purple) = session.thrown.placed.purple
+    {
+        let to_m: Vec3 = purple.get_centre_m() - session.player.feet_m;
+        session.player.yaw_rad = (-to_m.x).atan2(-to_m.z);
+        controls.player.move_axes = Vec2::Y;
+    }
+    let eye_m: Vec3 = session.player.eye_position_m();
+    let remote_places: Vec<Vec3> = session
+        .remote_bots
+        .iter()
+        .flat_map(|remote| remote.wormholes.get_places())
+        .map(|place| place.get_centre_m())
+        .collect();
+    let targets_m: Vec<Vec3> = if remote_places.is_empty() {
+        let own = session.thrown.placed.get_places();
+        own.iter().map(|place| place.get_centre_m()).collect()
+    } else {
+        remote_places
+    };
+    if is_due(args.shoot_thrown_at_s)
+        && let Some(target_m) = targets_m
+            .into_iter()
+            .min_by(|a, b| a.distance(eye_m).total_cmp(&b.distance(eye_m)))
+    {
+        let to_m: Vec3 = target_m - eye_m;
+        session.player.yaw_rad = (-to_m.x).atan2(-to_m.z);
+        session.player.pitch_rad = (to_m.y / to_m.length()).asin();
+        controls.gun.is_trigger_held = true;
+        controls.gun.is_shoot_pressed = true;
+    }
+    controls
 }
 
 /// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle, in simulated
@@ -416,6 +489,7 @@ fn capture_wormhole_lens(
                     hit_effect: HitEffect::default(),
                     lens_draws: &[],
                     lens_particles: &[],
+                    thrown_lens_mouths: &[],
                     beams: &[],
                     beam_speckle_shares: glam::Vec2::ZERO,
                     overlay_rects: &[],
@@ -616,6 +690,8 @@ fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
 
 /// `MENU_DIM_FRAC` is how much the menu darkens the view behind it.
 const MENU_DIM_FRAC: f32 = 0.75;
+/// `HELD_MAP_DIM_FRAC` is how much the map shown while `Tab` is held darkens the game behind it.
+const HELD_MAP_DIM_FRAC: f32 = 0.6;
 /// `MENU_HEIGHT_FRAC` is the most of the window's height the menu's text takes.
 const MENU_HEIGHT_FRAC: f32 = 0.85;
 /// `TITLE_PICTURE_PX` is the size of the title screen's text picture.
@@ -748,6 +824,7 @@ fn run_title_screen(
                 hit_effect: HitEffect::default(),
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
+                thrown_lens_mouths: &frame.thrown_lens_mouths,
                 beams: &frame.beams,
                 beam_speckle_shares: frame.beam_speckle_shares,
                 overlay_rects: &[],
@@ -1031,13 +1108,14 @@ fn main() {
     let mut minimap: Minimap = Minimap::New(&session.arena);
     minimap.load_photo(&Path::new(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
     let mut marks: Vec<Mark> = Vec::new();
-    let mut menu: Option<Menu> = None;
-    let mut exit_prompt: ExitPrompt = ExitPrompt::New();
+    let mut menu_and_map: MenuAndMap<Menu> = MenuAndMap::New();
     if args.photo_hud {
         renderer.set_is_capturing_hud(true);
     }
     let mut death_picture: TextPicture =
         TextPicture::Banner(DEATH_PICTURE_PX.0, DEATH_PICTURE_PX.1);
+    let mut message_picture: TextPicture =
+        TextPicture::New(MESSAGE_PICTURE_PX.0, MESSAGE_PICTURE_PX.1);
     let mut menu_picture: TextPicture =
         TextPicture::New(menu::MENU_PICTURE_PX.0, menu::MENU_PICTURE_PX.1);
     let mut menu_settings: MenuSettings = MenuSettings {
@@ -1074,11 +1152,12 @@ fn main() {
             }
             let _outcome: MenuOutcome = opened.handle(Scancode::E, &mut menu_settings);
         }
-        menu = Some(opened);
+        menu_and_map.open_menu(opened);
     }
     'running: loop {
         let mut look_delta_pt: Vec2 = Vec2::ZERO;
         let mut is_jump_pressed: bool = false;
+        let mut is_throw_pressed: bool = false;
         let mut is_shoot_pressed: bool = false;
         let mut is_swap_pressed: bool = false;
         let mut picked_gun: Option<Gun> = None;
@@ -1089,28 +1168,21 @@ fn main() {
                     scancode: Some(scancode),
                     repeat: false,
                     ..
-                } if exit_prompt.is_shown() => {
-                    if exit_prompt.answer(scancode) == ExitOutcome::Exit {
-                        break 'running;
-                    }
-                }
-                Event::KeyDown {
-                    scancode: Some(scancode),
-                    repeat: false,
-                    ..
-                } if menu.is_some() => {
-                    match menu
-                        .as_mut()
+                } if menu_and_map.is_menu_open() => {
+                    match menu_and_map
+                        .get_menu_mut()
                         .expect("the menu is open")
                         .handle(scancode, &mut menu_settings)
                     {
                         MenuOutcome::Stay => {}
                         MenuOutcome::Close => {
-                            menu = None;
-                            is_mouse_captured = true;
-                            mouse.set_relative_mouse_mode(&platform.window, true);
+                            menu_and_map.close_menu().apply(
+                                &mut is_mouse_captured,
+                                &platform.window,
+                                &mouse,
+                            );
                         }
-                        MenuOutcome::Quit => break 'running,
+                        MenuOutcome::LeaveLevel => break 'running,
                     }
                     settings.render_scale_frac = menu_settings.render_scale_frac;
                     settings.is_vsync_enabled = menu_settings.is_vsync_enabled;
@@ -1121,20 +1193,15 @@ fn main() {
                     ..
                 } => match scancode {
                     Scancode::Escape => {
-                        if exit_prompt.press_release_mouse(is_mouse_captured)
-                            == ExitOutcome::ReleaseMouse
-                        {
-                            is_mouse_captured = false;
-                            mouse.set_relative_mouse_mode(&platform.window, false);
-                        }
-                    }
-                    Scancode::Tab => {
-                        menu = Some(Menu::New());
+                        menu_and_map.open_menu(Menu::New()).apply(
+                            &mut is_mouse_captured,
+                            &platform.window,
+                            &mouse,
+                        );
                         menu_settings.render_scale_frac = settings.render_scale_frac;
-                        is_mouse_captured = false;
-                        mouse.set_relative_mouse_mode(&platform.window, false);
                     }
                     Scancode::Space => is_jump_pressed = true,
+                    Scancode::Q => is_throw_pressed = is_mouse_captured,
                     Scancode::V => session.view_switch.toggle(),
                     Scancode::_1 => picked_gun = Some(Gun::Laser),
                     Scancode::_2 => picked_gun = Some(Gun::Rifle),
@@ -1167,7 +1234,7 @@ fn main() {
                     _ => {}
                 },
                 Event::MouseButtonDown { .. }
-                    if !is_mouse_captured && menu.is_none() && !exit_prompt.is_shown() =>
+                    if !is_mouse_captured && !menu_and_map.is_menu_open() =>
                 {
                     is_mouse_captured = true;
                     mouse.set_relative_mouse_mode(&platform.window, true);
@@ -1243,8 +1310,10 @@ fn main() {
             },
             is_flashlight_held: args.hold_flashlight
                 || (is_mouse_captured && keys.is_scancode_pressed(Scancode::F)),
+            is_throw_pressed,
         };
-        let controls: Controls = if menu.is_some() || exit_prompt.is_shown() {
+        menu_and_map.set_map_held(keys.is_scancode_pressed(Scancode::Tab));
+        let controls: Controls = if menu_and_map.is_menu_open() {
             Controls::default()
         } else {
             controls
@@ -1258,7 +1327,12 @@ fn main() {
         let camera_view: Option<CameraView> = bench_view
             .map(|index| CameraView::ALL[index])
             .or(args.camera_view);
-        if let Some(pose) = &args.camera_pose {
+        let is_walking_by_script: bool = args
+            .walk_into_thrown_at_s
+            .is_some_and(|at_s| session.time_s >= at_s);
+        if let Some(pose) = &args.camera_pose
+            && !is_walking_by_script
+        {
             assert_eq!(pose.len(), 5, "--camera-pose takes x,y,z,yaw,pitch");
             hold_player(&mut session, Vec3::new(pose[0], pose[1], pose[2]), pose[3]);
             session.player.pitch_rad = pose[4];
@@ -1307,6 +1381,7 @@ fn main() {
         } else {
             controls
         };
+        let controls: Controls = script_wormholes(&args, &mut session, controls, dt_s);
         let sim_start: Instant = Instant::now();
         let waypoint_before: usize = session.autopilot_waypoint;
         if let Some(period_s) = args.hurt_player_every_s
@@ -1322,8 +1397,8 @@ fn main() {
                 start.elapsed().as_secs_f32()
             );
         }
-        let is_e_held: bool =
-            menu.is_none() && (args.hold_console || keys.is_scancode_pressed(Scancode::E));
+        let is_e_held: bool = !menu_and_map.is_menu_open()
+            && (args.hold_console || keys.is_scancode_pressed(Scancode::E));
         if let Err(error) = play.update(&mut session, &scene, is_e_held, dt_s) {
             eprintln!("network error: {error}");
         }
@@ -1350,7 +1425,8 @@ fn main() {
             continue;
         }
         let build_start: Instant = Instant::now();
-        session.is_view_covered = menu.is_some() || !session.player.is_alive();
+        session.is_view_covered =
+            menu_and_map.get_cover() != Cover::Nothing || !session.player.is_alive();
         let mut frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);
         if let Some(fov_deg) = args.fov_deg {
             frame.camera.fov_y_rad = fov_deg.to_radians();
@@ -1375,7 +1451,7 @@ fn main() {
         let (window_width_px, window_height_px) = (width_px as f32, height_px as f32);
         fill_marks(&session, &mut marks);
         let mut hud_images: Vec<HudImage> = Vec::new();
-        if let Some(open_menu) = &menu {
+        if let Some(open_menu) = menu_and_map.get_menu() {
             let scoreboard: Scoreboard = match &play.client {
                 None => Scoreboard::Alone {
                     kill_count: session.kill_count,
@@ -1406,19 +1482,27 @@ fn main() {
                 minimap.draw_map(session.player.feet_m, session.player.yaw_rad, &marks);
                 hud_images.push(minimap.get_map_image(window_width_px, window_height_px));
             }
+        } else if menu_and_map.get_cover() == Cover::Map {
+            menu_picture.draw(&menu::get_held_map_lines(), false);
+            frame.hud_rects.push(HudRect {
+                x_px: 0.0,
+                y_px: 0.0,
+                width_px: window_width_px,
+                height_px: window_height_px,
+                color_rgba: Vec4::new(0.0, 0.0, 0.0, HELD_MAP_DIM_FRAC),
+            });
+            hud_images.push(menu_picture.get_image(
+                window_width_px,
+                window_height_px,
+                MENU_HEIGHT_FRAC,
+            ));
+            minimap.draw_map(session.player.feet_m, session.player.yaw_rad, &marks);
+            hud_images.push(minimap.get_map_image(window_width_px, window_height_px));
         } else if menu_settings.is_showing_minimap && bench_view.is_none() && !args.play_route {
             minimap.draw_minimap(session.player.feet_m, session.player.yaw_rad, &marks);
             hud_images.push(minimap.get_minimap_image(window_width_px, window_height_px));
         }
-        if exit_prompt.is_shown() {
-            let [question, keys] = exit_prompt::get_lines();
-            death_picture.draw(&[(question, true), (keys, false)], true);
-            hud_images.push(death_picture.get_image(
-                window_width_px,
-                window_height_px,
-                BANNER_HEIGHT_FRAC,
-            ));
-        } else if menu.is_none()
+        if !menu_and_map.is_menu_open()
             && let Some(respawn_in_s) = session
                 .player
                 .get_respawn_in_s(session.settings.respawn.delay_s as f32)
@@ -1435,6 +1519,15 @@ fn main() {
                 window_height_px,
                 BANNER_HEIGHT_FRAC,
             ));
+        }
+        if menu_and_map.get_cover() == Cover::Nothing
+            && let Some((text, _)) = &session.message
+        {
+            message_picture.draw(&[(text.clone(), false)], true);
+            let mut image: HudImage =
+                message_picture.get_image(window_width_px, window_height_px, MESSAGE_HEIGHT_FRAC);
+            image.y_px = (window_height_px * MESSAGE_TOP_FRAC).floor();
+            hud_images.push(image);
         }
         let build_ms: f32 = build_start.elapsed().as_secs_f32() * 1000.0;
         timing = renderer.render_frame(
@@ -1455,6 +1548,7 @@ fn main() {
                 hit_effect: frame.hit_effect,
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
+                thrown_lens_mouths: &frame.thrown_lens_mouths,
                 beams: &frame.beams,
                 beam_speckle_shares: frame.beam_speckle_shares,
                 overlay_rects: &frame.overlay_rects,

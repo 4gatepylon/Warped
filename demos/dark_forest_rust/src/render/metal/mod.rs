@@ -16,6 +16,7 @@ mod foveation;
 mod gpu_types;
 mod pipelines;
 mod resources;
+mod thrown_lens;
 
 use std::collections::VecDeque;
 use std::ffi::c_void;
@@ -340,6 +341,7 @@ pub struct MetalRenderer {
     drawable_size_px: (u32, u32),
     lens: Option<(Texture, gpu_types::GpuLensUniforms)>,
     lens_live: Option<LensLive>,
+    thrown_lens: Option<thrown_lens::ThrownLens>,
     hud_capture: Option<Texture>,
     is_capturing: bool,
     has_rate_maps: bool,
@@ -578,6 +580,7 @@ impl MetalRenderer {
             white_texture,
             lens: None,
             lens_live: None,
+            thrown_lens: None,
             hud_capture: None,
             is_capturing: false,
             has_rate_maps: true,
@@ -857,8 +860,9 @@ impl MetalRenderer {
     }
 
     /// `encode_lens_live` draws the lens's live slots: the robots and lasers near the mouths that
-    /// `pick_live_lens_mouths` picks, seen from each mouth's centre, into `live`. It returns
-    /// `static_uniforms` with those slots and the robots' bounding spheres filled in.
+    /// `pick_live_lens_mouths` picks among `mouths` (the map's and the thrown ones shown), seen
+    /// from each mouth's centre, into `live`. It returns `static_uniforms` with those slots and the
+    /// robots' bounding spheres filled in.
     #[allow(clippy::too_many_arguments)]
     fn encode_lens_live(
         &self,
@@ -871,11 +875,11 @@ impl MetalRenderer {
         camera_frustum: &Frustum,
         (particles_offset_bytes, particle_count): (usize, usize),
         live: &LensLive,
+        mouths: &[LensMouth],
         static_uniforms: &gpu_types::GpuLensUniforms,
     ) -> gpu_types::GpuLensUniforms {
         let mut uniforms: gpu_types::GpuLensUniforms = *static_uniforms;
-        let is_visible: Vec<bool> = live
-            .mouths
+        let is_visible: Vec<bool> = mouths
             .iter()
             .map(|mouth| camera_frustum.contains_sphere(mouth.centre_m, mouth.reach_m))
             .collect();
@@ -889,7 +893,7 @@ impl MetalRenderer {
             }))
             .collect();
         let slots: Vec<usize> =
-            pick_live_lens_mouths(&live.mouths, frame.camera.position_m, &is_visible, &movers);
+            pick_live_lens_mouths(mouths, frame.camera.position_m, &is_visible, &movers);
         if slots.is_empty() {
             return uniforms;
         }
@@ -902,7 +906,7 @@ impl MetalRenderer {
         }
         let lanes_per_vec4: usize = 4;
         for (slot, &mouth) in slots.iter().enumerate() {
-            let mouth_data: &LensMouth = &live.mouths[mouth];
+            let mouth_data: &LensMouth = &mouths[mouth];
             let is_mover_within_reach: bool = spheres.iter().any(|sphere| {
                 sphere.truncate().distance(mouth_data.centre_m) < mouth_data.reach_m + sphere.w
             });
@@ -913,7 +917,7 @@ impl MetalRenderer {
         let get_slot_distance_m = |sphere: &Vec4| -> f32 {
             slots
                 .iter()
-                .map(|&mouth| live.mouths[mouth].centre_m.distance(sphere.truncate()))
+                .map(|&mouth| mouths[mouth].centre_m.distance(sphere.truncate()))
                 .fold(f32::MAX, f32::min)
         };
         spheres.sort_by(|a, b| get_slot_distance_m(a).total_cmp(&get_slot_distance_m(b)));
@@ -923,7 +927,7 @@ impl MetalRenderer {
         let get_glow_distance_m = |&(start_m, end_m, _): &(Vec3, Vec3, f32)| -> f32 {
             slots
                 .iter()
-                .map(|&mouth| get_segment_distance_m(live.mouths[mouth].centre_m, start_m, end_m))
+                .map(|&mouth| get_segment_distance_m(mouths[mouth].centre_m, start_m, end_m))
                 .fold(f32::MAX, f32::min)
         };
         glows.sort_by(|a, b| get_glow_distance_m(a).total_cmp(&get_glow_distance_m(b)));
@@ -961,7 +965,7 @@ impl MetalRenderer {
                 .renderCommandEncoderWithDescriptor(&descriptor)
                 .expect("render encoder creation failed");
             encoder.setFrontFacingWinding(MTLWinding::CounterClockwise);
-            let centre_m: Vec3 = live.mouths[mouth].centre_m;
+            let centre_m: Vec3 = mouths[mouth].centre_m;
             for (face, (forward, up)) in LENS_FACES.iter().enumerate() {
                 let camera: crate::render::Camera = crate::render::Camera {
                     view: crate::render::camera_math::make_view_rh(centre_m, *forward, *up),
@@ -1248,6 +1252,7 @@ impl Renderer for MetalRenderer {
                 uniforms,
             )
         });
+        self.thrown_lens = lens.map(|_| thrown_lens::ThrownLens::New(&self.device));
         self.lens_live = lens.map(|lens| {
             let face_px: usize = lens.atlas.width as usize / LENS_FACES.len();
             let slot_spec = |format: MTLPixelFormat| -> TextureSpec {
@@ -1935,17 +1940,44 @@ impl MetalRenderer {
         } else {
             &targets.hdr
         };
-        let lens_scissor: Option<MTLScissorRect> = self.lens_live.as_ref().and_then(|live| {
+        let thrown_jobs: Vec<thrown_lens::ThrownFaceJob> = match &mut self.thrown_lens {
+            Some(thrown) => thrown.plan_faces(frame.thrown_lens_mouths),
+            None => Vec::new(),
+        };
+        self.encode_thrown_faces(
+            &command_buffer,
+            frame,
+            settings,
+            targets,
+            &cascades,
+            &all_light_buffers,
+            &thrown_jobs,
+        );
+        let frame_lens: Option<(Vec<LensMouth>, gpu_types::GpuLensUniforms)> =
+            match (&self.lens, &self.lens_live) {
+                (Some((_, static_uniforms)), Some(live)) => Some(self.get_frame_lens(
+                    &live.mouths,
+                    static_uniforms,
+                    frame.thrown_lens_mouths,
+                    frame.camera.near_m,
+                )),
+                _ => None,
+            };
+        let lens_scissor: Option<MTLScissorRect> = frame_lens.as_ref().and_then(|(mouths, _)| {
             get_lens_scissor(
-                &live.mouths,
+                mouths,
                 frame_uniforms.view_proj,
                 &camera_frustum,
                 targets.lens.width(),
                 targets.lens.height(),
             )
         });
-        if let (Some((lens_atlas, lens_uniforms)), Some(scissor)) = (&self.lens, lens_scissor) {
+        if let (Some((lens_atlas, _)), Some((lens_mouths, lens_uniforms)), Some(scissor)) =
+            (&self.lens, &frame_lens, lens_scissor)
+        {
             let live: &LensLive = self.lens_live.as_ref().expect("a lens has live slots");
+            let thrown: &thrown_lens::ThrownLens =
+                self.thrown_lens.as_ref().expect("a lens has thrown slots");
             let frame_lens_uniforms: gpu_types::GpuLensUniforms = self.encode_lens_live(
                 &command_buffer,
                 frame,
@@ -1956,6 +1988,7 @@ impl MetalRenderer {
                 &camera_frustum,
                 (lens_particles_offset_bytes, lens_particles.len()),
                 live,
+                lens_mouths,
                 lens_uniforms,
             );
             draw_fullscreen(
@@ -1971,6 +2004,8 @@ impl MetalRenderer {
                         encoder.setFragmentTexture_atIndex(Some(lens_atlas), 0);
                         encoder.setFragmentTexture_atIndex(Some(&live.color), 1);
                         encoder.setFragmentTexture_atIndex(Some(&live.depth), 2);
+                        encoder.setFragmentTexture_atIndex(Some(&thrown.color), 3);
+                        encoder.setFragmentTexture_atIndex(Some(&thrown.depth), 4);
                     }
                 },
             );
@@ -1982,8 +2017,7 @@ impl MetalRenderer {
             MTLLoadAction::DontCare,
             |encoder: &Encoder| {
                 set_fragment_bytes(encoder, as_bytes(&frame_uniforms), 1);
-                let mut lens_uniforms: gpu_types::GpuLensUniforms = self
-                    .lens
+                let mut lens_uniforms: gpu_types::GpuLensUniforms = frame_lens
                     .as_ref()
                     .map_or_else(gpu_types::GpuLensUniforms::default, |(_, uniforms)| {
                         *uniforms
