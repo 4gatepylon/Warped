@@ -1,0 +1,280 @@
+//! `level_link.rs` is the app's side of a level playing in its window (`app::MatchLink`): once a
+//! frame the level asks it whether the round is over, and it polls the network there, so the
+//! match server keeps hearing this player; it gives the level's menu the match's status. With a
+//! `Tour` (`warped --tour-levels`), it also times the level's frames and presses the keys that
+//! show the map, open the menu and leave the level.
+//!
+//! Interface: `AppLink` (`New`), `Tour` (`New`, `on_frame`, `get_frame_times`), `TourStep`,
+//! `summarise_frame_times`, `FrameSummary`.
+//!
+//! Example: `let mut link = AppLink::New(&mut app, Some(&mut tour));`
+
+use std::time::Instant;
+
+use sdl3::keyboard::Scancode;
+use sdl3::sys::events::{
+    SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP, SDL_Event, SDL_EventType, SDL_KeyboardEvent,
+    SDL_PushEvent,
+};
+use warped_shared::app::MatchLink;
+use warped_shared::match_protocol::MatchView;
+
+use crate::app_state::App;
+
+const MS_PER_S: f64 = 1000.0;
+const PERCENT: f64 = 100.0;
+const P99_PCT: f64 = 99.0;
+
+/// `TourStep` is what a toured level does next, after how long in the level: wait while it loads
+/// and settles, time its frames, hold the map key, open the menu, then leave by its QUIT page.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TourStep {
+    Settle,
+    Time,
+    ShowMap,
+    OpenMenu,
+    Leave,
+    Done,
+}
+
+/// `Tour` is a scripted visit of a level: how long each step lasts, when the level started, the
+/// frame times measured in the `Time` step, and the step reached.
+pub struct Tour {
+    settle_s: f64,
+    time_s: f64,
+    step_s: f64,
+    started_at: Option<Instant>,
+    last_frame_at: Option<Instant>,
+    frame_times_ms: Vec<f64>,
+    step: TourStep,
+}
+
+impl Tour {
+    /// `New` makes a tour that settles `settle_s`, times frames for `time_s`, and spends `step_s`
+    /// on each key step.
+    ///
+    /// Example: `let tour = Tour::New(8.0, 10.0, 1.0);`
+    #[allow(non_snake_case)]
+    pub fn New(settle_s: f64, time_s: f64, step_s: f64) -> Tour {
+        Tour {
+            settle_s,
+            time_s,
+            step_s,
+            started_at: None,
+            last_frame_at: None,
+            frame_times_ms: Vec::new(),
+            step: TourStep::Settle,
+        }
+    }
+
+    /// `get_frame_times` gives the frame times measured, in ms.
+    ///
+    /// Example: `let times = tour.get_frame_times();`
+    pub fn get_frame_times(&self) -> &[f64] {
+        &self.frame_times_ms
+    }
+
+    /// `get_step` gives the step reached.
+    ///
+    /// Example: `if tour.get_step() == TourStep::Done { ... }`
+    #[cfg(test)]
+    fn get_step(&self) -> TourStep {
+        self.step
+    }
+
+    /// `get_step_at` gives the step due `elapsed_s` into the level.
+    ///
+    /// Example: `assert_eq!(tour.get_step_at(0.0), TourStep::Settle);`
+    fn get_step_at(&self, elapsed_s: f64) -> TourStep {
+        let time_end_s: f64 = self.settle_s + self.time_s;
+        match elapsed_s {
+            s if s < self.settle_s => TourStep::Settle,
+            s if s < time_end_s => TourStep::Time,
+            s if s < time_end_s + self.step_s => TourStep::ShowMap,
+            s if s < time_end_s + 2.0 * self.step_s => TourStep::OpenMenu,
+            s if s < time_end_s + 3.0 * self.step_s => TourStep::Leave,
+            _ => TourStep::Done,
+        }
+    }
+
+    /// `on_frame` counts a frame at `now`: it records its time in the `Time` step and, on entering
+    /// a key step, presses that step's keys (Tab down for the map; Tab up and Escape for the menu;
+    /// Q and Y on the menu's QUIT page to leave). It gives the step entered, if one began.
+    ///
+    /// Example: `if let Some(step) = tour.on_frame(Instant::now()) { ... }`
+    pub fn on_frame(&mut self, now: Instant) -> Option<TourStep> {
+        let started_at: Instant = *self.started_at.get_or_insert(now);
+        let step: TourStep = self.get_step_at(now.duration_since(started_at).as_secs_f64());
+        if step == TourStep::Time
+            && let Some(last) = self.last_frame_at
+        {
+            self.frame_times_ms
+                .push(now.duration_since(last).as_secs_f64() * MS_PER_S);
+        }
+        self.last_frame_at = Some(now);
+        if step == self.step {
+            return None;
+        }
+        self.step = step;
+        match step {
+            TourStep::ShowMap => push_key(Scancode::Tab, SDL_EVENT_KEY_DOWN),
+            TourStep::OpenMenu => {
+                push_key(Scancode::Tab, SDL_EVENT_KEY_UP);
+                push_key(Scancode::Escape, SDL_EVENT_KEY_DOWN);
+            }
+            TourStep::Leave => {
+                push_key(Scancode::Q, SDL_EVENT_KEY_DOWN);
+                push_key(Scancode::Y, SDL_EVENT_KEY_DOWN);
+            }
+            TourStep::Settle | TourStep::Time | TourStep::Done => {}
+        }
+        Some(step)
+    }
+}
+
+/// `push_key` queues `scancode` going down or up (`kind`), as the keyboard would, through SDL's
+/// own `SDL_PushEvent`.
+///
+/// Example: `push_key(Scancode::Escape, SDL_EVENT_KEY_DOWN);`
+fn push_key(scancode: Scancode, kind: SDL_EventType) {
+    let key: SDL_KeyboardEvent = SDL_KeyboardEvent {
+        r#type: kind,
+        scancode: scancode.into(),
+        down: kind == SDL_EVENT_KEY_DOWN,
+        repeat: false,
+        ..Default::default()
+    };
+    let mut event: SDL_Event = SDL_Event { key };
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN SDL READING AN EVENT AS THE WRONG TYPE WILL HAPPEN
+    let is_pushed: bool = unsafe { SDL_PushEvent(&mut event) };
+    assert!(is_pushed, "SDL didn't queue the key: {}", sdl3::get_error());
+}
+
+/// `FrameSummary` is a level's frame times: how many, the median, the 99th percentile and the
+/// slowest, in ms.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct FrameSummary {
+    pub frame_count: usize,
+    pub median_ms: f64,
+    pub p99_ms: f64,
+    pub max_ms: f64,
+}
+
+/// `summarise_frame_times` gives the summary of `times_ms`, or `None` for no frames.
+///
+/// Example: `let summary = summarise_frame_times(&[10.0, 11.0]);`
+pub fn summarise_frame_times(times_ms: &[f64]) -> Option<FrameSummary> {
+    if times_ms.is_empty() {
+        return None;
+    }
+    let mut sorted: Vec<f64> = times_ms.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let at = |pct: f64| sorted[((sorted.len() - 1) as f64 * pct / PERCENT).round() as usize];
+    Some(FrameSummary {
+        frame_count: sorted.len(),
+        median_ms: at(PERCENT / 2.0),
+        p99_ms: at(P99_PCT),
+        max_ms: sorted[sorted.len() - 1],
+    })
+}
+
+/// `AppLink` is the `MatchLink` of a level the app plays: the app, and the tour if one runs.
+pub struct AppLink<'a> {
+    app: &'a mut App,
+    tour: Option<&'a mut Tour>,
+}
+
+impl<'a> AppLink<'a> {
+    /// `New` links a level to `app`, with `tour` scripting it if given.
+    ///
+    /// Example: `let mut link = AppLink::New(&mut app, None);`
+    #[allow(non_snake_case)]
+    pub fn New(app: &'a mut App, tour: Option<&'a mut Tour>) -> AppLink<'a> {
+        AppLink { app, tour }
+    }
+}
+
+impl MatchLink for AppLink<'_> {
+    /// `is_round_over` polls the network and says whether the round the level plays has ended;
+    /// a tour also counts the frame and presses its keys here.
+    ///
+    /// Example: `if link.is_round_over() { ... }`
+    fn is_round_over(&mut self) -> bool {
+        if let Some(tour) = &mut self.tour {
+            tour.on_frame(Instant::now());
+        }
+        self.app.poll_network();
+        self.app.is_level_round_over()
+    }
+
+    /// `get_match_view` gives the match's latest view.
+    ///
+    /// Example: `let view = link.get_match_view();`
+    fn get_match_view(&self) -> Option<&MatchView> {
+        self.app.get_level_view()
+    }
+
+    /// `get_match_lines` gives the in-level menu's MATCH page.
+    ///
+    /// Example: `menu.set_match_lines(link.get_match_lines());`
+    fn get_match_lines(&self) -> Option<Vec<(String, bool)>> {
+        self.app.get_match_lines()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for `level_link.rs` (the keys a tour presses need SDL, so the steps are tested
+    //! through `get_step_at` and the frame times through a tour that stays in `Time`).
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Tour steps | before settling, timing, each key step, done | `tour_steps_follow_the_clock` |
+    //! | Frame times | recorded only while timing | `frames_are_timed_only_while_timing` |
+    //! | Summary | none, one, many (median, p99, max) | `frame_times_summarise` |
+
+    use super::*;
+    use std::time::Duration;
+
+    const TOUR_FRAME_STEP: Duration = Duration::from_millis(10);
+
+    #[test]
+    fn tour_steps_follow_the_clock() {
+        let tour: Tour = Tour::New(2.0, 3.0, 1.0);
+        for (elapsed_s, step) in [
+            (0.0, TourStep::Settle),
+            (2.5, TourStep::Time),
+            (5.5, TourStep::ShowMap),
+            (6.5, TourStep::OpenMenu),
+            (7.5, TourStep::Leave),
+            (8.5, TourStep::Done),
+        ] {
+            assert_eq!(tour.get_step_at(elapsed_s), step, "{elapsed_s}");
+        }
+    }
+
+    #[test]
+    fn frames_are_timed_only_while_timing() {
+        let mut tour: Tour = Tour::New(0.05, 100.0, 1.0);
+        let start: Instant = Instant::now();
+        for i in 0..20 {
+            tour.on_frame(start + TOUR_FRAME_STEP * i);
+        }
+        assert_eq!(tour.get_step(), TourStep::Time);
+        assert!(tour.get_frame_times().len() >= 13 && tour.get_frame_times().len() <= 15);
+        assert!(tour.get_frame_times().iter().all(|&ms| (ms - 10.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn frame_times_summarise() {
+        assert_eq!(summarise_frame_times(&[]), None);
+        let one: FrameSummary = summarise_frame_times(&[12.0]).unwrap();
+        assert_eq!((one.median_ms, one.p99_ms, one.max_ms), (12.0, 12.0, 12.0));
+        let times: Vec<f64> = (1..=100).map(f64::from).collect();
+        let many: FrameSummary = summarise_frame_times(&times).unwrap();
+        assert_eq!(many.frame_count, 100);
+        assert_eq!(many.median_ms, 51.0);
+        assert_eq!(many.p99_ms, 99.0);
+        assert_eq!(many.max_ms, 100.0);
+    }
+}

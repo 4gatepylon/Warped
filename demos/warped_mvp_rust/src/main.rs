@@ -19,6 +19,8 @@
 //! - `--print-level-programs`: print the levels `make package-mac-app` puts in the app, and exit.
 //! - `--loopback-only`: keep the app and the games it hosts on 127.0.0.1 (checks; nothing open to
 //!   the network); `WARPED_LOOPBACK_ONLY=1` does the same.
+//! - `--tour-levels`: play alone, visit every level in turn (timing its frames, showing its map
+//!   and menu, leaving), write the frame times to `.artifacts/tour_levels/<run_id>/` and quit.
 //!
 //! Example: `warped --width-px 2560 --height-px 1440`
 //!
@@ -30,22 +32,27 @@ mod app_state;
 mod children;
 mod game_menu;
 mod game_settings_page;
+mod level_library;
+mod level_link;
 mod levels_manifest;
 mod main_menu;
 mod menu_page;
 mod painter;
 mod player_settings_page;
 mod screens;
+mod tour_run;
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use objc2::rc::autoreleasepool;
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
+use warped_shared::app::{LevelEnd, LevelWindow};
 use warped_shared::app_bundle::get_level_slug;
 use warped_shared::game_settings::{
     GameSettings, SettingsMessage, SettingsScope, read_settings_file,
@@ -64,11 +71,13 @@ use crate::app_state::{App, Ports, format_utc_now, get_address_shapes, get_credi
 use crate::children::make_run_folder;
 use crate::game_menu::{GameMenu, LevelMenu, get_level_shapes};
 use crate::game_settings_page::GameSettingsPage;
+use crate::level_link::{AppLink, Tour};
 use crate::levels_manifest::{Picture, get_levels_manifest_path, load_levels, load_map_pictures};
 use crate::main_menu::MainMenu;
 use crate::menu_page::{MenuInput, page_t};
 use crate::painter::{Painter, PixelOrder, render_page};
 use crate::player_settings_page::PlayerSettingsPage;
+use crate::tour_run::TourRun;
 
 /// `Result` is this program's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -126,6 +135,11 @@ struct Arguments {
     /// WARPED_LOOPBACK_ONLY=1).
     #[arg(long)]
     loopback_only: bool,
+    /// Play alone and visit every level of the manifest in turn in this window: settle, time its
+    /// frames, show the map, open the menu, leave; then write the frame times to
+    /// .artifacts/tour_levels/<run_id>/ and quit (a check of the levels inside the app).
+    #[arg(long)]
+    tour_levels: bool,
 }
 
 /// `print_level_programs` prints the levels `make package-mac-app` builds and puts in the app (see
@@ -234,10 +248,12 @@ fn get_menu_input(event: &Event, is_rebinding: bool) -> Option<MenuInput> {
     })
 }
 
-/// `run_window` opens the app's window and runs it until the player quits.
+/// `run_window` opens the app's window and runs it until the player quits: the menus, and each
+/// round's level played in the same window through its library (`level_library`). With
+/// `--tour-levels` it tours the manifest's `level_count` levels and quits.
 ///
-/// Example: `run_window(&arguments, app)?;`
-fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
+/// Example: `run_window(&arguments, app, 5)?;`
+fn run_window(arguments: &Arguments, mut app: App, level_count: usize) -> Result<()> {
     let mut window: MetalWindow = MetalWindow::Open(
         WINDOW_TITLE,
         (arguments.width_px, arguments.height_px),
@@ -245,6 +261,14 @@ fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
     )?;
     let mut painter: Painter = Painter::New(window.get_device())?;
     let mut shown: Option<(Vec<Shape>, (u32, u32))> = None;
+    let mut tour_run: Option<TourRun> = match arguments.tour_levels {
+        true => Some(TourRun::Start(
+            &mut app,
+            level_count,
+            window.get_window().size_in_pixels(),
+        )?),
+        false => None,
+    };
     let started_at: Instant = Instant::now();
     while !app.should_quit() {
         if arguments
@@ -281,7 +305,28 @@ fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
                 app.handle(input);
             }
         }
+        if let Some(tour_run) = &tour_run {
+            tour_run.before_frame(&mut app);
+        }
         app.update();
+        if let Some((play, join)) = app.take_level_to_play() {
+            let mut tour: Option<Tour> = tour_run.as_ref().map(TourRun::make_level_tour);
+            let result: Result<LevelEnd> = autoreleasepool(|_| {
+                let mut link: AppLink = AppLink::New(&mut app, tour.as_mut());
+                let mut level_window: LevelWindow = window.get_level_window(&mut link);
+                play(&mut level_window, &join)
+            });
+            app.end_level(result.map_err(|error| error.to_string()));
+            if let (Some(tour_run), Some(tour)) = (&mut tour_run, &tour) {
+                tour_run.after_level(&app, &join.level.name, tour)?;
+                if tour_run.is_done() {
+                    tour_run.finish()?;
+                    return Ok(());
+                }
+            }
+            shown = None;
+            continue;
+        }
         let (shapes, page_size, pictures): (Vec<Shape>, [f32; 2], Vec<Option<Picture>>) =
             app.get_page();
         let size_px: (u32, u32) = window.get_window().size_in_pixels();
@@ -462,6 +507,7 @@ fn main() -> Result<()> {
         discovery_port: arguments.discovery_port,
         is_loopback_only: arguments.loopback_only || network_scope::is_loopback_only(),
     };
+    let level_count: usize = levels.len();
     let app: App = App::New(
         levels,
         &manifest,
@@ -470,7 +516,7 @@ fn main() -> Result<()> {
         &player_settings_path,
         ports,
     );
-    run_window(&arguments, app)
+    run_window(&arguments, app, level_count)
 }
 
 #[cfg(test)]
