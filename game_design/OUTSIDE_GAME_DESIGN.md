@@ -60,6 +60,11 @@ document is agreed.
 | Ban | A superadmin's or the game's decision that an account may not play online, or may not chat, for a time or for good. |
 | Block | One player's choice to hear nothing more from another player. |
 | Notice | A message from the game to a player, kept in the app's inbox. |
+| Friend | A player another player has agreed to be friends with. |
+| Clan | A standing group of players with a name and a tag, managed by the shared [roles](#roles). |
+| Profile | The page that shows one player's name, icon, tier, badges and statistics. |
+| Commendation | One player's thanks to another after a match. |
+| Presence | Whether a friend is offline, online, in the queue or in a match. |
 
 ## Accounts
 
@@ -547,6 +552,90 @@ The app has an inbox of notices from the game. A notice tells a player:
   avoids putting the two on the same team when it can.
 - Text messages are kept ≈30 days so that a superadmin can review a report. Voice is not recorded.
 
+## Friends, parties and clans
+
+### Friends
+
+- A player sends a friend request by name, from a match's scoreboard or history, or by a link. The other player
+  accepts or declines. Either one ends the friendship at any time.
+- A player sees each friend's presence: offline, online, in the queue, or in a match and which kind. A player can
+  appear offline.
+- **Recent players:** the app lists the players of a player's last matches, so that a good teammate is easy to
+  find again.
+
+### Parties
+
+- Any player forms a party and invites friends or recent players, up to 5 in all. The one who formed it is its
+  leader, who can pass the lead on and remove players.
+- A party queues for a matchmade match together (see [Matchmaking](#matchmaking)), or its leader takes it into a
+  custom game, where each player still picks a team.
+- A party has its own text and voice chat, which carry on between matches.
+
+### Clans
+
+- A clan has a name, a tag of 2 to ≈5 letters shown before its players' names, and up to ≈50 members.
+- A clan follows the shared [roles](#roles): its founder, its admins, and its members, who are readers. Admins
+  invite and remove members.
+- A clan has its own text chat and its own [rankings](#rankings) of its members.
+- A player belongs to at most ≈1 clan.
+
+## Talking
+
+| Channel | Who is in it | Text | Voice |
+| --- | --- | --- | --- |
+| Direct | Two friends | Yes | No |
+| Party | The party | Yes | Yes |
+| Clan | The clan | Yes | No |
+| Team | A team, during a match and its warm-up | Yes | Yes |
+| Match | Both teams, during the warm-up and after the match ends | Yes | No |
+| Game lobby | Everyone in a custom game's lobby | Yes | No |
+
+- **Outside matches** a player talks with friends, their party and their clan from anywhere in the app.
+- **Voice** is for the party and the team. A player picks push-to-talk or an open microphone, and mutes anyone.
+- **During play** opposing teams don't talk: the match channel is open only before the match and after it.
+- Pings and the other signals a player gives inside a match are part of `INSIDE_GAME_DESIGN.md`.
+- The rules against abuse are in [Chat and voice](#chat-and-voice).
+
+## Profiles
+
+- A profile shows a player's name, icon, clan, tier, the badges of past seasons, commendations, and statistics:
+  matches played, share won, kills and deaths, and the levels they win most on.
+- A player opens their own [match history](#match-history) from it, and others see as much of it as the player
+  allows.
+- **Commendations:** after a match, a player commends up to ≈3 others who played in it, for teamwork, for
+  leading or for being good company. A profile shows how many of each the player has. Players can't commend
+  themselves, and commendations from the same party count once.
+
+## Notifications
+
+The app tells a player, wherever they are in it, and through the computer's notifications when it is in the
+background:
+
+- a friend request, and an invitation to a party, a custom game or a clan;
+- a direct message;
+- that the ready check has started, with a sound;
+- that their place in the wait queue has come up;
+- a new [notice](#notices).
+
+## Privacy settings
+
+Each player chooses:
+
+| Setting | Choices |
+| --- | --- |
+| Who may send friend requests | Everyone, friends of friends, nobody |
+| Who may send direct messages | Friends, nobody |
+| Who may invite to parties and games | Everyone, friends, nobody |
+| Who sees the profile's statistics and match history | Everyone, friends, only the player |
+| Presence | Shown to friends, or always offline |
+
+A player's name, icon, tier and place in the rankings are always public.
+
+## Settings that follow the player
+
+A player's own settings, such as key bindings, mouse sensitivity and team colours, are saved to their account, so
+they are the same on every computer the player signs in on.
+
 ## Superadmins
 
 - The developers appoint superadmins, and only the developers can.
@@ -627,6 +716,12 @@ Every number marked ≈ in this document, in one place.
 | Fair play | Reports one player may send per day | ≈10 |
 | Fair play | Days chat messages are kept for review | ≈30 |
 | Fair play | Appeals per ban | ≈1 |
+| Friends and clans | Most friends | ≈200 |
+| Friends and clans | Most members of a clan | ≈50 |
+| Friends and clans | Clans one player belongs to | ≈1 |
+| Friends and clans | Length of a clan's tag | 2 to ≈5 letters |
+| Commendations | Commendations a player gives per match | ≈3 |
+| Chat | Days direct messages are kept | ≈30 |
 
 ## Open questions
 
@@ -657,3 +752,8 @@ Every number marked ≈ in this document, in one place.
   ranked matches.
 - **Naming the cheater:** whether the notice after a ban names the banned player.
 - **Voice:** whether voice chat is ever recorded for review. This design records none.
+- **Clans:** what a clan is for beyond chat and its own rankings (clan matches, a clan rating), and whether a
+  player may be in more than one.
+- **Voice:** whether voice is on by default or push-to-talk only, and whether opposing teams ever hear each other.
+- **Profiles:** which statistics a profile shows, and whether a player may hide theirs.
+- **Commendations:** whether they give anything beyond a number on the profile.
