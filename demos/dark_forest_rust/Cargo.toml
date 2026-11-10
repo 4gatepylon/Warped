@@ -35,3 +35,8 @@ path = "src/bin/dark_forest_server.rs"
 [[bin]]
 name = "download-assets"
 path = "src/bin/download_assets.rs"
+
+[[test]]
+name = "play_twice"
+path = "tests/play_twice.rs"
+harness = false

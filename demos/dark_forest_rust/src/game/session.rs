@@ -307,11 +307,13 @@ const MESSAGE_S: f32 = 3.0;
 /// `LONE_MOUTH_HITS_TO_DESTROY` is how many hits destroy a mouth down whose partner isn't (Lunar
 /// Surface's).
 const LONE_MOUTH_HITS_TO_DESTROY: u8 = 1;
-/// `MARKER_GLOW_PER_RADIUS` sizes a thrown mouth's glowing ball's sprite by its radius, and
+/// `MARKER_GLOW_PER_RADIUS` sizes a thrown mouth's glowing ball's sprite (half its width) by the ball's radius, and
 /// `MARKER_LIGHT_M` and `MARKER_LIGHT_FRAC` its light.
 const MARKER_GLOW_PER_RADIUS: f32 = 2.0;
 const MARKER_LIGHT_M: f32 = 4.0;
 const MARKER_LIGHT_FRAC: f32 = 0.6;
+/// `MARKER_BALL_FRAC` dims the ball itself, so it shows its colour rather than white.
+const MARKER_BALL_FRAC: f32 = 0.3;
 /// `MOUTH_FLOOR_PROBE_M` is how far below a thrown mouth the lens looks for its floor.
 const MOUTH_FLOOR_PROBE_M: f32 = 20.0;
 /// `MIN_WARP_JUMP_M` is how far a robot must move in one update to have gone through a mouth.
@@ -1934,8 +1936,8 @@ impl Session {
                 position_m: marker.centre_m,
                 stretch_m: Vec3::ZERO,
                 size_m: marker.radius_m * MARKER_GLOW_PER_RADIUS,
-                color_rgba: rgb.extend(0.0),
-                kind: ParticleKind::Spark,
+                color_rgba: (rgb * MARKER_BALL_FRAC).extend(0.0),
+                kind: ParticleKind::GlowBall,
                 seed: 0.5,
             });
             point_lights.push(PointLight {

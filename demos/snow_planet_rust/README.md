@@ -33,6 +33,11 @@ make join-game SERVER=127.0.0.1      # terminal 2: your window; press 1 (blue) o
 - Everything else plays as on Lunar Surface, W-126 (same play in every level): the same settings files, and a jump
   as high and as long (DECISIONS S12).
 
+`WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it listens
+on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for network
+permission and `--join auto` finds only servers on this computer. Every test run uses it (`cargo test` without
+it); leave it unset to play across computers.
+
 ## Match interface
 
 The match demo (`demos/warped_match_rust/`) launches the level with:

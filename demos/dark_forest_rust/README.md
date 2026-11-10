@@ -69,6 +69,11 @@ held on an enemy console; red, blurred edges and a shake when you take any damag
 countdown and a bar filling over the wait: 20 s, 10 s more for every 5 minutes into the level (online the server's
 wait, alone the same rule on the session's clock; W-142 (growing respawn time)).
 
+`WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it listens
+on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for network
+permission and `--join auto` finds only servers on this computer. Every test run uses it (`cargo test` without
+it); leave it unset to play across computers.
+
 ## The level
 
 - **Map:** [`../../common/maps/dark_forest/map.json`](../../common/maps/dark_forest/map.json), written by
@@ -115,6 +120,18 @@ wait, alone the same rule on the session's clock; W-142 (growing respawn time)).
   bundles.
 - **Map page:** the map shown while `Tab` is held, and the menu's map page (`Esc`, then E), is `assets/map_picture.png`, a photo of the forest from straight
   above made by `make map-picture`, with live marks over it; without it the page shows the old drawing.
+
+## In the one-window app
+
+The crate is a library too (W-141, one window for the whole game; DECISIONS.md D45): `warped_dark_forest::play_level`
+is a `warped_shared::app::play_level_fn_t`, which the one-window app (`../warped_mvp_rust/`) calls with its own window,
+Metal layer and device, the level server's address and the team. It plays as `dark-forest --join <server> --team <team>
+--no-title` would (plus the levels manifest's `--map` and client flags), shows the app's lines on the menu's MATCH page,
+and returns when the round is over, the QUIT page is confirmed (`LeaveLevel`) or the window is closed (`CloseWindow`),
+having freed its GPU resources and given the layer back as it found it. `src/lib.rs` holds the entry point,
+`src/level.rs` the level (`Level::Load`, `run_title_screen`, `play`), `src/args.rs` the flags, and `src/main.rs` opens
+a window and plays the level alone. `cargo test --test play_twice -- --ignored` plays it twice in one process in a
+hidden window (it needs the GPU), leaving each time from the QUIT page, and checks that the GPU memory comes back.
 
 ## Match interface
 
@@ -238,7 +255,7 @@ started or the frame before it ended, whichever is later, to when it ended.
 - `src/console_reach.rs`: who may hold `E` on a console (in reach and aimed at), for the server and the windows.
 - `src/game/console_bot.rs`: the bots' walking, along `src/game/nav.rs`'s paths and up and down the ladders.
 - `src/match_play.rs`: consoles, the win, and the online client (state, hits, remote robots).
-- `src/shaders/post.metal` (`get_lens_color`) and `capture_wormhole_lens` in `src/main.rs`: the wormhole lens pass.
+- `src/shaders/post.metal` (`get_lens_color`) and `capture_wormhole_lens` in `src/level.rs`: the wormhole lens pass.
 - `src/net.rs`, `src/server.rs`, `src/bin/dark_forest_server.rs`: the UDP server and protocol, copied from the
   hyperbolic demo.
 - `../warped_shared_rust/` (a library this crate depends on): the HUD's bars, crosshair and hit effect, the overlay
