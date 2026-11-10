@@ -33,6 +33,10 @@ const STEP_S: f64 = 1.2;
 const SETTINGS_ANSWER_TIMEOUT_S: f64 = 5.0;
 const SETTINGS_POLL_MS: u64 = 20;
 const SETTINGS_PICTURE_NAME: &str = "game_settings.png";
+const SAVED_PICTURE_NAME: &str = "game_settings_saved.png";
+const REFUSED_PICTURE_NAME: &str = "game_settings_refused.png";
+const SAVED_SETTING_ROW: &str = "shared.respawn.start_s";
+const REFUSED_SETTING_ROW: &str = "shared.beam_speckle.black_frac";
 
 /// `TourRun` is a tour of levels: the game it plays, the levels' indices in the manifest, how many
 /// are done, the frame summaries so far (level name, summary), the window's size in pixels, and
@@ -128,9 +132,12 @@ impl TourRun {
     }
 
     /// `check_game_settings` opens the game master's settings page on the game the tour hosts,
-    /// waits for the match server's settings to show, saves the page as `game_settings.png` and
-    /// closes it; it fails if they don't show within `SETTINGS_ANSWER_TIMEOUT_S` (a match server
-    /// that stopped never answers).
+    /// waits for the match server's settings to show (`game_settings.png`), raises one setting
+    /// and saves it, waiting for the match server to take it (`game_settings_saved.png`), then
+    /// raises one of the beam speckle's shares and saves, which the page must refuse
+    /// (`game_settings_refused.png`), and leaves. It fails if the settings don't show or the
+    /// save isn't taken within `SETTINGS_ANSWER_TIMEOUT_S` (a match server that stopped never
+    /// answers), or if the bad save isn't refused.
     ///
     /// Example: `self.check_game_settings(app)?;`
     fn check_game_settings(&self, app: &mut App) -> Result<()> {
@@ -147,8 +154,34 @@ impl TourRun {
             std::thread::sleep(Duration::from_millis(SETTINGS_POLL_MS));
         }
         self.save_page(app, SETTINGS_PICTURE_NAME)?;
-        app.handle(MenuInput::Back);
         println!("tour: the game settings page shows the match server's settings");
+        app.step_game_setting(SAVED_SETTING_ROW)?;
+        app.save_game_settings();
+        let deadline: Instant = Instant::now() + Duration::from_secs_f64(SETTINGS_ANSWER_TIMEOUT_S);
+        while app.has_unsaved_game_settings() {
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "tour: the match server didn't take a save of {SAVED_SETTING_ROW} within {SETTINGS_ANSWER_TIMEOUT_S} s"
+                )
+                .into());
+            }
+            app.update();
+            std::thread::sleep(Duration::from_millis(SETTINGS_POLL_MS));
+        }
+        self.save_page(app, SAVED_PICTURE_NAME)?;
+        println!("tour: the match server took a save of {SAVED_SETTING_ROW}");
+        app.step_game_setting(REFUSED_SETTING_ROW)?;
+        app.save_game_settings();
+        if !app.has_unsaved_game_settings() {
+            return Err(format!(
+                "tour: a save with {REFUSED_SETTING_ROW} raised (shares no longer adding up to 1) wasn't refused"
+            )
+            .into());
+        }
+        self.save_page(app, REFUSED_PICTURE_NAME)?;
+        println!("tour: a save that breaks a rule was refused on the page");
+        app.handle(MenuInput::Back);
+        app.handle(MenuInput::Back);
         Ok(())
     }
 

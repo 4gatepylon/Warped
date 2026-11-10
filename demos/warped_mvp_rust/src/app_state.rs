@@ -402,8 +402,45 @@ impl App {
         }
     }
 
-    /// `handle_game_settings` applies an input to the game master's settings page, sending each
-    /// change to the match server.
+    /// `has_unsaved_game_settings` says whether the game master's settings page is open with
+    /// changes the match server doesn't have.
+    ///
+    /// Example: `if app.has_unsaved_game_settings() { ... }`
+    pub fn has_unsaved_game_settings(&self) -> bool {
+        self.game_settings_page
+            .as_ref()
+            .is_some_and(GameSettingsPage::has_unsaved_changes)
+    }
+
+    /// `step_game_setting` raises the number of the open game settings page's row `row_key`
+    /// (`shared.<key>` or `level_<index>.<key>`) by one step, as the Right arrow does; it fails
+    /// if the page isn't open or has no such row.
+    ///
+    /// Example: `app.step_game_setting("shared.respawn.start_s")?;`
+    pub fn step_game_setting(&mut self, row_key: &str) -> Result<(), String> {
+        self.game_settings_page
+            .as_mut()
+            .ok_or("the game settings page isn't open")?
+            .select(row_key)?;
+        self.handle_game_settings(MenuInput::Right);
+        Ok(())
+    }
+
+    /// `save_game_settings` saves the open game settings page's changes as its SAVE SETTINGS row
+    /// does: checked on the page, then sent to the match server.
+    ///
+    /// Example: `app.save_game_settings();`
+    pub fn save_game_settings(&mut self) {
+        let page: &mut GameSettingsPage = self
+            .game_settings_page
+            .as_mut()
+            .expect("the game settings page is open");
+        let outcome: GameSettingsOutcome = page.save();
+        self.apply_game_settings_outcome(outcome);
+    }
+
+    /// `handle_game_settings` applies an input to the game master's settings page
+    /// (`apply_game_settings_outcome`).
     ///
     /// Example: `self.handle_game_settings(MenuInput::Right);`
     fn handle_game_settings(&mut self, input: MenuInput) {
@@ -411,7 +448,20 @@ impl App {
             .game_settings_page
             .as_mut()
             .expect("the game settings page is open");
-        match page.handle(input) {
+        let outcome: GameSettingsOutcome = page.handle(input);
+        self.apply_game_settings_outcome(outcome);
+    }
+
+    /// `apply_game_settings_outcome` does what the game settings page asked for after an input:
+    /// nothing, send the match server a message (a save), or close the page.
+    ///
+    /// Example: `self.apply_game_settings_outcome(outcome);`
+    fn apply_game_settings_outcome(&mut self, outcome: GameSettingsOutcome) {
+        let page: &mut GameSettingsPage = self
+            .game_settings_page
+            .as_mut()
+            .expect("the game settings page is open");
+        match outcome {
             GameSettingsOutcome::Stay => {}
             GameSettingsOutcome::Send(message) => {
                 let result: Result<(), String> = match &mut self.client {
