@@ -1,7 +1,7 @@
 //! `text_overlay` draws lines of text with SDL's built-in 8x8 font into an RGBA picture for the
 //! HUD (`HudImage`): the menu and the title screen. It redraws only when the lines change.
 //!
-//! Interface: `TextPicture` (`New`, `draw`, `get_image`), `GLYPH_PX`.
+//! Interface: `TextPicture` (`New`, `draw`, `draw_team_box`, `get_image`), `GLYPH_PX`.
 //!
 //! Example: `picture.draw(&[("MENU".to_string(), true)], false); let image = picture.get_image(1600, 1200, 0.85);`
 //!
@@ -13,6 +13,7 @@ use sdl3::pixels::{Color, PixelFormat};
 use sdl3::surface::Surface;
 
 use crate::render::HudImage;
+use warped_shared::hud::make_team_box_rgba;
 
 /// `GLYPH_PX` is the width and height of one character of SDL's debug font.
 pub const GLYPH_PX: f32 = 8.0;
@@ -31,6 +32,8 @@ const HIGHLIGHT_COLOR: Color = Color::RGB(255, 196, 92);
 const BANNER_TITLE_COLOR: Color = Color::RGB(255, 89, 77);
 const BANNER_TOP_PX: f32 = 2.0;
 const BYTES_PER_PIXEL: usize = 4;
+/// `TEAM_BOX_PAD_PX` is how far the team box reaches past its lines' text.
+const TEAM_BOX_PAD_PX: u32 = 2;
 
 /// `TextPicture` is a picture of some lines of text and the lines it shows.
 pub struct TextPicture {
@@ -118,6 +121,39 @@ impl TextPicture {
         self.shown_lines = Some((lines.to_vec(), is_centered));
     }
 
+    /// `draw_team_box` draws a box in `team`'s colour (`make_team_box_rgba`) under the text of
+    /// left-aligned lines `lines` (first, end excluded), across the picture; it fills only clear
+    /// pixels, so drawing it again over the same lines changes nothing.
+    ///
+    /// Example: `picture.draw_team_box(0, [5, 8]);`
+    pub fn draw_team_box(&mut self, team: u32, lines: [usize; 2]) {
+        let [top_px, bottom_excl_px] = lines.map(|line| self.top_px + LINE_PX * line as f32);
+        let min_px: [u32; 2] = [
+            LEFT_PX as u32 - TEAM_BOX_PAD_PX,
+            top_px as u32 - TEAM_BOX_PAD_PX,
+        ];
+        let max_excl_px: [u32; 2] = [
+            self.width_px - LEFT_PX as u32 + TEAM_BOX_PAD_PX,
+            (bottom_excl_px - LINE_PX + GLYPH_PX) as u32 + TEAM_BOX_PAD_PX,
+        ];
+        assert!(
+            max_excl_px[1] <= self.height_px,
+            "draw_team_box: lines {lines:?} end below the picture's {} px",
+            self.height_px
+        );
+        let size_px: (u32, u32) = (max_excl_px[0] - min_px[0], max_excl_px[1] - min_px[1]);
+        let box_rgba: Vec<u8> = make_team_box_rgba(size_px, team);
+        for (i, pixel) in box_rgba.chunks_exact(BYTES_PER_PIXEL).enumerate() {
+            let (x, y) = (i % size_px.0 as usize, i / size_px.0 as usize);
+            let at: usize =
+                ((min_px[1] as usize + y) * self.width_px as usize + min_px[0] as usize + x)
+                    * BYTES_PER_PIXEL;
+            if self.pixels_rgba[at + BYTES_PER_PIXEL - 1] == 0 {
+                self.pixels_rgba[at..at + BYTES_PER_PIXEL].copy_from_slice(pixel);
+            }
+        }
+    }
+
     /// `get_image` places the picture in the middle of a window of `window_width_px` by
     /// `window_height_px`, as large as fits in `height_frac` of its height.
     ///
@@ -140,5 +176,43 @@ impl TextPicture {
             y_px: ((window_height_px - self.height_px as f32 * scale) / 2.0).floor(),
             scale,
         }
+    }
+}
+
+/// `tests` checks the team box drawn under a menu's lines.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | pixel | clear (filled), text (kept) | `test_team_box_fills_only_clear_pixels` |
+/// | drawing | once, again over the same lines (unchanged) | `test_team_box_fills_only_clear_pixels` |
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `get_alpha` is the opacity of `picture`'s pixel at `x`, `y`.
+    fn get_alpha(picture: &TextPicture, x: u32, y: u32) -> u8 {
+        picture.pixels_rgba[(y * picture.width_px + x) as usize * BYTES_PER_PIXEL + 3]
+    }
+
+    #[test]
+    fn test_team_box_fills_only_clear_pixels() {
+        let mut picture: TextPicture = TextPicture::New(64, 48);
+        let text_at: (u32, u32) = (20, 20);
+        let text_index: usize =
+            (text_at.1 * picture.width_px + text_at.0) as usize * BYTES_PER_PIXEL;
+        picture.pixels_rgba[text_index..text_index + BYTES_PER_PIXEL]
+            .copy_from_slice(&[1, 2, 3, 255]);
+        picture.draw_team_box(1, [1, 2]);
+        let top_px: u32 = (TOP_PX + LINE_PX) as u32 - TEAM_BOX_PAD_PX;
+        assert_eq!(get_alpha(&picture, LEFT_PX as u32, top_px), u8::MAX);
+        assert!(get_alpha(&picture, LEFT_PX as u32 + 4, top_px + 4) < u8::MAX);
+        assert_eq!(get_alpha(&picture, LEFT_PX as u32, top_px - 1), 0);
+        assert_eq!(
+            picture.pixels_rgba[text_index..text_index + BYTES_PER_PIXEL],
+            [1, 2, 3, 255]
+        );
+        let once: Vec<u8> = picture.pixels_rgba.clone();
+        picture.draw_team_box(1, [1, 2]);
+        assert_eq!(picture.pixels_rgba, once);
     }
 }
