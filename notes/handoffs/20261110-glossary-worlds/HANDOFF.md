@@ -116,7 +116,7 @@ The new chain, bottom to top, pushed but with no PRs yet. Each branch adds one c
 
 ## The pictures
 
-`pictures/` has 14 draft jpgs: Snow Planet (1), Dark Forest (3), Dust (3), City Sphere (2), Lunar Surface (3).
+`pictures/` has 12 draft jpgs: Snow Planet (1), Dark Forest (3), Dust (3), City Sphere (2), Lunar Surface (3).
 
 - Four levels use the game's own map picture from the repo: `demos/dust_rust/map_pictures/dust_r50m.png`,
   `demos/snow_planet_rust/map_pictures/snow_planet.png`, `demos/city_sphere_rust/assets/map_picture.png`,
@@ -141,6 +141,21 @@ Sans Bold). Run `python3 tools/world_<level>.py` from anywhere; it rewrites that
 - `zone_objects.py`: lists a hyperbolic level's objects by zone (`python3 zone_objects.py dust 50 48`).
 - `world_*.py`: each level's names, positions and crops.
 - `mk_section.py`, `trace_block.sh`, `pr_bodies_v2.py`: helpers that add a glossary section as a commit, print the
-  `AGENT TRACES` section, and write PR bodies. They have this machine's paths in them and are for reference only.
+  `AGENT TRACES` section, and write PR bodies. `trace_block.sh` only works in a desktop Claude Code session, and
+  `pr_bodies_v2.py` has the old PR numbers in it. They are for reference only.
 
 `section_drafts/02.md` to `06.md` are the section texts already committed in the chain.
+
+## If you are a cloud agent
+
+- **Nothing is missing from the repo.** Every input the tools read is a tracked file: the four map pictures under
+  `demos/` and each level's `common/maps/<level>/map.json`. All five `world_*.py` tools were rerun from this
+  folder and reproduce the pictures.
+- **Install Pillow** (`pip install pillow`). The tools need a bold TrueType font and look for DejaVu Sans Bold
+  under `/usr/share/fonts/`; if it is elsewhere, add its path to `FONT_CANDIDATES` in `tools/annotate.py`.
+- **`AGENT TRACES`.** The commit rules require this section in every commit
+  (`.agents/skills/pr-description/commit-agent-traces.md`). A cloud session uses its session URL as the
+  transcript and the id in that URL as the trace id. The rules say an agent that can't fill the section doesn't
+  commit; follow what the user's message says about that case.
+- **`gh stack`** is an extension (`gh extension install github/gh-stack`) and may be missing. Plain branches,
+  each built on the one before, are enough.
