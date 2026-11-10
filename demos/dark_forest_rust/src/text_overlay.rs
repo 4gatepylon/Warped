@@ -143,7 +143,7 @@ impl TextPicture {
         );
         let size_px: (u32, u32) = (max_excl_px[0] - min_px[0], max_excl_px[1] - min_px[1]);
         let box_rgba: Vec<u8> = make_team_box_rgba(size_px, team);
-        for (i, pixel) in box_rgba.chunks_exact(BYTES_PER_PIXEL).enumerate() {
+        for (i, pixel) in box_rgba.as_chunks::<BYTES_PER_PIXEL>().0.iter().enumerate() {
             let (x, y) = (i % size_px.0 as usize, i / size_px.0 as usize);
             let at: usize =
                 ((min_px[1] as usize + y) * self.width_px as usize + min_px[0] as usize + x)
