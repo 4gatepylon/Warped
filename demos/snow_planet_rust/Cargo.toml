@@ -1,7 +1,9 @@
 # `Cargo.toml` builds the Snow Planet level demo, a copy of `../hyperbolic_wormholes_rust/` drawing Snow Planet.
 #
 # Interface:
-#     snow-planet: the game (macOS only: Metal and SDL), what `cargo run` runs.
+#     snow_planet_level: the level as a library (src/lib.rs, macOS only: Metal and SDL), whose
+#         play_level the one-window app (../warped_mvp_rust/) calls.
+#     snow-planet: the game alone (src/main.rs, which runs the library), what `cargo run` runs.
 #     snow_planet_server: a game server alone (src/bin/snow_planet_server.rs), which also builds for Linux.
 #
 # Example:
@@ -36,6 +38,13 @@ objc2-metal-fx = "0.3"
 objc2-quartz-core = "0.3"
 sdl3 = { version = "0.22", features = ["build-from-source-static"] }
 
+[lib]
+name = "snow_planet_level"
+
 [[bin]]
 name = "snow_planet_server"
 test = false
+
+[[test]]
+name = "in_one_window"
+harness = false
