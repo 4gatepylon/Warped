@@ -5,8 +5,8 @@
 //! to the match server, which holds the settings and gives each round's level server its merged
 //! copy; the page shows the server's latest answer.
 //!
-//! Interface: `GameSettingsPage` (`New`, `update`, `handle`, `show_message`, `get_shapes`; in tests
-//! `is_waiting`, `get_row_keys`),
+//! Interface: `GameSettingsPage` (`New`, `update`, `handle`, `show_message`, `get_shapes`,
+//! `is_waiting`; in tests `get_row_keys`),
 //! `GameSettingsOutcome`.
 //!
 //! Example: `if let GameSettingsOutcome::Send(message) = page.handle(MenuInput::Right) { client.send_settings(&message)?; }`
@@ -187,7 +187,6 @@ impl GameSettingsPage {
     /// `is_waiting` says whether no settings have come from the match server yet.
     ///
     /// Example: `if page.is_waiting() { ... }`
-    #[cfg(test)]
     pub fn is_waiting(&self) -> bool {
         self.editor.is_none()
     }

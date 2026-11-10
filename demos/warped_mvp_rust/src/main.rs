@@ -389,10 +389,12 @@ fn run_window(arguments: &Arguments, mut app: App, tour_level_indices: Vec<usize
                 let mut level_window: LevelWindow = window.get_level_window(&mut link);
                 play(&mut level_window, &join)
             });
+            let game: String = app.describe_game();
             app.end_level(result.map_err(|error| error.to_string()));
             if let Some(timer) = &timer {
                 let path: PathBuf = play_log.record(
                     &join.level.name,
+                    &game,
                     window.get_window().size_in_pixels(),
                     timer.get_frame_times(),
                 )?;

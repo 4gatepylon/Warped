@@ -6,7 +6,7 @@
 //! Interface: `GameKind`, `BotObjective`, `BotPlan`, `Programs` (`Find`), `plan_bots`,
 //! `MAX_ALLY_COUNT`, `MAX_ENEMY_COUNT`, `MAX_BOT_COUNT`,
 //! `make_match_server_command`, `make_bot_command`, `HostedGame` (`Start`, `has_stopped`,
-//! `move_sit_out_bot`, `stop`), `make_run_folder`, `SIT_OUT_ROUND_COUNT`.
+//! `move_sit_out_bot`, `stop`), `make_run_folder`, `describe_game_kind`, `SIT_OUT_ROUND_COUNT`.
 //!
 //! Example: `let game = HostedGame::Start(&programs, GameKind::Alone, Team::Blue, ports, &folder)?;`
 //!
@@ -216,6 +216,21 @@ pub fn make_bot_command(programs: &Programs, server: SocketAddr, plan: &BotPlan)
         command.arg("--bot-round-winners").arg(winners.join(","));
     }
     command
+}
+
+/// `describe_game_kind` says in words which game `kind` is, for the frame times' headings.
+///
+/// Example: `assert_eq!(describe_game_kind(GameKind::Alone), "playing alone");`
+pub fn describe_game_kind(kind: GameKind) -> String {
+    match kind {
+        GameKind::Host => "hosting a game".to_string(),
+        GameKind::Alone => "playing alone".to_string(),
+        GameKind::Bots {
+            ally_count,
+            enemy_count,
+            ..
+        } => format!("with {ally_count} allied and {enemy_count} enemy bots"),
+    }
 }
 
 /// `make_run_folder` makes the folder of a run of `script` (`warped` for the children's logs,
@@ -470,6 +485,7 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Game kind | hosted, alone (blue, red), bots (none: as alone; allies and enemies; allies only: a sitting-out enemy; the most) | `each_game_kind_plans_its_bots` |
+    //! | Game kind in words | hosted, alone, with bots | `game_kinds_are_described` |
     //! | Match server command | ports and manifest passed; on the network (no variable), loopback only (`WARPED_LOOPBACK_ONLY=1`) | `the_match_server_serves_the_manifest_on_its_ports` |
     //! | Bot command | consoles, fight, sitting out (as many rounds as `SIT_OUT_ROUND_COUNT`, the other team named) | `bots_join_with_their_team_and_objective` |
     //! | How the game's processes end | the app stops the game (a level server left by its killed match server dies too), the app ends without stopping it (the guard's pipe closes) | `stopping_a_group_kills_a_grandchild`, `a_group_dies_with_the_app` |
@@ -549,6 +565,18 @@ mod tests {
             match_server: PathBuf::from("/app/warped-match"),
             levels_manifest: PathBuf::from("/app/match_levels.yaml"),
         }
+    }
+
+    #[test]
+    fn game_kinds_are_described() {
+        assert_eq!(describe_game_kind(GameKind::Host), "hosting a game");
+        assert_eq!(describe_game_kind(GameKind::Alone), "playing alone");
+        let bots: GameKind = GameKind::Bots {
+            ally_count: 4,
+            enemy_count: 5,
+            objective: BotObjective::Fight,
+        };
+        assert_eq!(describe_game_kind(bots), "with 4 allied and 5 enemy bots");
     }
 
     #[test]

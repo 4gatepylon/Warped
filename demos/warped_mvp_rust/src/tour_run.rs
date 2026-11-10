@@ -1,7 +1,8 @@
 //! `tour_run.rs` drives `warped --tour-levels`: it plays alone or with bots and asks the match
 //! server for each toured level in turn (free play), lets each run its `Tour` in the app's window (settle, time
-//! its frames, open the menu, leave), saves the game menu after each level, and writes every
-//! level's frame times to its run folder before quitting.
+//! its frames, open the menu, leave), saves the game menu after each level, writes every
+//! level's frame times to its run folder, and opens the game master's settings page to check that
+//! the match server's settings show there, before quitting.
 //!
 //! Interface: `TourRun` (`Start`, `before_frame`, `make_level_tour`, `after_level`, `is_done`,
 //! `finish`).
@@ -11,14 +12,16 @@
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use warped_shared::app_bundle::get_level_slug;
 
 use crate::app_state::{App, format_utc_now};
-use crate::children::{GameKind, make_run_folder};
+use crate::children::{GameKind, describe_game_kind, make_run_folder};
 use crate::level_link::{
     FRAME_TABLE_HEADER, FrameSummary, Tour, format_frame_row, summarise_frame_times,
 };
+use crate::menu_page::MenuInput;
 use crate::painter::{PixelOrder, render_page};
 
 /// `Result` is this module's result type.
@@ -27,6 +30,9 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const SETTLE_S: f64 = 10.0;
 const TIME_S: f64 = 8.0;
 const STEP_S: f64 = 1.2;
+const SETTINGS_ANSWER_TIMEOUT_S: f64 = 5.0;
+const SETTINGS_POLL_MS: u64 = 20;
+const SETTINGS_PICTURE_NAME: &str = "game_settings.png";
 
 /// `TourRun` is a tour of levels: the game it plays, the levels' indices in the manifest, how many
 /// are done, the frame summaries so far (level name, summary), the window's size in pixels, and
@@ -90,6 +96,19 @@ impl TourRun {
         let summary: Option<FrameSummary> = summarise_frame_times(tour.get_frame_times());
         println!("tour: {level_name}: {summary:?}");
         self.summaries.push((level_name.to_string(), summary));
+        self.save_page(
+            app,
+            &format!("game_menu_after_{}.png", get_level_slug(level_name)),
+        )?;
+        self.done_count += 1;
+        Ok(())
+    }
+
+    /// `save_page` saves the page `app` shows, at the window's size, as `file_name` in the run
+    /// folder.
+    ///
+    /// Example: `self.save_page(app, "game_settings.png")?;`
+    fn save_page(&self, app: &App, file_name: &str) -> Result<()> {
         let (shapes, page_size, pictures) = app.get_page();
         let pixels: Vec<u8> = render_page(
             self.size_px,
@@ -98,18 +117,38 @@ impl TourRun {
             &pictures,
             PixelOrder::Rgba,
         )?;
-        let path: PathBuf = self.folder.join(format!(
-            "game_menu_after_{}.png",
-            get_level_slug(level_name)
-        ));
         image::save_buffer(
-            &path,
+            self.folder.join(file_name),
             &pixels,
             self.size_px.0,
             self.size_px.1,
             image::ExtendedColorType::Rgba8,
         )?;
-        self.done_count += 1;
+        Ok(())
+    }
+
+    /// `check_game_settings` opens the game master's settings page on the game the tour hosts,
+    /// waits for the match server's settings to show, saves the page as `game_settings.png` and
+    /// closes it; it fails if they don't show within `SETTINGS_ANSWER_TIMEOUT_S` (a match server
+    /// that stopped never answers).
+    ///
+    /// Example: `self.check_game_settings(app)?;`
+    fn check_game_settings(&self, app: &mut App) -> Result<()> {
+        app.open_game_settings();
+        let deadline: Instant = Instant::now() + Duration::from_secs_f64(SETTINGS_ANSWER_TIMEOUT_S);
+        while !app.has_game_settings() {
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "tour: the game settings page didn't get the match server's settings within {SETTINGS_ANSWER_TIMEOUT_S} s"
+                )
+                .into());
+            }
+            app.update();
+            std::thread::sleep(Duration::from_millis(SETTINGS_POLL_MS));
+        }
+        self.save_page(app, SETTINGS_PICTURE_NAME)?;
+        app.handle(MenuInput::Back);
+        println!("tour: the game settings page shows the match server's settings");
         Ok(())
     }
 
@@ -120,8 +159,9 @@ impl TourRun {
         self.done_count >= self.level_indices.len()
     }
 
-    /// `finish` writes `frame_times.md`, a table of each level's frame times, prints it, and
-    /// stops the game `app` hosts; it fails if a process the game started is still alive then.
+    /// `finish` writes `frame_times.md`, a table of each level's frame times, prints it, checks
+    /// the game settings page (`check_game_settings`) and stops the game `app` hosts; it fails if
+    /// the page got no settings, or if a process the game started is still alive then.
     ///
     /// Example: `tour_run.finish(&mut app)?;`
     pub fn finish(&self, app: &mut App) -> Result<()> {
@@ -129,55 +169,17 @@ impl TourRun {
             "Frame times inside the app at {}x{} px, {} (wall clock, from one frame's start to the next's)\n\n{FRAME_TABLE_HEADER}",
             self.size_px.0,
             self.size_px.1,
-            describe_game(self.kind)
+            describe_game_kind(self.kind)
         );
         for (name, summary) in &self.summaries {
             table.push_str(&format_frame_row(name, *summary));
         }
         fs::write(self.folder.join("frame_times.md"), &table)?;
         println!("{table}");
+        let settings_check: Result<()> = self.check_game_settings(app);
         app.stop_hosting()?;
+        settings_check?;
         println!("tour: every process the game started has stopped");
         Ok(())
-    }
-}
-
-/// `describe_game` says in words which game a tour played, for the frame times' heading.
-///
-/// Example: `assert_eq!(describe_game(GameKind::Alone), "playing alone");`
-fn describe_game(kind: GameKind) -> String {
-    match kind {
-        GameKind::Host => "hosting a game".to_string(),
-        GameKind::Alone => "playing alone".to_string(),
-        GameKind::Bots {
-            ally_count,
-            enemy_count,
-            ..
-        } => format!("with {ally_count} allied and {enemy_count} enemy bots"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    //! Unit tests for `tour_run.rs` (a tour itself needs a window and the levels; `warped
-    //! --tour-levels` runs one).
-    //!
-    //! | Partitioning | Parts | Tests |
-    //! | --- | --- | --- |
-    //! | Game described | hosted, alone, with bots | `a_tour_names_its_game` |
-
-    use super::*;
-    use crate::children::BotObjective;
-
-    #[test]
-    fn a_tour_names_its_game() {
-        assert_eq!(describe_game(GameKind::Host), "hosting a game");
-        assert_eq!(describe_game(GameKind::Alone), "playing alone");
-        let bots: GameKind = GameKind::Bots {
-            ally_count: 4,
-            enemy_count: 5,
-            objective: BotObjective::Fight,
-        };
-        assert_eq!(describe_game(bots), "with 4 allied and 5 enemy bots");
     }
 }

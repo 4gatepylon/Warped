@@ -5,7 +5,7 @@
 //!
 //! Interface: `PlayLog` (`New`, `record`), `PLAY_SETTLE_S`.
 //!
-//! Example: `play_log.record("Dust", (2560, 1334), timer.get_frame_times())?;`
+//! Example: `play_log.record("Dust", &app.describe_game(), (2560, 1334), timer.get_frame_times())?;`
 //!
 //! Must know:
 //! - The run folder is `.artifacts/play_frame_times/<run_id>/` in the checkout, and
@@ -44,14 +44,15 @@ impl PlayLog {
         PlayLog { path: None }
     }
 
-    /// `record` adds the row of `level_name`, played in a window of `size_px` with the frame
-    /// times `times_ms`, making the run folder and the table's head at the first level, and
-    /// gives the file.
+    /// `record` adds the row of `level_name`, played in `game` (who was in it,
+    /// `App::describe_game`) in a window of `size_px` with the frame times `times_ms`, making the
+    /// run folder and the table's head at the first level, and gives the file.
     ///
-    /// Example: `let path = play_log.record("Dust", (2560, 1334), timer.get_frame_times())?;`
+    /// Example: `let path = play_log.record("Dust", &app.describe_game(), (2560, 1334), timer.get_frame_times())?;`
     pub fn record(
         &mut self,
         level_name: &str,
+        game: &str,
         size_px: (u32, u32),
         times_ms: &[f64],
     ) -> Result<PathBuf> {
@@ -59,28 +60,25 @@ impl PlayLog {
             Some(path) => path.clone(),
             None => make_run_folder(SCRIPT, &format_utc_now())?.join(FILE_NAME),
         };
-        add_row(&path, level_name, size_px, times_ms)?;
+        let row_name: String = format!("{level_name} ({game}; {}x{} px)", size_px.0, size_px.1);
+        add_row(&path, &row_name, times_ms)?;
         self.path = Some(path.clone());
         Ok(path)
     }
 }
 
-/// `add_row` appends `level_name`'s row to the table at `path`, writing the table's head first
-/// when the file isn't there yet.
+/// `add_row` appends the row named `row_name` (the level, who was in the game, the window's
+/// size) to the table at `path`, writing the table's head first when the file isn't there yet.
 ///
-/// Example: `add_row(&path, "Dust", (2560, 1334), &[10.0, 11.0])?;`
-fn add_row(path: &Path, level_name: &str, size_px: (u32, u32), times_ms: &[f64]) -> Result<()> {
+/// Example: `add_row(&path, "Dust (playing alone; 2560x1334 px)", &[10.0, 11.0])?;`
+fn add_row(path: &Path, row_name: &str, times_ms: &[f64]) -> Result<()> {
     let mut text: String = String::new();
     if !path.exists() {
         text.push_str(&format!(
-            "Frame times of the levels played in the app (wall clock, from one frame's start to the next's, after each level's first {PLAY_SETTLE_S} s; the window was {}x{} px at the first level)\n\n{FRAME_TABLE_HEADER}",
-            size_px.0, size_px.1
+            "Frame times of the levels played in the app (wall clock, from one frame's start to the next's, after each level's first {PLAY_SETTLE_S} s; each row names who was in the game, bots too, and the window's size)\n\n{FRAME_TABLE_HEADER}"
         ));
     }
-    text.push_str(&format_frame_row(
-        level_name,
-        summarise_frame_times(times_ms),
-    ));
+    text.push_str(&format_frame_row(row_name, summarise_frame_times(times_ms)));
     let mut file: fs::File = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -112,14 +110,13 @@ mod tests {
         if path.exists() {
             fs::remove_file(&path).unwrap();
         }
-        add_row(&path, "Dust", (2560, 1334), &[10.0, 12.0]).unwrap();
-        add_row(&path, "Dark Forest", (2560, 1334), &[]).unwrap();
+        add_row(&path, "Dust (playing alone; 2560x1334 px)", &[10.0, 12.0]).unwrap();
+        add_row(&path, "Dark Forest", &[]).unwrap();
         let text: String = fs::read_to_string(&path).unwrap();
         assert_eq!(text.matches(FRAME_TABLE_HEADER).count(), 1);
         assert!(text.starts_with("Frame times of the levels played in the app"));
-        assert!(text.contains("2560x1334 px"));
         assert!(text.ends_with(
-            "| Dust | 2 | 12.00 | 12.00 | 12.00 | yes |\n| Dark Forest | 0 | - | - | - | no frames |\n"
+            "| Dust (playing alone; 2560x1334 px) | 2 | 12.00 | 12.00 | 12.00 | yes |\n| Dark Forest | 0 | - | - | - | no frames |\n"
         ));
     }
 }
