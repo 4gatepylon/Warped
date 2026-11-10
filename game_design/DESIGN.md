@@ -25,27 +25,9 @@ and in progress.
 
 ## Terms
 
-| Term | Meaning |
-| --- | --- |
-| Team | Blue or red, ≈5 players each. A game holds at most 12 players (a 5v5 and a spare player each team). |
-| Match | One game between the two teams, played across the levels of one map. |
-| Map | A line of levels: the blue levels, one purple level in the middle, then the red levels. |
-| Level | One playable space. A blue or red level belongs to that team; the purple level to neither. |
-| Depth | How far a level is from the purple level: 0 for purple, then 1, 2, … outward. |
-| Round | One play of one level, which one team wins. |
-| Wavefront | A team's next level to win on the other team's side. It only moves deeper. |
-| Attacker | The team whose wavefront is being played. |
-| Defender | The team that owns the level being played. |
-| Lobby | The screen a player joins on: it shows each team's head count, and the player picks a team. |
-| Spawn | Where a team's players enter a level. |
-| Pylon | One of a team's 1 to 3 objectives in a level, near its spawn. |
-| Console | One part of a pylon. The opposing team deactivates consoles to win the level. |
-| Zone | One of a level's three regions: the blue zone, the middle zone and the red zone. |
-| Route | One way across the middle zone, from one side to the other. |
-| Floor | One walkable layer inside a level. |
-| Warp object | A black hole or a wormhole. Level designers place them, and each player throws a pair of wormhole mouths of their own (see [Thrown wormholes](#thrown-wormholes)). |
-| Energy | What sprinting uses up. It refills over time, twice as fast while crouched. |
-| Map edge | The soft edge of a level: players slow down without end as they climb it, so they never leave. |
+[`GLOSSARY.md`](GLOSSARY.md) defines the terms of the game, one meaning each: game, match, round, level, map,
+pylon, console, warp object, HUD and the rest. Read it first. This document still says *game* in places for
+what the glossary calls a *match*, and *map edge* for a *level edge*; fix those when you edit them.
 
 ## Match
 
