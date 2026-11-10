@@ -37,6 +37,10 @@ document is agreed.
 | Replay | The recording of a match, which the app plays back from any viewpoint. |
 | Clip | A short video a player makes from a replay. |
 | Checkpoint | The saved state of a custom game that stopped, from which it can start again. |
+| Party | 1 to 5 players who queue together and always land on the same team. |
+| Queue | The players and parties waiting for matchmaking to form a match. |
+| Rating window | How far apart in rating matchmaking lets a party and its opponents be. It widens as the party waits. |
+| Ready check | The moment each of the ten players confirms they are there, before a matchmade match starts. |
 
 ## Accounts
 
@@ -244,6 +248,78 @@ Every online match starts with a warm-up, as in Counter-Strike.
 - **Versions:** a replay plays in an app that still knows the version it was recorded with. A clip is a video and
   plays anywhere.
 
+## Matchmaking
+
+Matchmaking forms ranked matches of five against five on the official map and settings. It is the only way to
+play a ranked match, apart from tournament games.
+
+### Parties
+
+- A player queues alone or in a party of up to 5. A party's players are always on the same team.
+- The party's leader starts and stops the search. Everyone in the party must be able to play: signed in on an app
+  the servers accept, past no free allowance without the purchase, not banned, and under no cooldown.
+- **Rating gap:** in a party of 2 to 4, the highest and lowest ratings are at most ≈500 apart, so that a strong
+  player can't carry a weak friend up the ranks. A full party of 5 has no limit, because it chooses all of its own
+  teammates.
+- **A party's rating:** matchmaking treats a party as one rating: the mean of its players' ratings, moved ≈25% of
+  the way toward its best player's. The lean makes up for the edge that playing together gives.
+
+### The queue
+
+There is one queue, so that the players online find each other as fast as they can.
+
+1. Every ≈5 s, matchmaking takes the party that has waited longest and looks for nine more players around it.
+2. It only takes parties whose rating is inside the first party's rating window. The window starts at ≈±100 and
+   grows by ≈50 every 10 s the party waits, up to ≈±500. Matchmaking never matches players further apart than
+   that.
+3. It prefers parties of the same sizes on both teams, a party of 3 against a party of 3, and fills the rest with
+   players who queued alone.
+4. It only takes players who can play in the same region: each player's delay to that region is at most ≈120 ms.
+   Of the regions that fit, it picks the one where the slowest player's delay is lowest.
+5. With ten players, it tries every way to split them into two teams of five that keeps parties whole, and takes
+   the split where the two teams' ratings are closest. If the weaker team's chance to win is below ≈40% in every
+   split, it drops the match and keeps looking.
+6. Which team is blue and which is red is random.
+
+While waiting, a player sees how long they have waited and an estimate of how much longer.
+
+### The ready check
+
+- When matchmaking has ten players, each of them gets ≈20 s to confirm.
+- If all ten confirm, the match's server starts in the chosen region, and the players go to its
+  [warm-up](#warm-up).
+- If anyone declines or doesn't answer, there is no match. That player's party leaves the queue, and the player
+  gets a short cooldown that grows if they do it again (see Rating, in a later section). The other parties go back
+  into the queue with the time they had already waited.
+- If the caps are full, the confirmed match waits in the wait queue ahead of new custom games, and the players
+  see their place.
+
+### Too few players: bots
+
+- A party that has waited ≈2 minutes without a match is offered a match with bots. The offer names how many human
+  players it would have.
+- A party that accepts can be put in a match where bots fill the empty places, the same number of bots on each
+  team where that is possible. The bots play at about the level of the human players' ratings.
+- A match that starts with bots is not ranked: it changes no rating and counts for no leaving penalty.
+- A party that declines keeps waiting for ten human players. If there aren't enough, it gets no match.
+- A match with bots needs at least ≈2 human players. A player alone is pointed to practice against bots in a
+  local game.
+
+### After the match
+
+- The players see the result and how their rating changed (see Rating, in a later section).
+- A party stays together and can queue again at once. Players who met in the match can form a party for the next
+  one.
+
+### Later, without changing these rules
+
+- **Opening hours:** the queue is always open at launch. Superadmins gather players at set times with
+  announcements. A setting for the queue's opening hours can be added later.
+- **More queues:** an unranked queue, or one per game type, can be added when there are enough players to fill
+  them. Each queue would follow the steps above with its own settings.
+- **Tournaments:** at launch a superadmin sets up each tournament game by hand. Brackets that start the games
+  themselves can be added on top of tournament games.
+
 ## Superadmins
 
 - The developers appoint superadmins, and only the developers can.
@@ -287,6 +363,18 @@ Every number marked ≈ in this document, in one place.
 | Watching | Most spectators in one game | ≈20 |
 | Replays | Days a replay is kept | ≈90 |
 | Replays | Longest clip | ≈60 s |
+| Matchmaking | Players in a party | 1 to 5 |
+| Matchmaking | Largest rating gap inside a party of 2 to 4 | ≈500 |
+| Matchmaking | How far a party's rating leans toward its best member | ≈25% of the gap to its mean |
+| Matchmaking | How often matchmaking looks for a match | ≈5 s |
+| Matchmaking | Rating window at the start | ≈±100 |
+| Matchmaking | Rating window growth | ≈50 every 10 s |
+| Matchmaking | Largest rating window | ≈±500 |
+| Matchmaking | Least and most win chance a team may have | ≈40% and ≈60% |
+| Matchmaking | Largest delay to a region a player is matched into | ≈120 ms |
+| Matchmaking | Time to answer the ready check | ≈20 s |
+| Matchmaking | Wait before bots are offered | ≈2 min |
+| Matchmaking | Fewest human players in a match with bots | ≈2 |
 
 ## Open questions
 
@@ -299,3 +387,7 @@ Every number marked ≈ in this document, in one place.
 - **Public saved maps:** whether anyone may publish a saved map to every player, or a superadmin approves it first.
 - **Replays:** how long replays are kept, and whether a player can hide their own replays from the others in the
   match.
+- **Bots in the queue:** the fewest human players a match with bots needs, and whether a party that accepted bots
+  still gets a full human match when one turns up.
+- **Party gap:** whether the largest rating gap inside a party should be counted in rating points or in tiers.
+- **Blocked players:** whether matchmaking should also keep a blocked player off the other team.
