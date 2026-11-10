@@ -1002,6 +1002,8 @@ fn make_frame(
         beam_speckle: [0.0; 4],
         flashlight: [[0.0; 4]; 3],
         visuals: warped_shared::visuals::GpuPlayerVisuals::IDENTITY,
+        glass_light_frac: crate::settings::GlassLightsSettings::default().get_brightness_frac(now_s)
+            as f32,
     }
 }
 
@@ -2061,6 +2063,7 @@ impl CitySession {
             frame.zoom_in(self.get_zoom());
         }
         frame.visuals = self.player_settings.visuals.to_gpu();
+        frame.glass_light_frac = self.settings.glass_lights.get_brightness_frac(now_s) as f32;
         let flashlight = &self.settings.flashlight;
         let shot_eye: DMat4 = self.player.get_eye_frame();
         frame.flashlight = [

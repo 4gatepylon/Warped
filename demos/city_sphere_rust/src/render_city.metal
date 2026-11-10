@@ -115,6 +115,7 @@ struct CityUniforms {
     float4 flashlight_direction;
     float4 flashlight;
     float4 hole_sides[MAX_HOLE_COUNT];
+    float4 glass_lights;
 };
 
 struct Fragment {
@@ -326,7 +327,7 @@ fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& 
     }
     float alpha = clamp(GLASS_BASE_ALPHA + fresnel * (1.0 - line) + RIB_ALPHA * line + 0.6 * rim, 0.0, 0.95);
     float3 l = normalize(-in.world);
-    float rib_light = RIB_GLOW + 0.3 * pow(max(dot(reflect(-view, n), l), 0.0), 8.0);
+    float rib_light = (RIB_GLOW + 0.3 * pow(max(dot(reflect(-view, n), l), 0.0), 8.0)) * u.glass_lights.x;
     float3 tint = mix(in.color.rgb * GLASS_TINT_FRAC, RIB_COLOR * rib_light, line) + float3(0.8, 0.6, 1.0) * rim;
     return float4(encode_srgb(tint) * alpha, alpha);
 }

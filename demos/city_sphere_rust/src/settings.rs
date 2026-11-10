@@ -47,7 +47,8 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 31] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 32] = [
+    "glass_lights.low_brightness_frac",
     "gravity.black_hole_acceleration_frac",
     "gravity.black_hole_min_radius_m",
     "gravity.black_hole_darkness_frac",
@@ -197,6 +198,76 @@ impl TeamDomesSettings {
     }
 }
 
+/// `GlassLightsSettings` is how the lights on City Sphere's glass shell (its glowing ribs) pulse
+/// (W-203, dimmer, pulsing lights on City Sphere's glass): between `low_brightness_frac` and
+/// `high_brightness_frac` of their full brightness, in a triangle wave of `period_s` that spends
+/// `rising_frac` of each period rising and the rest falling (the user: "from around 30%
+/// brightness of actual to around 70% brightness of actual on around a 16 second period", "10 are
+/// spent on the upwards part of the triangle and 6 are spent on the downwards part"). A file
+/// without the section takes those values.
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct GlassLightsSettings {
+    pub low_brightness_frac: f64,
+    pub high_brightness_frac: f64,
+    pub period_s: f64,
+    pub rising_frac: f64,
+}
+
+const BUILTIN_GLASS_LIGHTS: GlassLightsSettings = GlassLightsSettings {
+    low_brightness_frac: 0.3,
+    high_brightness_frac: 0.7,
+    period_s: 16.0,
+    rising_frac: 0.625,
+};
+
+impl Default for GlassLightsSettings {
+    /// `default` is the built-in pulse: 0.3 to 0.7 over 16 s, 10 s rising and 6 s falling.
+    ///
+    /// Example: `let lights: GlassLightsSettings = GlassLightsSettings::default();`
+    fn default() -> GlassLightsSettings {
+        BUILTIN_GLASS_LIGHTS
+    }
+}
+
+impl GlassLightsSettings {
+    /// `check` fails, naming the keys, unless the low brightness is from 0 up to the high one,
+    /// the period is above 0 and the rising share is strictly between 0 and 1.
+    ///
+    /// Example: `settings.glass_lights.check()?;`
+    pub fn check(&self) -> Result<()> {
+        let is_valid: bool = self.low_brightness_frac >= 0.0
+            && self.low_brightness_frac <= self.high_brightness_frac
+            && self.period_s > 0.0
+            && self.rising_frac > 0.0
+            && self.rising_frac < 1.0;
+        if !is_valid {
+            return Err(format!(
+                "glass_lights needs 0 <= low_brightness_frac <= high_brightness_frac, period_s above 0 and rising_frac between 0 and 1, not {}, {}, {} and {}",
+                self.low_brightness_frac, self.high_brightness_frac, self.period_s, self.rising_frac
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// `get_brightness_frac` gives the lights' brightness at `time_s`, as a share of full: with
+    /// `p` the share of the period gone by, `p / rising_frac` of the way from low to high while
+    /// `p < rising_frac`, and `(1 - p) / (1 - rising_frac)` of the way after.
+    ///
+    /// Example: `let brightness_frac: f64 = settings.glass_lights.get_brightness_frac(now_s);`
+    pub fn get_brightness_frac(&self, time_s: f64) -> f64 {
+        let phase_frac: f64 = time_s.rem_euclid(self.period_s) / self.period_s;
+        let wave_frac: f64 = if phase_frac < self.rising_frac {
+            phase_frac / self.rising_frac
+        } else {
+            (1.0 - phase_frac) / (1.0 - self.rising_frac)
+        };
+        self.low_brightness_frac
+            + (self.high_brightness_frac - self.low_brightness_frac) * wave_frac
+    }
+}
+
 /// `ServerSettings` is everything in `server_settings.yaml`.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -222,6 +293,8 @@ pub struct ServerSettings {
     pub glass: GlassSettings,
     #[serde(default)]
     pub team_domes: TeamDomesSettings,
+    #[serde(default)]
+    pub glass_lights: GlassLightsSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -390,6 +463,10 @@ impl ServerSettings {
             .team_domes
             .check()
             .map_err(|error| format!("settings {source}: {error}"))?;
+        settings
+            .glass_lights
+            .check()
+            .map_err(|error| format!("settings {source}: {error}"))?;
         let min_time_rate_frac: f64 = settings.black_hole.min_time_rate_frac;
         if min_time_rate_frac > 1.0 {
             return Err(format!(
@@ -528,6 +605,7 @@ mod tests {
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
+    //! | Glass lights (W-203) | the built-in pulse at its low, half way up, its high, half way down, a period later, a time before 0; a file without the section; low 0, low above high, a shorter period, a rising share of 1 and of a half | `glass_lights_follow_an_uneven_triangle` |
     //! | Team dome size (W-148) | 0.2 (built in), a file without the section (0.2), small, a half, 0, above a half | `dome_size_takes_above_0_to_a_half` |
     //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`, the four `view.head_bob` sway and swing keys) | present (built in), missing in an old save (gets its built-in value), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
     //! | Menu and map keys (W-140, hold Tab for the map, Esc for the menu) | current (built in), saved before (`release_mouse`, `open_menu` on `Tab`: loads with `Escape` for the menu and `Tab` for the map), `release_mouse` beside `show_map` (fails) | `builtin_settings_read_and_survive_json`, `saves_from_before_the_held_map_open_the_menu_with_escape` |
@@ -717,6 +795,53 @@ mod tests {
                         .contains("space.curvature_per_map_curvature"),
                     "{error}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn glass_lights_follow_an_uneven_triangle() {
+        let lights: GlassLightsSettings = ServerSettings::Builtin().glass_lights;
+        assert_eq!(lights, BUILTIN_GLASS_LIGHTS);
+        for (time_s, expected_frac) in [
+            (0.0, 0.3),
+            (5.0, 0.5),
+            (10.0, 0.7),
+            (13.0, 0.5),
+            (16.0, 0.3),
+            (26.0, 0.7),
+            (-3.0, 0.5),
+        ] {
+            let brightness_frac: f64 = lights.get_brightness_frac(time_s);
+            assert!(
+                (brightness_frac - expected_frac).abs() < 1e-12,
+                "{time_s}: {brightness_frac}"
+            );
+        }
+        let section_at: usize = BUILTIN_SERVER_YAML
+            .find("glass_lights:")
+            .expect("the section");
+        let without: ServerSettings =
+            ServerSettings::FromYaml(&BUILTIN_SERVER_YAML[..section_at], "test")
+                .expect("no section");
+        assert_eq!(without.glass_lights, BUILTIN_GLASS_LIGHTS);
+        for (old, new, is_valid) in [
+            ("low_brightness_frac: 0.3", "low_brightness_frac: 0.0", true),
+            (
+                "low_brightness_frac: 0.3",
+                "low_brightness_frac: 0.8",
+                false,
+            ),
+            ("period_s: 16.0", "period_s: 4.0", true),
+            ("rising_frac: 0.625", "rising_frac: 1.0", false),
+            ("rising_frac: 0.625", "rising_frac: 0.5", true),
+        ] {
+            assert!(BUILTIN_SERVER_YAML.contains(old), "{old}");
+            let result: Result<ServerSettings> =
+                ServerSettings::FromYaml(&BUILTIN_SERVER_YAML.replace(old, new), "test");
+            assert_eq!(result.is_ok(), is_valid, "{new}");
+            if let Err(error) = result {
+                assert!(error.to_string().contains("glass_lights"), "{error}");
             }
         }
     }

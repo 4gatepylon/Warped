@@ -149,3 +149,9 @@ glass:  # City Sphere: shots fired on the glass level (inside the glass shell) r
 
 team_domes:  # City Sphere: each team's area is a shimmering dome over its pylon on the glass level (W-148).
   circumference_frac: 0.2  # Share of the way round the glass level that each team's dome spans (0.2: 72 degrees, 21.4 m across; at most 0.5).
+
+glass_lights:  # City Sphere: the lights on the glass shell (its glowing ribs) pulse in an uneven triangle wave (W-203).
+  low_brightness_frac: 0.3  # Their dimmest, as a share of full brightness (0 for off).
+  high_brightness_frac: 0.7  # Their brightest, as a share of full brightness.
+  period_s: 16.0  # Seconds from one dimmest moment to the next.
+  rising_frac: 0.625  # Share of each period spent getting brighter (10 s of 16); the rest gets dimmer (strictly between 0 and 1).

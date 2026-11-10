@@ -232,6 +232,9 @@ noise; the crowd view's p99 frame is over 16.7 ms in both, from posing eight rob
 - On this VM the frame interval's p99 with vsync (21 to 28 ms) is over 16.7 ms because of the display's pacing (see
   Results); not yet measured on a real Mac display.
 - Posing robots costs about 1 ms of CPU per clip each frame; a crowd of eight is the worst view's main cost.
+- The lights on the glass shell (its glowing ribs) pulse (W-203, dimmer, pulsing lights on City Sphere's glass):
+  between 0.3 and 0.7 of full brightness every 16 s, 10 s rising and 6 s falling; the four numbers are the
+  `glass_lights` game settings.
 - No thrown wormhole lenses or shadows in City Sphere. Its team boundaries (W-148, team boundary planes
   in every level) are a dome over each team's pylon on the glass level, in the team's colour, spanning
   `team_domes.circumference_frac` of the way round (0.2: 21.4 m across; a game setting), fainter from inside, and

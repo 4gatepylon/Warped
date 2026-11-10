@@ -273,6 +273,9 @@ Every level follows these rules:
   Sphere, inside a sphere, a dome over each team's pylon on the glass level. A team's area there is inside its dome
   and everything else is the middle; each dome spans 0.2 of the way round the glass level (21.4 m across), which the
   game master can change (`team_domes.circumference_frac`), and it is fainter seen from inside than from outside.
+- City Sphere's glass level is lit by the glowing ribs of its glass shell, which pulse (W-203, dimmer, pulsing
+  lights on City Sphere's glass): from 0.3 to 0.7 of their full brightness and back every 16 s, rising for 10 s
+  and falling for 6 s. The game master can change the two bounds, the period and the rising share (`glass_lights`).
 
 | Zone layout | Shape |
 | --- | --- |
