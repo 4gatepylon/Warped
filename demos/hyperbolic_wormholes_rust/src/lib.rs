@@ -1199,6 +1199,17 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
     ]
 }
 
+/// `get_bench_visuals` gives the visuals of `--player-settings` for the bench views (W-51, basic
+/// visuals), or the identity without it, so the default pictures stay as they were.
+///
+/// Example: `frame.set_visuals(get_bench_visuals(&arguments)?);`
+fn get_bench_visuals(arguments: &Arguments) -> Result<warped_shared::visuals::GpuPlayerVisuals> {
+    Ok(match &arguments.player_settings {
+        Some(path) => PerPlayerSettings::Load(path)?.visuals.to_gpu(),
+        None => warped_shared::visuals::GpuPlayerVisuals::IDENTITY,
+    })
+}
+
 /// `bench_voxel_views` renders a voxel map's viewpoints without a window, timing each, as
 /// `bench_views` does for the house.
 ///
@@ -1243,6 +1254,8 @@ fn bench_voxel_views(
         let mut warm_up: VoxelFrame =
             VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
         warm_up.set_sharp_centre(get_sharp_centre(arguments));
+        let visuals: warped_shared::visuals::GpuPlayerVisuals = get_bench_visuals(arguments)?;
+        warm_up.set_visuals(visuals);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
@@ -1250,6 +1263,7 @@ fn bench_voxel_views(
             let mut frame: VoxelFrame =
                 VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
             frame.set_sharp_centre(get_sharp_centre(arguments));
+            frame.set_visuals(visuals);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());
@@ -3659,6 +3673,8 @@ impl Session {
                 render_px,
             );
             view.frame.set_sharp_centre(self.sharp_centre);
+            view.frame
+                .set_visuals(self.player_settings.visuals.to_gpu());
             if is_firing
                 && !self.was_firing
                 && let Some(shot) = &view.shot

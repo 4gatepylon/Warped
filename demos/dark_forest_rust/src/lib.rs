@@ -13,9 +13,9 @@
 //! - Gotchas: the app's join plays as `dark-forest --join <server> --team <team> --no-title`
 //!   with the level's `--map` and client flags from the levels manifest, so the forest plays the
 //!   same in the app as run alone.
-//! - Gotchas: the forest doesn't read `LevelJoin::player_settings_path` yet: its keys and look
-//!   speed are its own constants (Lunar Surface's defaults) until it reads the shared
-//!   `player_settings`.
+//! - Gotchas: of `LevelJoin::player_settings_path` the forest reads only the `visuals` (W-51,
+//!   basic visuals): its keys and look speed are its own constants (Lunar Surface's defaults)
+//!   until it reads the rest of the shared `player_settings`.
 
 pub mod args;
 #[allow(dead_code)]
@@ -47,7 +47,9 @@ use std::error::Error;
 use clap::Parser;
 use warped_shared::app::{LevelEnd, LevelJoin, LevelWindow};
 use warped_shared::match_state::Team;
+use warped_shared::player_settings::PerPlayerSettings;
 use warped_shared::shot_noise;
+use warped_shared::visuals::VisualsSettings;
 
 use args::Args;
 use level::{Level, LevelFiles};
@@ -55,15 +57,29 @@ use level::{Level, LevelFiles};
 /// `PROGRAM_NAME` is the name the join's command line starts with, as the program's own does.
 const PROGRAM_NAME: &str = "dark-forest";
 
+/// `get_join_visuals` gives the player's `visuals` for `join`: those of the player's settings
+/// file where it exists, as the app's settings pages saved them, and the built-in ones (no
+/// change) where the player has saved none.
+///
+/// Example: `let visuals: VisualsSettings = get_join_visuals(&join)?;`
+fn get_join_visuals(join: &LevelJoin) -> Result<VisualsSettings, Box<dyn Error>> {
+    if !join.player_settings_path.exists() {
+        return Ok(VisualsSettings::IDENTITY);
+    }
+    Ok(PerPlayerSettings::Load(&join.player_settings_path)?.visuals)
+}
+
 /// `get_join_args` gives the flags that play `join`: join its server on its team at once, with
-/// no title screen, and the level's `--map` and client flags from the levels manifest.
+/// no title screen, the player's visuals (W-51, basic visuals), and the level's `--map` and
+/// client flags from the levels manifest.
 ///
 /// Example: `let args: Args = get_join_args(&join)?;`
-fn get_join_args(join: &LevelJoin) -> Result<Args, clap::Error> {
+fn get_join_args(join: &LevelJoin) -> Result<Args, Box<dyn Error>> {
     let team: &str = match join.team {
         Team::Blue => "blue",
         Team::Red => "red",
     };
+    let visuals: VisualsSettings = get_join_visuals(join)?;
     let mut command_line: Vec<String> = [
         PROGRAM_NAME,
         "--join",
@@ -71,6 +87,14 @@ fn get_join_args(join: &LevelJoin) -> Result<Args, clap::Error> {
         "--team",
         team,
         "--no-title",
+        "--brightness",
+        &visuals.brightness.to_string(),
+        "--contrast",
+        &visuals.contrast.to_string(),
+        "--saturation",
+        &visuals.saturation.to_string(),
+        "--gamma",
+        &visuals.gamma.to_string(),
     ]
     .map(String::from)
     .to_vec();
@@ -78,7 +102,7 @@ fn get_join_args(join: &LevelJoin) -> Result<Args, clap::Error> {
         command_line.extend(["--map".to_string(), map.clone()]);
     }
     command_line.extend(join.level.client_args.iter().cloned());
-    Args::try_parse_from(command_line)
+    Ok(Args::try_parse_from(command_line)?)
 }
 
 /// `play_level` plays `join` in the app's `window` until the match's round ends, the player
@@ -111,6 +135,7 @@ mod tests {
     //! | Team | blue, red | `a_join_plays_its_server_and_team` |
     //! | Level's `--map` | none, given | `a_join_plays_its_server_and_team`, `a_join_passes_the_levels_map_and_flags` |
     //! | Level's client flags | none, some, unknown | `a_join_plays_its_server_and_team`, `a_join_passes_the_levels_map_and_flags`, `an_unknown_client_flag_fails` |
+    //! | Player's settings file | missing, with visuals, broken | `a_join_plays_its_server_and_team`, `a_join_plays_the_players_visuals`, `a_broken_settings_file_fails` |
 
     use std::net::SocketAddr;
     use std::path::PathBuf;
@@ -120,7 +145,7 @@ mod tests {
     use super::*;
 
     /// `make_join` is a join of Dark Forest's server at 127.0.0.1:48370 on `team`, with `map` and
-    /// `client_args` in its manifest entry.
+    /// `client_args` in its manifest entry, and a player's settings file that doesn't exist.
     ///
     /// Example: `let join: LevelJoin = make_join(Team::Red, None, &[]);`
     fn make_join(team: Team, map: Option<&str>, client_args: &[&str]) -> LevelJoin {
@@ -141,8 +166,20 @@ mod tests {
             },
             server: SocketAddr::from(([127, 0, 0, 1], 48370)),
             team,
-            player_settings_path: PathBuf::from("player_settings.yaml"),
+            player_settings_path: PathBuf::from("no_such_folder/player_settings.yaml"),
         }
+    }
+
+    /// `make_join_with_settings_path` is `make_join`'s blue join with the player's settings file
+    /// `file_name` in the tests' own folder under `.build/`, for the test to write.
+    ///
+    /// Example: `let join: LevelJoin = make_join_with_settings_path("mine.yaml");`
+    fn make_join_with_settings_path(file_name: &str) -> LevelJoin {
+        let folder: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".build/test_joins");
+        std::fs::create_dir_all(&folder).expect("the tests' folder");
+        let mut join: LevelJoin = make_join(Team::Blue, None, &[]);
+        join.player_settings_path = folder.join(file_name);
+        join
     }
 
     #[test]
@@ -153,7 +190,31 @@ mod tests {
             assert_eq!(args.team.as_deref(), Some(team_flag));
             assert!(args.no_title && !args.host && !args.serve && !args.bot);
             assert_eq!(args.map, None);
+            assert_eq!(args::get_start_visuals(&args), VisualsSettings::IDENTITY);
         }
+    }
+
+    #[test]
+    fn a_join_plays_the_players_visuals() {
+        let mut mine: PerPlayerSettings = PerPlayerSettings::Builtin();
+        mine.visuals = VisualsSettings {
+            brightness: 1.25,
+            contrast: 0.75,
+            saturation: 1.5,
+            gamma: 1.75,
+        };
+        let join: LevelJoin = make_join_with_settings_path("with_visuals.yaml");
+        mine.save(&join.player_settings_path)
+            .expect("the settings file");
+        let args: Args = get_join_args(&join).expect("valid flags");
+        assert_eq!(args::get_start_visuals(&args), mine.visuals);
+    }
+
+    #[test]
+    fn a_broken_settings_file_fails() {
+        let join: LevelJoin = make_join_with_settings_path("broken.yaml");
+        std::fs::write(&join.player_settings_path, "keys: 7").expect("the settings file");
+        assert!(get_join_args(&join).is_err());
     }
 
     #[test]

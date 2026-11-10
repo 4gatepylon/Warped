@@ -40,6 +40,8 @@ pub use crate::play_settings::{
 pub use crate::play_settings::{HeadBobSettings, MinimapCorner};
 #[cfg(target_os = "macos")]
 pub use crate::play_settings::{HitEffectSettings, MinimapSettings, ViewSettings};
+#[cfg(target_os = "macos")]
+use warped_shared::visuals::VisualsSettings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 #[cfg(target_os = "macos")]
@@ -91,7 +93,8 @@ const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 6] = [
+const ADDED_PLAYER_KEYS: [&str; 7] = [
+    "visuals",
     "keys.switch_view",
     "view.milky_way_brightness_frac",
     "view.head_bob.gun_walk_sway_m",
@@ -112,6 +115,7 @@ struct PlayerFile {
     view: ViewSettings,
     hit_effects: HitEffectSettings,
     minimap: MinimapSettings,
+    visuals: VisualsSettings,
 }
 
 /// `PerPlayerSettings` is everything in `player_settings.yaml`, with the keys read into controls.
@@ -121,6 +125,7 @@ pub struct PerPlayerSettings {
     pub view: ViewSettings,
     pub hit_effects: HitEffectSettings,
     pub minimap: MinimapSettings,
+    pub visuals: VisualsSettings,
 }
 
 /// `SandstormSettings` is Dust's own game setting (W-158, per-map game settings): how strongly
@@ -379,7 +384,8 @@ impl ServerSettings {
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
-    /// `view.wormhole_tint_frac` and `view.milky_way_brightness_frac` at most 1. The keys in
+    /// `view.wormhole_tint_frac` and `view.milky_way_brightness_frac` at most 1, and `visuals` in its
+    /// ranges (`VisualsSettings::check`). The keys in
     /// `REMOVED_PLAYER_KEYS`, which older versions saved, are dropped (`drop_removed_keys`), and those in `ADDED_PLAYER_KEYS`, which
     /// older versions didn't save, take their built-in values when missing (`add_missing_keys`).
     /// Keys saved before W-140 (hold Tab for the map, Esc for the menu) are upgraded
@@ -413,11 +419,13 @@ impl PerPlayerSettings {
                 .into());
             }
         }
+        file.visuals.check(source)?;
         Ok(PerPlayerSettings {
             keys: KeyBindings::FromNames(&file.keys, source)?,
             view: file.view,
             hit_effects: file.hit_effects,
             minimap: file.minimap,
+            visuals: file.visuals,
         })
     }
 
@@ -439,6 +447,7 @@ impl PerPlayerSettings {
             view: self.view.clone(),
             hit_effects: self.hit_effects.clone(),
             minimap: self.minimap.clone(),
+            visuals: self.visuals,
         };
         serde_yaml::to_string(&file).expect("player settings serialize to YAML")
     }
@@ -467,6 +476,7 @@ mod tests {
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
     //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`, the four `view.head_bob` sway and swing keys) | present (built in), missing in an old save (gets its built-in value), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
     //! | Menu and map keys (W-140, hold Tab for the map, Esc for the menu) | current (built in), saved before (`release_mouse`, `open_menu` on `Tab`: loads with `Escape` for the menu and `Tab` for the map), `release_mouse` beside `show_map` (fails) | `builtin_settings_read_and_survive_json`, `saves_from_before_the_held_map_open_the_menu_with_escape` |
+    //! | Visuals (W-51, basic visuals) | the identity (built in), a save without the section (gets the identity), a value out of its range (fails, naming it) | `saves_without_visuals_load_with_the_identity` |
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
@@ -747,5 +757,36 @@ mod tests {
             .expect("release_mouse beside show_map still fails")
             .to_string();
         assert!(error.contains("release_mouse"), "{error}");
+    }
+
+    #[test]
+    fn saves_without_visuals_load_with_the_identity() {
+        assert_eq!(
+            PerPlayerSettings::Builtin().visuals,
+            VisualsSettings::IDENTITY
+        );
+        let mut is_in_visuals: bool = false;
+        let old_save: String = BUILTIN_PLAYER_YAML
+            .lines()
+            .filter(|line| {
+                if !line.is_empty() && !line.starts_with(' ') {
+                    is_in_visuals = line.starts_with("visuals:");
+                }
+                !is_in_visuals
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+        assert!(!old_save.contains("brightness:") && old_save.contains("keys:"));
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("a save without visuals loads");
+        assert_eq!(loaded.visuals, VisualsSettings::IDENTITY);
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let too_bright: String =
+            BUILTIN_PLAYER_YAML.replacen("  brightness: 1.0", "  brightness: 9.0", 1);
+        let error: String = PerPlayerSettings::FromYaml(&too_bright, "test")
+            .err()
+            .expect("a brightness of 9 fails")
+            .to_string();
+        assert!(error.contains("visuals.brightness"), "{error}");
     }
 }

@@ -1,7 +1,8 @@
 //! `menu.rs` is the in-game menu, in pages under a tab bar: the settings page, where a player
 //! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
-//! head bob, motion blur, how a hit looks, the wormhole tint and the Milky Way's brightness, and a
-//! row that saves them), the map page, whose
+//! head bob, motion blur, how a hit looks, the wormhole tint, the Milky Way's brightness, the
+//! picture's brightness, contrast, saturation and gamma (W-51, basic visuals), and a row that saves
+//! them), the map page, whose
 //! picture the window draws (`map_layout.rs`), the scores page, with each player's team, kills
 //! and deaths from the server, the credits page, with where the game's assets come from
 //! (`credits.rs`), the quit page, which leaves the level, and, when the caller supplies its lines
@@ -31,6 +32,7 @@ use crate::key_bindings::{Action, Control, KeyBindings};
 use crate::menu_and_map::{MATCH_PAGE_NAME, QUIT_LINES, format_tab_bar, is_leave_control};
 use crate::net::{Score, TEAM_NAMES};
 use crate::settings::PerPlayerSettings;
+use warped_shared::visuals::{VISUALS_ROWS, VisualsKnob};
 
 const VISIBLE_ROW_COUNT: usize = 20;
 const PAGES: [(Page, &str); 5] = [
@@ -106,6 +108,7 @@ enum Number {
     HitBlur,
     WormholeTint,
     MilkyWay,
+    Visual(VisualsKnob),
 }
 
 /// `Row` is one line of the menu that can be chosen: an action's controls, a number, or saving.
@@ -143,7 +146,8 @@ pub fn get_held_map_lines(keys: &KeyBindings) -> Vec<(String, bool)> {
     ]
 }
 
-/// `get_rows` gives the menu's rows in order: every action, then the numbers, then saving.
+/// `get_rows` gives the menu's rows in order: every action, then the numbers, then the visuals, then
+/// saving.
 ///
 /// Example: `let rows = get_rows();`
 fn get_rows() -> Vec<Row> {
@@ -155,6 +159,9 @@ fn get_rows() -> Vec<Row> {
                 Row::Number(number, label, step, low, high)
             }),
         )
+        .chain(VISUALS_ROWS.iter().map(|&(knob, label, step, low, high)| {
+            Row::Number(Number::Visual(knob), label, step, low, high)
+        }))
         .chain([Row::Save])
         .collect()
 }
@@ -173,6 +180,7 @@ fn get_number(settings: &PerPlayerSettings, number: Number) -> f64 {
         Number::HitBlur => settings.hit_effects.blur_px,
         Number::WormholeTint => settings.view.wormhole_tint_frac,
         Number::MilkyWay => settings.view.milky_way_brightness_frac,
+        Number::Visual(knob) => settings.visuals.get(knob),
     }
 }
 
@@ -190,6 +198,7 @@ fn get_number_slot(settings: &mut PerPlayerSettings, number: Number) -> &mut f64
         Number::HitBlur => &mut settings.hit_effects.blur_px,
         Number::WormholeTint => &mut settings.view.wormhole_tint_frac,
         Number::MilkyWay => &mut settings.view.milky_way_brightness_frac,
+        Number::Visual(knob) => settings.visuals.get_mut(knob),
     }
 }
 
@@ -498,6 +507,7 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Row kind | an action (rebound, or cancelled with Escape), a number (stepped, clamped), saving | `rows_rebind_step_and_save` |
+    //! | Visuals row (W-51, basic visuals) | stepped up to its highest, down to its lowest, back to 1 | `visuals_rows_step_within_their_ranges` |
     //! | Closing | Escape (the built-in open-menu control), another open-menu control; not the show-map control (`Tab`) | `escape_and_the_menu_key_close_it` |
     //! | Page | the first (SCORES, where the menu opens), turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
     //! | Quit page | `Return` or `Y` (leave the level), another key (stay); its lines; `Return` elsewhere (no leaving) | `the_quit_page_leaves_the_level` |
@@ -770,5 +780,44 @@ mod tests {
                 .0
                 .starts_with("MENU  [SCORES]")
         );
+    }
+
+    #[test]
+    fn visuals_rows_step_within_their_ranges() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::E), &mut mine);
+        for (knob, _, step, low, high) in VISUALS_ROWS {
+            let row: Row = get_rows()
+                .into_iter()
+                .find(|row| matches!(row, Row::Number(Number::Visual(k), ..) if *k == knob))
+                .expect("a visuals row");
+            move_to(&mut menu, &mut mine, row);
+            let press =
+                |menu: &mut Menu, mine: &mut PerPlayerSettings, key: Scancode, count: f64| {
+                    for _ in 0..count.round() as usize {
+                        menu.handle(Control::Key(key), mine);
+                    }
+                };
+            press(
+                &mut menu,
+                &mut mine,
+                Scancode::Right,
+                (high - low) / step + 2.0,
+            );
+            assert_eq!(mine.visuals.get(knob), high, "{knob:?}");
+            press(
+                &mut menu,
+                &mut mine,
+                Scancode::Left,
+                (high - low) / step + 2.0,
+            );
+            assert_eq!(mine.visuals.get(knob), low, "{knob:?}");
+            press(&mut menu, &mut mine, Scancode::Right, (1.0 - low) / step);
+            assert_eq!(
+                mine.visuals.to_gpu(),
+                warped_shared::visuals::GpuPlayerVisuals::IDENTITY,
+                "{knob:?}"
+            );
+        }
     }
 }

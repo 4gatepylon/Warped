@@ -112,8 +112,6 @@ is in [`AGENTS.md`](AGENTS.md).
   pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
 - [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
   play but has a dashboard where they can change or reset those settings.
-- [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
-  dark.
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
 - [?] **W-139 Dark Forest thrown-wormhole sheet.** A bug found by agents on 2026-11-09: in Dark Forest's `spawn` view, a hard straight-edged sheet covers part of a thrown wormhole's lens (upper right), like a clipping glitch in the lens capture.
   #478: it was red's lift mouth on its deck, its lens reaching through the deck; no lens is drawn from below a
@@ -171,6 +169,15 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-199 One wormhole per player per level.** The user, 2026-11-09: "You only get to create a wormhole once ever in a level (I have been able to multpile times after respawn in the past, we want to avoid that)". Related: W-165 (money to buy wormholes), W-166 (clear rules for destroying thrown wormholes).
 
 ## Pending user review
+
+- [?] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
+  dark. The user, 2026-11-09: "it should be super basic (i.e. something can be implemnted on the raster render instead
+  of actually on the 3d world)".
+  #516: brightness, contrast, saturation and gamma of the finished picture in every level (Lunar Surface, the match,
+  Dust, Snow Planet, City Sphere, Dark Forest), in screen space after tone mapping; `visuals` in
+  `player_settings.yaml` (each 1 for none, leaving every pixel as before), four rows on the SETTINGS page (Dark
+  Forest: for the run, and `--brightness` and the like; in the one-window app it starts with the visuals of the
+  player's settings file).
 
 - [?] **W-145 No walls at map edges.** The user, 2026-11-09: "on all maps there are NOT walls on the ends and as you walk off the edges of the map you get slowd with the same efefct as dust and lunar (i.e. it should zenos paradox you basically)", "also you can get rid of the toroidal topology to have just euclidean specificalyl for dark forest and snow planet", "(so snow planet and dark forest have perma slow mechanics", "since dark forest wont have a wall it needs to be such that you are slowed in teh forest so that you see trees in front of you as you walk off the map (ie you should never see empty space", "(you an put a caveat in game design that the toroidal maps are not actually toroidal and that that is a worok in progress btw)".
   #517: no level has a wall at its edge; Lunar Surface's and Dust's crater-wall slowdown is one shared rule

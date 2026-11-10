@@ -396,3 +396,36 @@ fragment float4 beam_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     }
     return float4(encode_srgb(light), cover);
 }
+
+/** @brief `VisualsVertexOut` is a vertex of `visuals_vertex`'s full-screen triangle. */
+struct VisualsVertexOut {
+    float4 position [[position]];
+};
+
+/**
+ * @brief `visuals_vertex` makes a triangle that covers the whole render area, for `visuals_fragment`.
+ * @par Example
+ * @code
+ * drawPrimitives(triangle, 0, 3) with the visuals pipeline
+ * @endcode
+ */
+vertex VisualsVertexOut visuals_vertex(uint id [[vertex_id]]) {
+    float2 uv = float2((id << 1) & 2, id & 2);
+    VisualsVertexOut out;
+    out.position = float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    return out;
+}
+
+/**
+ * @brief `visuals_fragment` shows a pixel of the finished, resolved frame in the player's visuals (W-51, basic
+ * visuals): it reads the pixel already there (`drawn`, programmable blending) and gives it back through
+ * `apply_player_visuals` (`visuals.metal`, prepended by render_city.rs).
+ * @par Example
+ * @code
+ * a render pass that loads the resolved frame, with the visuals pipeline and `PlayerVisuals` at fragment buffer 0
+ * @endcode
+ */
+fragment float4 visuals_fragment(VisualsVertexOut in [[stage_in]], float4 drawn [[color(0)]],
+                                 constant PlayerVisuals& visuals [[buffer(0)]]) {
+    return float4(apply_player_visuals(drawn.rgb, visuals), drawn.a);
+}
