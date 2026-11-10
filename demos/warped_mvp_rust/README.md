@@ -80,6 +80,8 @@ through `warped_shared::app_bundle` first; the levels-as-libraries and level-def
   in turn, and in each one settles, times its frames, opens the menu and leaves; it writes
   `frame_times.md` and the game menu after each level to `.artifacts/tour_levels/<run_id>/`.
   `--tour-level <name>` (repeatable) visits only the levels named.
+  `--tour-ally-bot-count <count>` and `--tour-enemy-bot-count <count>` tour with that many fighting
+  bots on the player's team and on the other (4 and 5 for a 5v5), to time the levels in a busy game.
   Run it with `WARPED_LOOPBACK_ONLY=1` and your own ports (`--match-port`, `--level-port`,
   `--discovery-port`).
 - **Player settings**, from every menu: every key binding and the in-level menu's numbers, saved to

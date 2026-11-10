@@ -1,5 +1,5 @@
-//! `tour_run.rs` drives `warped --tour-levels`: it plays alone and asks the match server for each
-//! toured level in turn (free play), lets each run its `Tour` in the app's window (settle, time
+//! `tour_run.rs` drives `warped --tour-levels`: it plays alone or with bots and asks the match
+//! server for each toured level in turn (free play), lets each run its `Tour` in the app's window (settle, time
 //! its frames, open the menu, leave), saves the game menu after each level, and writes every
 //! level's frame times to its run folder before quitting.
 //!
@@ -28,9 +28,11 @@ const TIME_S: f64 = 8.0;
 const STEP_S: f64 = 1.2;
 const TARGET_FRAME_MS: f64 = 1000.0 / 60.0;
 
-/// `TourRun` is a tour of levels: their indices in the manifest, how many are done, the frame
-/// summaries so far (level name, summary), the window's size in pixels, and the run folder.
+/// `TourRun` is a tour of levels: the game it plays, the levels' indices in the manifest, how many
+/// are done, the frame summaries so far (level name, summary), the window's size in pixels, and
+/// the run folder.
 pub struct TourRun {
+    kind: GameKind,
     level_indices: Vec<usize>,
     done_count: usize,
     summaries: Vec<(String, Option<FrameSummary>)>,
@@ -39,17 +41,23 @@ pub struct TourRun {
 }
 
 impl TourRun {
-    /// `Start` hosts a game alone on the first toured level, for a tour of the manifest's levels
-    /// `level_indices` (at least one) in a window of `size_px`.
+    /// `Start` hosts a game of `kind` (alone or with bots) on the first toured level, for a tour
+    /// of the manifest's levels `level_indices` (at least one) in a window of `size_px`.
     ///
-    /// Example: `let tour_run = TourRun::Start(&mut app, vec![0, 3], (2560, 1440))?;`
+    /// Example: `let tour_run = TourRun::Start(&mut app, GameKind::Alone, vec![0, 3], (2560, 1440))?;`
     #[allow(non_snake_case)]
-    pub fn Start(app: &mut App, level_indices: Vec<usize>, size_px: (u32, u32)) -> Result<TourRun> {
+    pub fn Start(
+        app: &mut App,
+        kind: GameKind,
+        level_indices: Vec<usize>,
+        size_px: (u32, u32),
+    ) -> Result<TourRun> {
         let first_level: usize = *level_indices.first().ok_or("a tour needs a level")?;
         let folder: PathBuf = make_run_folder("tour_levels", &format_utc_now())?;
-        app.start_game(GameKind::Alone, Some(first_level))?;
+        app.start_game(kind, Some(first_level))?;
         println!("tour: run folder {}", folder.display());
         Ok(TourRun {
+            kind,
             level_indices,
             done_count: 0,
             summaries: Vec::new(),
@@ -118,8 +126,10 @@ impl TourRun {
     /// Example: `tour_run.finish(&mut app)?;`
     pub fn finish(&self, app: &mut App) -> Result<()> {
         let mut table: String = format!(
-            "Frame times inside the app at {}x{} px (wall clock, from one frame's start to the next's)\n\n| Level | Frames | Median ms | p99 ms | Max ms | p99 under 16.7 ms |\n| --- | --- | --- | --- | --- | --- |\n",
-            self.size_px.0, self.size_px.1
+            "Frame times inside the app at {}x{} px, {} (wall clock, from one frame's start to the next's)\n\n| Level | Frames | Median ms | p99 ms | Max ms | p99 under 16.7 ms |\n| --- | --- | --- | --- | --- | --- |\n",
+            self.size_px.0,
+            self.size_px.1,
+            describe_game(self.kind)
         );
         for (name, summary) in &self.summaries {
             match summary {
@@ -144,5 +154,45 @@ impl TourRun {
         app.stop_hosting()?;
         println!("tour: every process the game started has stopped");
         Ok(())
+    }
+}
+
+/// `describe_game` says in words which game a tour played, for the frame times' heading.
+///
+/// Example: `assert_eq!(describe_game(GameKind::Alone), "playing alone");`
+fn describe_game(kind: GameKind) -> String {
+    match kind {
+        GameKind::Host => "hosting a game".to_string(),
+        GameKind::Alone => "playing alone".to_string(),
+        GameKind::Bots {
+            ally_count,
+            enemy_count,
+            ..
+        } => format!("with {ally_count} allied and {enemy_count} enemy bots"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for `tour_run.rs` (a tour itself needs a window and the levels; `warped
+    //! --tour-levels` runs one).
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Game described | hosted, alone, with bots | `a_tour_names_its_game` |
+
+    use super::*;
+    use crate::children::BotObjective;
+
+    #[test]
+    fn a_tour_names_its_game() {
+        assert_eq!(describe_game(GameKind::Host), "hosting a game");
+        assert_eq!(describe_game(GameKind::Alone), "playing alone");
+        let bots: GameKind = GameKind::Bots {
+            ally_count: 4,
+            enemy_count: 5,
+            objective: BotObjective::Fight,
+        };
+        assert_eq!(describe_game(bots), "with 4 allied and 5 enemy bots");
     }
 }

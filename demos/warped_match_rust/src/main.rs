@@ -798,13 +798,15 @@ fn run_match_server(arguments: &Arguments) -> Result<()> {
     Ok(())
 }
 
-/// `get_bot_objective_flag` gives a bot objective as `--bot-objective` takes it.
+/// `get_bot_objective_flags` gives the flags that make any level's bot play for `objective`:
+/// none for `Fight`, which every level's bot does without `--bot-objective` (Dust, City Sphere
+/// and Dark Forest have no `fight` value), and `--bot-objective consoles` for `Consoles`.
 ///
-/// Example: `assert_eq!(get_bot_objective_flag(BotObjective::Fight), "fight");`
-fn get_bot_objective_flag(objective: BotObjective) -> &'static str {
+/// Example: `assert!(get_bot_objective_flags(BotObjective::Fight).is_empty());`
+fn get_bot_objective_flags(objective: BotObjective) -> &'static [&'static str] {
     match objective {
-        BotObjective::Fight => "fight",
-        BotObjective::Consoles => "consoles",
+        BotObjective::Fight => &[],
+        BotObjective::Consoles => &["--bot-objective", "consoles"],
     }
 }
 
@@ -956,15 +958,14 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                         let label: String = format!("match-{}-round-{round}", team.get_name());
                         let objective: BotObjective =
                             arguments.bot_objective.unwrap_or(BotObjective::Consoles);
-                        let mut extra: Vec<String> = [
-                            "--bot",
-                            "--bot-objective",
-                            get_bot_objective_flag(objective),
-                            "--exit-after-s",
-                            "3600",
-                        ]
-                        .map(String::from)
-                        .to_vec();
+                        let mut extra: Vec<String> = ["--bot", "--exit-after-s", "3600"]
+                            .map(String::from)
+                            .to_vec();
+                        extra.extend(
+                            get_bot_objective_flags(objective)
+                                .iter()
+                                .map(|flag| flag.to_string()),
+                        );
                         if view.levels[index].takes_bot_label {
                             extra.extend(["--label".to_string(), label]);
                         }
@@ -5435,12 +5436,22 @@ mod tests {
     //! | Speed along the view | forward (blueshift), backward (redshift), still (none), past the cap (held at it) | `wormhole_shift_follows_depth_and_speed` |
     //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
     //! | `--bot-hit-pictures` | a bot without it (off), a bot with it (on), without `--bot` (refused) | `bots_save_hit_pictures_only_when_asked` |
+    //! | Match bot's objective flags | fight (none, since some levels have no `fight` value), consoles | `a_match_bot_passes_flags_every_level_takes` |
     //! | Gun in hand | laser (the bolt-action rifle), rifle (the revolver) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Window with `--team` | before loading (only asks the lobby), after loading (joins) | `windows_join_their_team_only_after_loading` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
+
+    #[test]
+    fn a_match_bot_passes_flags_every_level_takes() {
+        assert!(get_bot_objective_flags(BotObjective::Fight).is_empty());
+        assert_eq!(
+            get_bot_objective_flags(BotObjective::Consoles),
+            ["--bot-objective", "consoles"]
+        );
+    }
 
     #[test]
     fn bots_save_hit_pictures_only_when_asked() {
