@@ -33,7 +33,7 @@ mod text_overlay;
 mod thrown_wormholes;
 mod title;
 
-use warped_shared::hud::get_death_lines;
+use warped_shared::hud::{get_death_lines, make_respawn_bar_rects};
 use warped_shared::shot_noise;
 
 use std::path::{Path, PathBuf};
@@ -1504,10 +1504,13 @@ fn main() {
                 BANNER_HEIGHT_FRAC,
             ));
         } else if menu.is_none()
-            && let Some(respawn_in_s) = session
-                .player
-                .get_respawn_in_s(session.settings.respawn.delay_s as f32)
+            && let Some(respawn_wait_s) = session.respawn_wait_s
+            && let Some(respawn_in_s) = session.player.get_respawn_in_s(respawn_wait_s)
         {
+            frame.overlay_rects.extend(make_respawn_bar_rects(
+                f64::from(respawn_in_s),
+                f64::from(respawn_wait_s),
+            ));
             death_picture.draw(
                 &{
                     let [title, countdown] = get_death_lines(f64::from(respawn_in_s));

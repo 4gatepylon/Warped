@@ -32,6 +32,7 @@ use super::{
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
+    make_respawn_bar_rects,
 };
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
 use warped_shared::shot_noise::ShotNoise;
@@ -202,7 +203,7 @@ pub fn run(arguments: &Arguments) -> Result<()> {
 /// `step_respawn` counts an eliminated player's `respawn_in_s` down by `dt_s` and asks the server
 /// to rejoin once it runs out; with no countdown running it keeps asking to join until welcomed
 /// (`net::Client::keep_joining`). A player waiting to respawn never asks, so they come back only
-/// after the settings' `respawn.delay_s`, as on Lunar Surface.
+/// after the server's respawn wait (the one their elimination carries), as on Lunar Surface.
 ///
 /// Example: `step_respawn(&mut client, &mut respawn_in_s, dt_s)?;`
 fn step_respawn(client: &mut net::Client, respawn_in_s: &mut Option<f64>, dt_s: f64) -> Result<()> {
@@ -1041,6 +1042,7 @@ struct CitySession {
     player: CityPlayer,
     is_spawned: bool,
     respawn_in_s: Option<f64>,
+    respawn_wait_s: f64,
     spawn_count: usize,
     shots: Vec<LiveShot>,
     weapons: Weapons,
@@ -1140,6 +1142,7 @@ impl CitySession {
             player,
             is_spawned: false,
             respawn_in_s: None,
+            respawn_wait_s: 0.0,
             spawn_count: 0,
             shots: Vec::new(),
             weapons,
@@ -1420,6 +1423,7 @@ impl CitySession {
                     victim_id,
                     shooter_id,
                     is_self,
+                    respawn_wait_s,
                 } => {
                     if !is_self && Some(shooter_id) == self.client.id {
                         self.rifle_log
@@ -1429,7 +1433,8 @@ impl CitySession {
                     }
                     if is_self {
                         self.is_spawned = false;
-                        self.respawn_in_s = Some(self.settings.respawn.delay_s);
+                        self.respawn_in_s = Some(respawn_wait_s);
+                        self.respawn_wait_s = respawn_wait_s;
                         self.disabling = None;
                         self.thrown.clear();
                     }
@@ -2310,6 +2315,12 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         };
         if session.is_spawned && session.menu.is_none() {
             rects.extend(session.get_bar_rects());
+        }
+        if session.menu.is_none()
+            && let Some(left_s) = session.respawn_in_s
+            && session.get_banner_lines() == Some(get_death_lines(left_s))
+        {
+            rects.extend(make_respawn_bar_rects(left_s, session.respawn_wait_s));
         }
         let minimap = (session.is_spawned
             && session.menu.is_none()
@@ -3508,10 +3519,14 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                     is_spawned = true;
                     brain.restart();
                 }
-                net::NetEvent::Eliminated { is_self: true, .. } => {
+                net::NetEvent::Eliminated {
+                    is_self: true,
+                    respawn_wait_s,
+                    ..
+                } => {
                     is_spawned = false;
                     eliminated_count += 1;
-                    respawn_in_s = Some(settings.respawn.delay_s);
+                    respawn_in_s = Some(respawn_wait_s);
                 }
                 net::NetEvent::Eliminated { .. } => {}
             }
@@ -4155,13 +4170,13 @@ mod tests {
 
     /// `an_eliminated_player_respawns_only_after_the_delay` plays an elimination on a real server:
     /// the victim's window keeps polling and stepping its countdown, and must be welcomed back
-    /// only once `respawn.delay_s` has passed (W-119 (City Sphere demo): they came back at once,
+    /// only once the respawn wait (`respawn.start_s` here) has passed (W-119 (City Sphere demo): they came back at once,
     /// after one 0.5 s join retry), and then at a spawn of their team.
     #[test]
     fn an_eliminated_player_respawns_only_after_the_delay() {
         let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
         let mut settings: ServerSettings = ServerSettings::Builtin();
-        settings.respawn.delay_s = TEST_RESPAWN_DELAY_S;
+        (settings.respawn.start_s, settings.respawn.step_s) = (TEST_RESPAWN_DELAY_S, 0.0);
         let socket: std::net::UdpSocket =
             std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port");
         socket

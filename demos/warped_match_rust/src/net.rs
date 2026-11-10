@@ -2539,12 +2539,16 @@ mod tests {
                 poll_until(&mut victim, |client| client.id.is_some());
                 let old: Message = Message::New(Kind::Eliminated).id(victim_id).id(1);
                 let victim_port: u16 = victim.socket.local_addr().expect("an address").port();
-                let victim_address: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, victim_port));
+                let victim_address: SocketAddr =
+                    SocketAddr::from((Ipv4Addr::LOCALHOST, victim_port));
                 server.send(&old.0, victim_address);
             } else {
                 let hit: Vec<u8> = make_hit(get_token(&server, shooter), 1, victim_id, 1);
                 server.handle(&hit, shooter).expect("a hit");
-                assert_eq!(server.get_tally_mut(victim_id).respawn_wait_s, expected_wait_s);
+                assert_eq!(
+                    server.get_tally_mut(victim_id).respawn_wait_s,
+                    expected_wait_s
+                );
             }
             let deadline: Instant = Instant::now() + Duration::from_secs(1);
             let wait_s: f64 = loop {

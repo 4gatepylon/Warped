@@ -574,8 +574,7 @@ pub fn run_voxel_bot(
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {
                         eliminated_count += 1;
-                        rejoin_at =
-                            Some(Instant::now() + Duration::from_secs_f64(respawn_wait_s));
+                        rejoin_at = Some(Instant::now() + Duration::from_secs_f64(respawn_wait_s));
                     }
                 }
             }

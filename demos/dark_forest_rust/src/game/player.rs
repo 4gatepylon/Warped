@@ -231,17 +231,17 @@ impl Player {
         false
     }
 
-    /// `should_respawn` says whether the respawn delay, the server settings' `respawn.delay_s`,
-    /// has passed.
+    /// `should_respawn` says whether the respawn wait, `respawn_delay_s` (the session's
+    /// `respawn_wait_s`), has passed.
     ///
-    /// Example: `if player.should_respawn(settings.respawn.delay_s as f32) { ... }`
+    /// Example: `if player.should_respawn(20.0) { ... }`
     pub fn should_respawn(&self, respawn_delay_s: f32) -> bool {
         self.dead_time_s
             .is_some_and(|time_s: f32| time_s > respawn_delay_s)
     }
 
-    /// `get_respawn_in_s` is how long until a dead player respawns, after the server settings'
-    /// `respawn.delay_s` (`None` while alive).
+    /// `get_respawn_in_s` is how long until a dead player respawns, after a wait of
+    /// `respawn_delay_s` (the session's `respawn_wait_s`; `None` while alive).
     ///
     /// Example: `if let Some(left_s) = player.get_respawn_in_s(delay_s) { ... }`
     pub fn get_respawn_in_s(&self, respawn_delay_s: f32) -> Option<f32> {
