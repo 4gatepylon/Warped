@@ -65,9 +65,196 @@ The windows a player meets, in order: the title, the loading screen, the lobby, 
   - QUIT: "Do you want to leave the game?"; `Return` or `Y` leaves it (a level run alone quits; the one-window app
     goes back to its game menu), and `Esc` goes back to the game.
 
+## The windows to come
+
+**Not built yet**, all of this section. These windows carry out the rules of
+[`OUTSIDE_GAME_DESIGN.md`](OUTSIDE_GAME_DESIGN.md), and each one names the section it serves.
+
+### How a player moves between them
+
+```mermaid
+flowchart TD
+    open["App opens"] --> signed{"Signed in?"}
+    signed -- "no" --> signin["Sign-in"]
+    signin --> home["Home"]
+    signed -- "yes" --> home
+    home --> play["Play"]
+    home --> custom["Custom games"]
+    home --> maps["Saved maps"]
+    home --> local["Local games"]
+    home --> side["Friends, profile, rankings, inbox, settings"]
+    play --> ready["Ready check"]
+    ready --> warm["Warm-up"]
+    custom --> lobby["Game lobby"]
+    maps --> lobby
+    lobby --> warm
+    warm --> match["Match"]
+    local --> match
+    match --> finish["End of match"]
+    finish --> home
+    play -. "free allowance used up" .-> pay["Purchase"]
+    custom -. "free allowance used up" .-> pay
+    pay --> home
+```
+
+Home takes the title screen's place. The friends panel, the inbox and the party stay within reach from every
+window outside a match.
+
+### Sign-in
+
+Serves [Accounts](OUTSIDE_GAME_DESIGN.md#accounts).
+
+- A "Sign in with Google" button, which opens the browser and comes back signed in.
+- The first time: the birth date, the display name, an icon from the set, and the terms to accept.
+- A player who isn't signed in can still open Local games.
+
+### Home
+
+- **Play**, **Custom games**, **Saved maps** and **Local games**, each opening its window.
+- The player's name, icon and tier, which open their profile.
+- The newest announcement, and a banner while the servers are in maintenance.
+- The party, when the player is in one, and the queue's timer while it searches.
+
+### Purchase
+
+Serves [Paying](OUTSIDE_GAME_DESIGN.md#paying).
+
+- It opens when a player past their free allowance tries to play online. It says what the purchase unlocks and
+  its price, and a button opens the payment page in the browser.
+- It closes by itself when the payment is confirmed. Local games stay open from it.
+
+### Play
+
+Serves [Matchmaking](OUTSIDE_GAME_DESIGN.md#matchmaking).
+
+- The party's players with their tiers, and a button to invite more.
+- Each region with the app's delay to it.
+- **Find a match**, which only the party's leader presses. While it searches: the time waited, the estimated
+  wait, and a button to stop.
+- The offer of a match with bots, when it comes, with how many human players it would have. Each player of the
+  party answers.
+- **Ready check:** a window over everything else, with a sound, a ≈20 s countdown and one button to confirm.
+- The player's place in the wait queue, while the caps are full.
+- A cooldown, when the player has one, with the time left in place of the button.
+
+### Custom games
+
+Serves [Custom games](OUTSIDE_GAME_DESIGN.md#custom-games).
+
+- **The list** of listed games: name, saved map, region and delay, players in it, and a lock for a password. The
+  player filters and sorts it, or types a game's code.
+- **New game:** the saved map to start from, the game's name, its region, and the settings of
+  [Who gets in](OUTSIDE_GAME_DESIGN.md#who-gets-in). Starting it opens its lobby.
+- **Stopped games:** the player's games that kept a checkpoint, each with a button to start it again.
+
+### Game lobby
+
+The lobby of today, grown for custom and tournament games.
+
+- **Everyone sees:** both teams and who is on them, with a button to join each; the game's saved map and
+  settings, read-only; the lobby's chat; the game's link and code; and, in the warm-up, its timer and the levels to
+  jump to.
+- **Admins also see** the admin panel:
+
+  | Part | What an admin does there |
+  | --- | --- |
+  | Players | Kick a player, with or without banning them from this game. |
+  | Access | Set the password, the whitelist, the ban list, the most players and whether the game is listed. |
+  | Game settings | Change the game settings for the matches still to come. |
+  | Watching | Turn watching on or off, set its delay, and choose who may watch. |
+  | Admins | Add and remove admins. |
+  | Match | Start the match and stop it. Only the root admin closes the game. |
+
+- In a matchmade match the lobby has no admin panel and no team buttons: matchmaking set the teams.
+
+### Saved maps
+
+Serves [Saved maps](OUTSIDE_GAME_DESIGN.md#saved-maps).
+
+- **The list:** the player's own saved maps, those shared with them and the public ones, each with its creator and
+  the player's role on it. A reader starts a game from one or copies it.
+- **The editor**, for writers:
+  - the levels, picked from the game's levels and dragged into order;
+  - the game settings, one row each as on the menu's SETTINGS page, in a part shared by every level and a part
+    per level, each row with its official value and a button back to it.
+- **Sharing**, for admins: the visibility, and the players it is shared with and each one's role.
+
+### In a match
+
+The menu of today gains, in online matches:
+
+- on SCORES, next to each player: mute, block, report, and after the match commend;
+- a VOTE page in ranked matches: kick a teammate (with the reason), surrender, pause;
+- on QUIT in a ranked match, what leaving will cost: the loss and the cooldown, or nothing if a teammate already
+  abandoned.
+
+A player who dropped out of a ranked match gets a **Rejoin** window when the app is back, with the time left.
+
+### End of match
+
+- The result, both teams, and each player's kills and deaths.
+- In a ranked match: how the player's rating and tier changed, or the placement count.
+- Buttons to commend and report players, watch the replay, queue again with the same party, and go Home.
+
+### Watching and replays
+
+Serve [Watching](OUTSIDE_GAME_DESIGN.md#watching) and [Replays and clips](OUTSIDE_GAME_DESIGN.md#replays-and-clips).
+
+- **Spectator view:** the match with a free camera, a list of players to follow, the scores, and the delay it is
+  shown with. It has no chat to the players.
+- **Replay viewer:** the same view with a timeline to move along, the speed, and marks at eliminations and at
+  each round's end. A player of the match gets **Make a clip** (mark a start and an end) and **Copy link**.
+
+### Friends, chat and clans
+
+Serve [Friends, parties and clans](OUTSIDE_GAME_DESIGN.md#friends-parties-and-clans) and
+[Talking](OUTSIDE_GAME_DESIGN.md#talking).
+
+- A panel at the side of every window outside a match: friends with their presence, requests, recent players, the
+  party and the clan.
+- A chat with tabs, one per channel the player is in.
+- Clicking a player anywhere offers: profile, message, invite to the party or game, add friend, mute, block,
+  report.
+
+### Profile, match history and rankings
+
+Serve [Profiles](OUTSIDE_GAME_DESIGN.md#profiles), [Match history](OUTSIDE_GAME_DESIGN.md#match-history) and
+[Rankings](OUTSIDE_GAME_DESIGN.md#rankings).
+
+- **Profile:** what the profile shows, as much as its owner allows the viewer.
+- **Match history:** the list of matches, each opening its scores and its replay.
+- **Rankings:** everyone, friends, or the clan, with the player's own line marked.
+
+### Inbox
+
+Serves [Notices](OUTSIDE_GAME_DESIGN.md#notices). The list of notices, newest first, unread ones marked. A ban or
+suspension notice has the button to appeal.
+
+### Settings
+
+- **Game:** the menu's SETTINGS page of today, also reachable outside a match, with the team colours added: each
+  player picks the two colours their own screen shows the teams in.
+- **Sound and voice:** the microphone, push-to-talk or open, and volumes.
+- **Account:** the display name, the icon, the [privacy settings](OUTSIDE_GAME_DESIGN.md#privacy-settings), sign
+  out, sign out everywhere, and delete the account.
+
+### On the web
+
+- **Public pages:** the download page, the rankings, the status page and the terms.
+- **Links:** a replay link and a watch link open the replay viewer and the spectator view in the browser.
+- **Superadmin console:** only for superadmins. It has every setting marked ≈ in `OUTSIDE_GAME_DESIGN.md`, the
+  reports, suspensions, audits and appeals to review, bans, announcements, maintenance, tournament games, and the
+  log of superadmin actions.
+
 ## Who changes which settings
 
 | Settings | Where | Who changes them |
 | --- | --- | --- |
 | A player's own: key bindings, mouse look speed, the minimap, how the picture looks | The menu's SETTINGS page, saved to that player's `player_settings.yaml` | Each player, for themselves only |
 | The game's: gravity, friendly fire, when a player may shoot and the other numbers that shape play, the same for everyone in a game | The game server's `server_settings.yaml`, and the one-window app's game menu during a match | The game master. Today any player in the game can act as the game master. |
+| An account's: display name, icon, privacy settings (**not built yet**) | The Settings window | Each player, for themselves only |
+| A saved map's levels and game settings (**not built yet**) | The saved map's editor | Its creator, admins and writers |
+| A saved map's visibility and sharing (**not built yet**) | The saved map's sharing part | Its creator and admins |
+| A custom or tournament game's access, game settings, watching and admins (**not built yet**) | The game lobby's admin panel | Its root admin and admins |
+| A matchmade match's map and settings (**not built yet**) | Nowhere in the app: they are the official ones | The developers |
+| Every number marked ≈ in `OUTSIDE_GAME_DESIGN.md` (**not built yet**) | The superadmin console | Superadmins |
