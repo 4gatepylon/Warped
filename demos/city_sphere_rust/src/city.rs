@@ -34,10 +34,10 @@ use warped_shared::hud::{
     HudBars, HudPulses, PylonSquare, get_death_lines, get_lobby_lines, make_bar_rects,
     make_hit_effect, make_pylon_square_rects, make_respawn_bar_rects,
 };
+use warped_shared::laser_drop::get_drop_curvature_per_m;
 use warped_shared::level_loop::{LevelFrames, play_frames};
 use warped_shared::match_state::Team;
 use warped_shared::metal_window::{MetalWindow, NoMatchLink, WindowOptions};
-use warped_shared::laser_drop::get_drop_curvature_per_m;
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
 use warped_shared::shot_gate::ShotMoves;
 use warped_shared::shot_noise::ShotNoise;
