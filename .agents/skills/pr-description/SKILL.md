@@ -21,6 +21,8 @@ Files in this skill:
   wishlist, read, verify) of every commit and PR, and their allowed values. Read it before any commit.
 - [`commit-agent-traces.md`](commit-agent-traces.md): the `AGENT TRACES` section that names each agent, its
   trace id, transcript and workspace. Read it before any commit.
+- [`chat.jq`](chat.jq): the `jq` filter that prints a transcript's chat and tool calls, for the section's `read it`
+  command.
 
 > NOTE: If you modify this skill (at the user's request), keep every file in it under 400 lines. Split a longer
 > file by topic, for progressive disclosure, and have each file name the files to read for what it leaves out,

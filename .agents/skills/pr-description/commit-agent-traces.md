@@ -27,7 +27,8 @@ AGENT TRACES
 - `workspace` is the worktree's folder, and `branch` the branch the commit is on. On a computer, a path is
   written without user-specific parts: the home folder is `~`, and the user name is `$USER`.
 - `transcript` is the file that holds the agent's chat log and tool calls, or the session's URL.
-- `read it` is the command that opens the transcript.
+- `read it` is a command the user can paste to read the agent's chat log and tool calls. It fails at once when the
+  transcript can't be read. For a transcript file it is the `chat.jq` filter (see "Reading a transcript").
 
 ```text
 AGENT TRACES
@@ -36,21 +37,37 @@ AGENT TRACES
   contributed: wrote the commit-fields rules and the glossary
   workspace: ~/git/Warped/.claude/worktrees/example, branch claude/example
   transcript: ~/.claude/projects/-Users-$USER-git-Warped--claude-worktrees-example/00000000-0000-4000-8000-000000000000.jsonl
-  read it: claude --resume 00000000-0000-4000-8000-000000000000
+  read it: jq -rf .agents/skills/pr-description/chat.jq ~/.claude/projects/-Users-$USER-git-Warped--claude-worktrees-example/00000000-0000-4000-8000-000000000000.jsonl | less
 ```
 
 ## Where each agent keeps its trace
 
 | Agent | Trace id | Transcript | Read it |
 | --- | --- | --- | --- |
-| Claude Code, desktop app | `$CLAUDE_CODE_SESSION_ID`; `$CLAUDE_CODE_ENTRYPOINT` is `claude-desktop` | `~/.claude/projects/<workspace path with every / and . replaced by ->/<trace id>.jsonl` | `claude --resume <trace id>`, run in the workspace |
+| Claude Code, desktop app | `$CLAUDE_CODE_SESSION_ID`; `$CLAUDE_CODE_ENTRYPOINT` is `claude-desktop` | `~/.claude/projects/<workspace path with every / and . replaced by ->/<trace id>.jsonl` | `jq -rf .agents/skills/pr-description/chat.jq <transcript> \| less` |
 | Claude Code, cloud | the id in the session's URL | the session's URL | open the URL |
 | Codex | the session id that `codex resume` lists | `~/.codex/sessions/<year>/<month>/<day>/rollout-<time>-<trace id>.jsonl` | `codex resume <trace id>` |
 | Devin | the id in the `Link to Devin session` URL | that URL | open the URL |
 
-Checked on a desktop Claude Code session on 2026-11-10: the first row's variables and file exist. The other
-rows come from the agents' documented behavior and were not checked on this machine. The first agent of that
-type that commits fixes its row if it is wrong.
+Checked on a desktop Claude Code session on 2026-11-10: the first row's variables and file exist, and its command
+printed that session's chat. The other rows come from the agents' documented behavior and were not checked on this
+machine. The first agent of that type that commits fixes its row if it is wrong.
+
+## Reading a transcript
+
+[`chat.jq`](chat.jq) is a `jq` filter that prints a Claude Code transcript as plain text: each `[user]` and
+`[assistant]` message, and one `[tool]` line per tool call. Run it from the repository's root, with the path the
+commit gives:
+
+```bash
+jq -rf .agents/skills/pr-description/chat.jq <transcript> | less
+```
+
+- It fails at once, with `Could not open file` and exit code 2, when the transcript isn't on this computer: it is
+  on the machine named by the commit's workspace, or it was deleted.
+- It needs `jq`. It reads only; `claude --resume <trace id>`, run in the workspace, opens the session itself, and
+  what you type there continues it.
+- A cloud agent's `read it` is its session's URL, which only the session's owner can open.
 
 ## Writing it: the command
 
@@ -62,7 +79,9 @@ workspace=$(git rev-parse --show-toplevel)
 transcript=~/.claude/projects/$(echo "$workspace" | tr '/.' '--')/$CLAUDE_CODE_SESSION_ID.jsonl
 test -f "$transcript" || { echo "no transcript at $transcript" >&2; exit 1; }
 echo "workspace: ${workspace/#$HOME/~}, branch $(git branch --show-current)"
-echo "transcript: $(echo "${transcript/#$HOME/~}" | sed "s|-$USER-|-\$USER-|")"
+transcript_shown=$(echo "${transcript/#$HOME/~}" | sed "s|-$USER-|-\$USER-|")
+echo "transcript: $transcript_shown"
+echo "read it: jq -rf .agents/skills/pr-description/chat.jq $transcript_shown | less"
 ```
 
 ## Failing fast

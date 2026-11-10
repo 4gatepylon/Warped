@@ -59,7 +59,7 @@ AGENT TRACES
   contributed: claimed the item
   workspace: ~/git/Warped/.claude/worktrees/example, branch claude/example
   transcript: ~/.claude/projects/-Users-$USER-git-Warped--claude-worktrees-example/00000000-0000-4000-8000-000000000000.jsonl
-  read it: claude --resume 00000000-0000-4000-8000-000000000000
+  read it: jq -rf .agents/skills/pr-description/chat.jq ~/.claude/projects/-Users-$USER-git-Warped--claude-worktrees-example/00000000-0000-4000-8000-000000000000.jsonl | less
 
 Kind: wishlist, feature
 Component: game-design
