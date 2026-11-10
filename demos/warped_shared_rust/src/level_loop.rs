@@ -240,6 +240,7 @@ mod tests {
             stand_in_for: None,
             takes_bot_label: true,
             map_picture: None,
+            server_settings: None,
         };
         let mut join: LevelJoin = LevelJoin {
             level,
