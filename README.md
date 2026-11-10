@@ -3,21 +3,6 @@
 A multiplayer first-person shooter set in curved space: rooms can be spherical or hyperbolic, and
 players can place objects such as black holes that bend the space around them.
 
-## Layout
-
-```
-clients/mac/        # the game client, one folder per platform (macOS first)
-management_server/  # starts and stops game servers, and tracks who may join each
-game_server/        # runs one room in real time; the authority on its state
-common/protocol/    # every message and API between components
-common/physics/     # the physics spec and the test cases every implementation passes
-demos/              # experiments that de-risk mechanics, weapons and physics before we build them
-infra/              # the Rust demo's cloud deploy on Google Cloud (Terraform) and its download page
-notes/              # notes to keep for future reference: knowledge, thoughts, background reading
-```
-
-Components may use different languages, so `common/` holds specifications, not shared code.
-
 ## The official game
 
 > NOTE: If this section is outdated (the official game moved, a folder below was replaced, or a command
@@ -50,6 +35,21 @@ package-mac-app` builds `Warped.app`; the folder's README has the rest.
 | `clients/starter/`, `game_server/`, `management_server/`, `common/protocol/` | historical, to be replaced soon | the starter 2D square game, below, and the specs behind it |
 | `common/physics/`, `clients/mac/` | planned, unused so far | folders that hold only a README (a physics spec and a macOS client plan); nothing in the official game refers to them yet |
 | `demos/levels/`, `demos/fps_demo/`, `demos/hyperbolic_wormholes/`, `demos/three_js_vibecode_demo/`, `demos/warp_pull_js/`, `demos/laser_gravity_demo/`, `demos/gluebox/`, `demos/mirror_sphere/`, `demos/mirror_sphere_v2/` | historical | earlier experiments that decided what to build ([`demos/README.md`](demos/README.md)) |
+
+## Layout
+
+```
+clients/mac/        # the game client, one folder per platform (macOS first)
+management_server/  # starts and stops game servers, and tracks who may join each
+game_server/        # runs one room in real time; the authority on its state
+common/protocol/    # every message and API between components
+common/physics/     # the physics spec and the test cases every implementation passes
+demos/              # experiments that de-risk mechanics, weapons and physics before we build them
+infra/              # the Rust demo's cloud deploy on Google Cloud (Terraform) and its download page
+notes/              # notes to keep for future reference: knowledge, thoughts, background reading
+```
+
+Components may use different languages, so `common/` holds specifications, not shared code.
 
 ## Play the old starter game on your Wi-Fi (historical)
 
