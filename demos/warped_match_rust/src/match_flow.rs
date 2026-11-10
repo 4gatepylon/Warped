@@ -482,7 +482,7 @@ mod tests {
         let view: &MatchView = clients[0].view.as_ref().unwrap();
         assert_eq!(back.last().copied(), view.state.get_next_level());
         assert!(view.state.rounds().len() <= 1, "{:?}", view.state.rounds());
-        fs::remove_dir_all(&folder).unwrap();
+        let _ = fs::remove_dir_all(&folder);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! player stops hosting or quits.
 //!
 //! Interface: `GameKind`, `BotObjective`, `BotPlan`, `Programs` (`Find`), `plan_bots`,
+//! `MAX_ALLY_COUNT`, `MAX_ENEMY_COUNT`, `MAX_BOT_COUNT`,
 //! `make_match_server_command`, `make_bot_command`, `HostedGame` (`Start`, `has_stopped`,
 //! `move_sit_out_bot`, `stop`), `make_run_folder`, `SIT_OUT_ROUND_COUNT`.
 //!
@@ -39,16 +40,23 @@ const LOGS_HOME_PATH: &str = "Library/Logs/Warped";
 const CHECKOUT_ARTIFACTS_FOLDER: &str = ".artifacts";
 
 /// `GameKind` is the game the player starts from the main menu: hosted for others, alone, or
-/// against bots (how many on each team, blue then red, and what they do).
+/// with bots (how many on the player's team and on the other, and what they do).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameKind {
     Host,
     Alone,
     Bots {
-        counts: [u32; 2],
+        ally_count: u32,
+        enemy_count: u32,
         objective: BotObjective,
     },
 }
+
+/// `MAX_ALLY_COUNT`, `MAX_ENEMY_COUNT` and `MAX_BOT_COUNT` bound the bots of a game: a level
+/// takes 8 players, the player and at most 7 bots.
+pub const MAX_ALLY_COUNT: u32 = 4;
+pub const MAX_ENEMY_COUNT: u32 = 5;
+pub const MAX_BOT_COUNT: u32 = 7;
 
 /// `BotObjective` is what a bot does in each round: turn off the other team's consoles, or fight.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -79,27 +87,43 @@ pub struct BotPlan {
 }
 
 /// `plan_bots` gives the bots a game of `kind` needs for a player on `player_team`: none for a
-/// hosted game, one sitting-out bot on the other team alone, and the chosen bots otherwise.
+/// hosted game; one sitting-out bot on the other team alone; the allies on the player's team and
+/// the enemies on the other otherwise, with a sitting-out bot there when there are no enemies.
 ///
 /// Example: `let bots = plan_bots(GameKind::Alone, Team::Blue);`
 pub fn plan_bots(kind: GameKind, player_team: Team) -> Vec<BotPlan> {
     match kind {
         GameKind::Host => Vec::new(),
-        GameKind::Alone => vec![BotPlan {
-            team: player_team.get_other(),
-            objective: BotObjective::Consoles,
-            is_sitting_out: true,
-        }],
-        GameKind::Bots { counts, objective } => [Team::Blue, Team::Red]
-            .into_iter()
-            .flat_map(|team| {
-                (0..counts[team.get_index()]).map(move |_| BotPlan {
-                    team,
-                    objective,
-                    is_sitting_out: false,
-                })
-            })
-            .collect(),
+        GameKind::Alone => plan_bots(
+            GameKind::Bots {
+                ally_count: 0,
+                enemy_count: 0,
+                objective: BotObjective::Consoles,
+            },
+            player_team,
+        ),
+        GameKind::Bots {
+            ally_count,
+            enemy_count,
+            objective,
+        } => {
+            let make = |team: Team, is_sitting_out: bool| BotPlan {
+                team,
+                objective,
+                is_sitting_out,
+            };
+            let other: Team = player_team.get_other();
+            let mut plans: Vec<BotPlan> =
+                (0..ally_count).map(|_| make(player_team, false)).collect();
+            plans.extend((0..enemy_count).map(|_| make(other, false)));
+            if enemy_count == 0 {
+                plans.push(BotPlan {
+                    objective: BotObjective::Consoles,
+                    ..make(other, true)
+                });
+            }
+            plans
+        }
     }
 }
 
@@ -333,7 +357,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Game kind | hosted, alone (blue, red), bots (none, some on each team, one team only) | `each_game_kind_plans_its_bots` |
+    //! | Game kind | hosted, alone (blue, red), bots (none: as alone; allies and enemies; allies only: a sitting-out enemy; the most) | `each_game_kind_plans_its_bots` |
     //! | Match server command | ports and manifest passed | `the_match_server_serves_the_manifest_on_its_ports` |
     //! | Bot command | consoles, fight, sitting out (as many rounds as `SIT_OUT_ROUND_COUNT`, the other team named) | `bots_join_with_their_team_and_objective` |
 
@@ -369,29 +393,33 @@ mod tests {
             assert!(alone[0].is_sitting_out);
         }
         let objective: BotObjective = BotObjective::Fight;
-        let none: GameKind = GameKind::Bots {
-            counts: [0, 0],
+        let make = |ally_count: u32, enemy_count: u32| GameKind::Bots {
+            ally_count,
+            enemy_count,
             objective,
         };
-        assert!(plan_bots(none, Team::Blue).is_empty());
-        let both: Vec<BotPlan> = plan_bots(
-            GameKind::Bots {
-                counts: [1, 2],
-                objective,
-            },
-            Team::Blue,
+        assert_eq!(
+            plan_bots(make(0, 0), Team::Red),
+            plan_bots(GameKind::Alone, Team::Red)
         );
+        let both: Vec<BotPlan> = plan_bots(make(1, 2), Team::Red);
         let teams: Vec<Team> = both.iter().map(|plan| plan.team).collect();
-        assert_eq!(teams, [Team::Blue, Team::Red, Team::Red]);
+        assert_eq!(teams, [Team::Red, Team::Blue, Team::Blue]);
         assert!(
             both.iter()
                 .all(|plan| !plan.is_sitting_out && plan.objective == objective)
         );
-        let red_only: GameKind = GameKind::Bots {
-            counts: [0, 3],
-            objective: BotObjective::Consoles,
-        };
-        assert_eq!(plan_bots(red_only, Team::Red).len(), 3);
+        let allies_only: Vec<BotPlan> = plan_bots(make(MAX_ALLY_COUNT, 0), Team::Blue);
+        assert_eq!(allies_only.len() as u32, MAX_ALLY_COUNT + 1);
+        assert!(
+            allies_only
+                .last()
+                .is_some_and(|plan| plan.is_sitting_out && plan.team == Team::Red)
+        );
+        assert_eq!(
+            plan_bots(make(2, MAX_ENEMY_COUNT), Team::Blue).len() as u32,
+            MAX_BOT_COUNT
+        );
     }
 
     #[test]
