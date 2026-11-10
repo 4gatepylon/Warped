@@ -570,7 +570,8 @@ mod tests {
             "{name: A, folder: a, branch: b, status: s, program: self, server_settings: a.yaml}",
         )
         .unwrap();
-        let loaded: GameSettings = GameSettings::Load(&[level.clone()], &folder).unwrap();
+        let loaded: GameSettings =
+            GameSettings::Load(std::slice::from_ref(&level), &folder).unwrap();
         assert_eq!(
             loaded.defaults,
             [Some(json!({"respawn": {"delay_s": 3.0}}))]

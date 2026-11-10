@@ -5,7 +5,8 @@
 //! to the match server, which holds the settings and gives each round's level server its merged
 //! copy; the page shows the server's latest answer.
 //!
-//! Interface: `GameSettingsPage` (`New`, `update`, `is_waiting`, `handle`, `get_shapes`),
+//! Interface: `GameSettingsPage` (`New`, `update`, `handle`, `show_message`, `get_shapes`; in tests
+//! `is_waiting`),
 //! `GameSettingsOutcome`.
 //!
 //! Example: `if let GameSettingsOutcome::Send(message) = page.handle(MenuInput::Right) { client.send_settings(&message)?; }`
@@ -165,6 +166,7 @@ impl GameSettingsPage {
     /// `is_waiting` says whether no settings have come from the match server yet.
     ///
     /// Example: `if page.is_waiting() { ... }`
+    #[cfg(test)]
     pub fn is_waiting(&self) -> bool {
         self.editor.is_none()
     }
@@ -245,6 +247,18 @@ impl GameSettingsPage {
                 put_at(&mut defaults, &row_key, default);
                 row_keys.push(row_key);
             }
+        }
+        let label_width: usize = rows
+            .iter()
+            .filter(|row| matches!(row.kind, RowKind::Number { .. }))
+            .map(|row| row.label.len())
+            .max()
+            .unwrap_or(0);
+        for row in rows
+            .iter_mut()
+            .filter(|row| matches!(row.kind, RowKind::Number { .. }))
+        {
+            row.label = format!("{:<label_width$}", row.label);
         }
         if self.editor.is_none() || row_keys != self.row_keys {
             self.editor = Some(SettingsEditor::New(TITLE, rows));

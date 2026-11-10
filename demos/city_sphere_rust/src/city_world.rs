@@ -1456,7 +1456,7 @@ mod tests {
             let second_leg_m: f64 = (dimmed.points[2] - dimmed.points[1]).length();
             assert_eq!(dimmed.hit, ShotHit::Range, "{dimmed:?}");
             assert!(
-                (second_leg_m - 4.0 * reflectivity_frac).abs() < 1e-6,
+                (second_leg_m - SURFACE_OFFSET_M - 4.0 * reflectivity_frac).abs() < 1e-6,
                 "{second_leg_m}"
             );
         }
