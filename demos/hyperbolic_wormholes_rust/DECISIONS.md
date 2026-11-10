@@ -2198,7 +2198,7 @@ users will want to see where on the map they are pretty often". This replaces D8
   The user (2026-11-09): "you may lower resolution outside a circle around the crosshairs if that helps"; the lead
   chose E from #469's sheets.
 
-### D118. 12 players a level server, snapshots in pages, W-155 (play against bots)
+### D119. 12 players a level server, snapshots in pages, W-155 (play against bots)
 
 - **Choice:** every level server (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest) takes 12
   players, `warped_shared::level_net::MAX_PLAYER_COUNT` (was 8 in each `net.rs`): a 5v5 and a spare player for each

@@ -30,8 +30,8 @@ use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, minkowski_dot};
 use crate::mesh::MeshModel;
 use crate::render_mesh::{
-    FIRST_AVATAR_ROOT_CODE, GpuNode, GpuTriangle, MeshGpu, NO_MESH, get_first_materials,
-    get_mesh_roots, pack_avatar_meshes,
+    FIRST_AVATAR_ROOT_CODE, MeshGpu, NO_MESH, get_avatar_bytes, get_avatar_roots,
+    get_first_materials, get_mesh_roots, write_avatar_buffers,
 };
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
@@ -334,8 +334,8 @@ pub struct VoxelFrame {
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
     meshes: Arc<Vec<MeshModel>>,
-    avatar_triangles: Vec<GpuTriangle>,
-    avatar_nodes: Vec<GpuNode>,
+    avatar_meshes: Vec<Arc<MeshModel>>,
+    avatar_first_material: i32,
     visuals: GpuPlayerVisuals,
 }
 
@@ -593,8 +593,7 @@ impl VoxelFrame {
         let r: f64 = world.r;
         let mesh_roots: Vec<i32> = get_mesh_roots(&world.meshes);
         let body_first_material: i32 = get_first_materials(&world.meshes)[world.body_mesh];
-        let (avatar_triangles, avatar_nodes, avatar_roots) =
-            pack_avatar_meshes(&world.avatar_meshes, body_first_material);
+        let avatar_roots: Vec<i32> = get_avatar_roots(&world.avatar_meshes);
         let structures: Vec<GpuStructure> = world
             .structures
             .iter()
@@ -858,8 +857,8 @@ impl VoxelFrame {
             dust_bursts,
             dust_particles,
             meshes: Arc::clone(&world.meshes),
-            avatar_triangles,
-            avatar_nodes,
+            avatar_meshes: world.avatar_meshes.clone(),
+            avatar_first_material: body_first_material,
             visuals: GpuPlayerVisuals::IDENTITY,
         }
     }
@@ -897,15 +896,16 @@ struct GrowableBuffer {
 }
 
 impl GrowableBuffer {
-    /// `write` copies `bytes` into the buffer (making a bigger one first if needed) and returns it.
+    /// `reserve` returns the buffer with room for `byte_count` bytes (making a bigger one first
+    /// if needed), whatever it holds.
     ///
-    /// Example: `let buffer = self.voxels.write(device, &frame.voxels)?;`
-    fn write(
+    /// Example: `let buffer = self.voxels.reserve(device, byte_count)?;`
+    fn reserve(
         &mut self,
         device: &ProtocolObject<dyn MTLDevice>,
-        bytes: &[u8],
+        byte_count: usize,
     ) -> Result<&ProtocolObject<dyn MTLBuffer>> {
-        let needed: usize = bytes.len().max(MIN_BUFFER_BYTES);
+        let needed: usize = byte_count.max(MIN_BUFFER_BYTES);
         if self.buffer.as_ref().is_none_or(|b| b.length() < needed) {
             self.buffer = Some(
                 device
@@ -916,8 +916,18 @@ impl GrowableBuffer {
                     .ok_or("Metal: no memory for a voxel buffer")?,
             );
         }
-        let buffer: &ProtocolObject<dyn MTLBuffer> =
-            self.buffer.as_ref().expect("the buffer was just made");
+        Ok(self.buffer.as_ref().expect("the buffer was just made"))
+    }
+
+    /// `write` copies `bytes` into the buffer (making a bigger one first if needed) and returns it.
+    ///
+    /// Example: `let buffer = self.voxels.write(device, &frame.voxels)?;`
+    fn write(
+        &mut self,
+        device: &ProtocolObject<dyn MTLDevice>,
+        bytes: &[u8],
+    ) -> Result<&ProtocolObject<dyn MTLBuffer>> {
+        let buffer: &ProtocolObject<dyn MTLBuffer> = self.reserve(device, bytes.len())?;
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A WRITE PAST THE BUFFER WILL HAPPEN
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -1340,16 +1350,27 @@ impl VoxelGpu {
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
             unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, DUST_BUFFER_INDICES[k]) };
         }
-        let avatars: [&[u8]; AVATAR_BUFFER_INDICES.len()] = [
-            as_bytes(&frame.avatar_triangles),
-            as_bytes(&frame.avatar_nodes),
-        ];
-        for (k, bytes) in avatars.iter().enumerate() {
-            let slot: usize = SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len() + k;
-            let buffer: &ProtocolObject<dyn MTLBuffer> = self.buffers[slot].write(device, bytes)?;
+        let avatar_slot: usize = SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len();
+        let avatar_bytes: [usize; AVATAR_BUFFER_INDICES.len()] =
+            get_avatar_bytes(&frame.avatar_meshes);
+        for (k, byte_count) in avatar_bytes.into_iter().enumerate() {
+            let buffer: &ProtocolObject<dyn MTLBuffer> =
+                self.buffers[avatar_slot + k].reserve(device, byte_count)?;
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
             unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, AVATAR_BUFFER_INDICES[k]) };
         }
+        let [triangles_device, nodes_device] = [0, 1].map(|k| {
+            self.buffers[avatar_slot + k]
+                .buffer
+                .as_deref()
+                .expect("the bodies' buffers were just reserved")
+        });
+        write_avatar_buffers(
+            &frame.avatar_meshes,
+            frame.avatar_first_material,
+            triangles_device,
+            nodes_device,
+        );
         let (width, height) = frame.get_render_size();
         if self
             .post
