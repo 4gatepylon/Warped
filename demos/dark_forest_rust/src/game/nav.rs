@@ -405,6 +405,7 @@ mod tests {
         let mut bot: Bot = Bot::new(Vec3::new(8.0, 0.0, 50.0), 3);
         let context: BotContext = BotContext {
             solids: &solids,
+            get_warp_pull_m_per_s: &|_| Vec3::ZERO,
             nav: &nav,
             ladders: &arena.ladders,
             player_eye_m: Vec3::new(14.0, 8.7, 44.0),
