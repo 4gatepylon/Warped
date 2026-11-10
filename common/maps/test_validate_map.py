@@ -12,6 +12,7 @@
 | Name | matches the folder, doesn't | `test_shipped_maps_are_valid`, `test_a_wrong_name_is_caught` |
 | Zone walls | absent (house_demo), valid (lunar_surface), height or thickness not positive, opacity 0, opacity 1, a field missing (height, thickness) | `test_shipped_maps_are_valid`, `test_bad_zone_walls_are_caught` |
 | Milky Way | none (house_demo), valid (lunar_surface), a pole that isn't a unit vector, a core not perpendicular to the pole | `test_shipped_maps_are_valid`, `test_a_bad_milky_way_is_caught` |
+| Map edge (W-145, no walls at map edges) | a crater's wall (lunar_surface), a soft edge past an ellipse (snow_planet) or a rectangle (dark_forest) in plain Euclidean space without a torus, a soft edge on a map with terrain | `test_shipped_maps_are_valid`, `test_flat_levels_are_plain_euclidean_with_a_soft_edge`, `test_a_soft_edge_on_terrain_is_caught` |
 
 Example:
     uv run pytest
@@ -160,3 +161,18 @@ def test_meshes_are_checked(model: str, expected: str | None, tmp_path: Path) ->
     )
     errors: list[str] = _validate_map(folder, SCHEMA)
     assert errors == [] if expected is None else len(errors) == 1 and expected in errors[0]
+
+
+@pytest.mark.parametrize(("name", "boundary_kind"), [("snow_planet", "fermi_ellipse"), ("dark_forest", "fermi_rectangle")])
+def test_flat_levels_are_plain_euclidean_with_a_soft_edge(name: str, boundary_kind: str) -> None:
+    manifest: dict = json.loads((MAPS_FOLDER / name / MANIFEST_NAME).read_text())
+    boundary: dict = manifest["regions"]["boundary"]
+    assert manifest["space"] == {"kind": "euclidean"}
+    assert boundary["kind"] == boundary_kind and boundary["soft_edge_m"] > 0.0
+    assert _validate_map(MAPS_FOLDER / name, SCHEMA) == []
+
+
+def test_a_soft_edge_on_terrain_is_caught(tmp_path: Path) -> None:
+    folder: Path = _copy_map("lunar_surface", tmp_path, lambda m: m["regions"]["boundary"].update(soft_edge_m=12.0))
+    errors: list[str] = _validate_map(folder, SCHEMA)
+    assert len(errors) == 1 and "crater's wall" in errors[0]

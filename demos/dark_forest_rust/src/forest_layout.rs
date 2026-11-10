@@ -1,21 +1,28 @@
-//! `forest_layout` builds the Dark Forest map: a bounded Euclidean forest, red's base at +z and
-//! blue's at −z (a half turn of red's), with treehouses, rope ladders and bridges between the
-//! trees, and two pylons per team (one in a treehouse, one in a palisade on the ground) with one
-//! console each. `--export-map` writes it to `common/maps/dark_forest/map.json`, which the game
-//! then loads; the layout lives in that file, this module only makes it.
+//! `forest_layout` builds the Dark Forest map: a Euclidean forest, red's base at +z and blue's at
+//! −z (a half turn of red's), with treehouses, rope ladders and bridges between the trees, and two
+//! pylons per team (one in a treehouse, one in a palisade on the ground) with one console each.
+//! `--export-map` writes it to `common/maps/dark_forest/map.json`, which the game then loads; the
+//! layout lives in that file, this module only makes it.
+//!
+//! No wall closes the playable rectangle (W-145, no walls at map edges): past it, a band
+//! `SOFT_EDGE_M` wide slows players without end (the map's `regions.boundary`), and the bamboo
+//! goes on `OUTER_FOREST_DEPTH_M` past the edge (`add_outer_forest`), so a player walking off the
+//! map always sees forest ahead.
 //!
 //! Example:
 //!     let map: MapFile = forest_layout::build();
 //!
-//! Interface: `build`, `HALF_WIDTH_M`, `HALF_LENGTH_M`, `DECK_TOP_M`, `LOOKOUT_TOP_M`.
+//! Interface: `build`, `HALF_WIDTH_M`, `HALF_LENGTH_M`, `SOFT_EDGE_M`, `OUTER_FOREST_DEPTH_M`,
+//! `DECK_TOP_M`, `LOOKOUT_TOP_M`.
 
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 use glam::{Mat4, Quat, Vec2, Vec3};
 
 use crate::map::{
-    Appearance, Ground, Ladder, LaserLook, Light, MapBox, MapFile, Material, PlayerSpec, Scatter,
-    Shape, Sky, Space, Spawn, Structure, StructureMesh, Sun, Warp, translation_frame, yaw_frame,
+    Appearance, Boundary, Ground, Ladder, LaserLook, Light, MapBox, MapFile, Material, PlayerSpec,
+    Regions, Scatter, Shape, Sky, Space, Spawn, Structure, StructureMesh, Sun, Warp,
+    translation_frame, yaw_frame,
 };
 
 /// `HALF_WIDTH_M` is half the forest's extent along x.
@@ -30,8 +37,38 @@ pub const LOOKOUT_TOP_M: f32 = 12.0;
 const DECK_THICKNESS_M: f32 = 0.3;
 /// `RAIL_HEIGHT_M` is how high a bridge's top rope is above its deck.
 const RAIL_HEIGHT_M: f32 = 1.0;
-/// `BORDER_HEIGHT_M` is the height of the rock wall around the forest.
-const BORDER_HEIGHT_M: f32 = 4.0;
+/// `SOFT_EDGE_M` is how far past the playable rectangle players' speed would reach 0: the band
+/// where each step outward is cut more and more (`warped_shared::map_edge`).
+pub const SOFT_EDGE_M: f32 = 12.0;
+/// `OUTER_FOREST_DEPTH_M` is how far past the playable rectangle the bamboo goes on.
+pub const OUTER_FOREST_DEPTH_M: f32 = 30.0;
+/// `EDGE_DETAIL_DEPTH_M` is how far past the rectangle the outer forest's clumps are like the
+/// labyrinth's with a branch per culm (`TreeDetail::Edge`); beyond it, where nobody walks, they are
+/// wider clumps of bare culms under one low-detail canopy (`TreeDetail::Far`).
+const EDGE_DETAIL_DEPTH_M: f32 = 14.0;
+/// `FLOOR_PAST_FOREST_M` is how far the forest floor reaches past the outer forest.
+const FLOOR_PAST_FOREST_M: f32 = 10.0;
+/// `EDGE_CLUMP_SPACING_M` and `FAR_CLUMP_SPACING_M` are the grid steps of the outer forest's
+/// clumps before jitter, near the edge and beyond it, and `OUTER_CLUMP_JITTER_FRAC` how far, as a
+/// share of the step, each clump moves off its grid point.
+const EDGE_CLUMP_SPACING_M: f32 = 3.2;
+const FAR_CLUMP_SPACING_M: f32 = 2.6;
+const OUTER_CLUMP_JITTER_FRAC: f32 = 0.4;
+/// `FAR_CLUMP_MIN_RADIUS_M` and `FAR_CLUMP_RADIUS_SPREAD_M` size the far clumps, which grow
+/// 2 + 4 × radius culms each (`add_tree`).
+const FAR_CLUMP_MIN_RADIUS_M: f32 = 0.6;
+const FAR_CLUMP_RADIUS_SPREAD_M: f32 = 0.35;
+/// `FAR_CANOPY_TOP_FRAC` is how high a far clump's canopy sits, as a share of its height;
+/// `FAR_CANOPY_REACH_M` how far it reaches past the clump's culms, and `FAR_CANOPY_HALF_HEIGHT_M`
+/// its half thickness.
+const FAR_CANOPY_TOP_FRAC: f32 = 0.85;
+const FAR_CANOPY_REACH_M: f32 = 1.4;
+const FAR_CANOPY_HALF_HEIGHT_M: f32 = 1.2;
+/// `OUTER_FOREST_SALT` seeds the outer forest's own random sequence, so the forest inside the
+/// rectangle stays as it was.
+const OUTER_FOREST_SALT: u32 = 0x0e7e_d9e5;
+/// `OUTER_TREE_RADIUS_M` is the footprint kept clear around each of the big outer trees.
+const OUTER_TREE_RADIUS_M: f32 = 2.0;
 /// `SUPPORT_RADIUS_M` is the smallest tree radius that becomes a thick bundle of bamboo (it holds
 /// up a deck or a ladder) rather than a loose clump.
 const SUPPORT_RADIUS_M: f32 = 1.0;
@@ -138,6 +175,37 @@ const BLUE: Side = Side {
     console: BLUE_CONSOLE,
 };
 
+/// `TreeDetail` is how much of a bamboo clump is drawn: every branch (`Full`, inside the map), one
+/// branch a culm (`Edge`, in the band players walk into) or bare culms under one canopy for the
+/// whole clump (`Far`, beyond it), so the outer forest costs less to draw.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TreeDetail {
+    Full,
+    Edge,
+    Far,
+}
+
+impl TreeDetail {
+    /// `get_leaf_spray_count` is how many leaf sprays each culm has.
+    fn get_leaf_spray_count(self) -> usize {
+        match self {
+            TreeDetail::Full | TreeDetail::Edge => LEAF_SPRAY_COUNT,
+            TreeDetail::Far => 0,
+        }
+    }
+
+    /// `get_branch_count` is how many branches a culm forks into, for a random `random_frac`.
+    fn get_branch_count(self, random_frac: f32) -> usize {
+        match self {
+            TreeDetail::Full => {
+                BRANCH_MIN_COUNT + (random_frac * (BRANCH_EXTRA_COUNT + 1) as f32) as usize
+            }
+            TreeDetail::Edge => 1,
+            TreeDetail::Far => 0,
+        }
+    }
+}
+
 /// `Layout` collects the map while it is built, and the ground footprints that the decorative
 /// trees keep out of.
 struct Layout {
@@ -174,6 +242,18 @@ impl Layout {
     /// (`radius_m` at least `SUPPORT_RADIUS_M`), otherwise a loose clump of thin, leaning culms.
     /// Every culm has leaf sprays near its top. Blue's clumps are red's turned by 180°.
     fn add_tree(&mut self, name: &str, foot_m: Vec3, radius_m: f32, height_m: f32) {
+        self.add_tree_in_detail(name, foot_m, radius_m, height_m, TreeDetail::Full);
+    }
+
+    /// `add_tree_in_detail` is `add_tree` drawn in `detail`.
+    fn add_tree_in_detail(
+        &mut self,
+        name: &str,
+        foot_m: Vec3,
+        radius_m: f32,
+        height_m: f32,
+        detail: TreeDetail,
+    ) {
         let is_turned: bool = foot_m.z < 0.0 || (foot_m.z == 0.0 && foot_m.x < 0.0);
         let turn: f32 = if is_turned { -1.0 } else { 1.0 };
         let mut random_state: u32 = get_clump_seed(foot_m);
@@ -237,7 +317,7 @@ impl Layout {
                 axis: 1,
                 material: BARK,
             }];
-            for spray in 0..LEAF_SPRAY_COUNT {
+            for spray in 0..detail.get_leaf_spray_count() {
                 let sign: f32 = if spray % 4 < 2 { 1.0 } else { -1.0 };
                 let y_m: f32 =
                     culm_height_m - LEAF_SPRAY_DEPTH_M * spray as f32 / LEAF_SPRAY_COUNT as f32;
@@ -268,8 +348,7 @@ impl Layout {
                 frame: frame.to_cols_array(),
                 shapes,
             });
-            let branch_count: usize =
-                BRANCH_MIN_COUNT + (random_frac() * (BRANCH_EXTRA_COUNT + 1) as f32) as usize;
+            let branch_count: usize = detail.get_branch_count(random_frac());
             for branch in 0..branch_count {
                 let azimuth_rad: f32 =
                     (branch as f32 + 0.6 * random_frac()) / branch_count as f32 * TAU;
@@ -328,6 +407,22 @@ impl Layout {
                     shapes: branch_shapes,
                 });
             }
+        }
+        if detail == TreeDetail::Far {
+            let reach_m: f32 = radius_m * CLUMP_SPREAD_FRAC + FAR_CANOPY_REACH_M;
+            self.map.structures.push(Structure {
+                name: format!("{name} canopy"),
+                mesh: None,
+                frame: translation_frame(foot_m + Vec3::Y * (height_m * FAR_CANOPY_TOP_FRAC)),
+                shapes: vec![Shape {
+                    kind: "ellipsoid".to_string(),
+                    centre_m: [0.0, 0.0, 0.0],
+                    half_m: [reach_m, FAR_CANOPY_HALF_HEIGHT_M, reach_m],
+                    round_m: 0.0,
+                    axis: 1,
+                    material: LEAVES,
+                }],
+            });
         }
     }
 
@@ -939,6 +1034,95 @@ fn add_labyrinth(layout: &mut Layout) {
     }
 }
 
+/// `add_outer_forest` grows bamboo past the playable rectangle out to `OUTER_FOREST_DEPTH_M`, clear
+/// of the rectangle (by each clump's spread) and of the big outer trees: clumps like the
+/// labyrinth's (`TreeDetail::Edge`) out to `EDGE_DETAIL_DEPTH_M`, then wider, denser clumps of bare
+/// culms under one canopy each (`TreeDetail::Far`), so that looking out from anywhere a player can
+/// reach shows bamboo, not the open beyond. It grows red's half (z > 0) and turns it half a turn
+/// onto blue's, as the labyrinth does, with its own seeded sequence; the row on the halfway line
+/// is red's west of the middle, so its half turn fills the east and no lane runs along that line.
+fn add_outer_forest(layout: &mut Layout) {
+    let outer_feet_m: Vec<Vec3> = layout
+        .map
+        .structures
+        .iter()
+        .filter(|tree| tree.name.starts_with("outer ") && tree.name.ends_with(" culm 0"))
+        .map(|tree| crate::map::frame_translation_m(&tree.frame))
+        .collect();
+    for foot_m in outer_feet_m {
+        layout.keep_clear(
+            Vec2::new(foot_m.x, foot_m.z),
+            Vec2::splat(OUTER_TREE_RADIUS_M),
+        );
+    }
+    let mut random_state: u32 = BAMBOO_SEED ^ OUTER_FOREST_SALT;
+    let mut count: usize = 0;
+    for (detail, spacing_m, depth_m, min_radius_m, radius_spread_m) in [
+        (
+            TreeDetail::Edge,
+            EDGE_CLUMP_SPACING_M,
+            [0.0, EDGE_DETAIL_DEPTH_M],
+            MAZE_CLUMP_MIN_RADIUS_M,
+            MAZE_CLUMP_RADIUS_SPREAD_M,
+        ),
+        (
+            TreeDetail::Far,
+            FAR_CLUMP_SPACING_M,
+            [EDGE_DETAIL_DEPTH_M, OUTER_FOREST_DEPTH_M],
+            FAR_CLUMP_MIN_RADIUS_M,
+            FAR_CLUMP_RADIUS_SPREAD_M,
+        ),
+    ] {
+        let reach_m: Vec2 = Vec2::new(HALF_WIDTH_M, HALF_LENGTH_M) + OUTER_FOREST_DEPTH_M;
+        let column_count: usize = (2.0 * reach_m.x / spacing_m).ceil() as usize;
+        let row_count: usize = (reach_m.y / spacing_m).ceil() as usize + 1;
+        for j in 0..row_count {
+            for i in 0..column_count {
+                let mut random_frac = || {
+                    random_state ^= random_state << 13;
+                    random_state ^= random_state >> 17;
+                    random_state ^= random_state << 5;
+                    (random_state >> 8) as f32 / (1u32 << 24) as f32
+                };
+                let jitter: Vec2 = Vec2::new(random_frac() - 0.5, random_frac() - 0.5)
+                    * 2.0
+                    * OUTER_CLUMP_JITTER_FRAC
+                    * spacing_m;
+                let point: Vec2 = Vec2::new(
+                    -reach_m.x + (i as f32 + 0.5) * spacing_m,
+                    j as f32 * spacing_m,
+                ) + jitter;
+                let radius_m: f32 = min_radius_m + radius_spread_m * random_frac();
+                let height_m: f32 = 16.0 + random_frac() * 12.0;
+                let past_m: f32 = Vec2::new(
+                    (point.x.abs() - HALF_WIDTH_M).max(0.0),
+                    (point.y.abs() - HALF_LENGTH_M).max(0.0),
+                )
+                .length();
+                let spread_m: f32 = radius_m * CLUMP_SPREAD_FRAC + 0.3;
+                if (j == 0 && point.x >= 0.0)
+                    || past_m < depth_m[0].max(spread_m)
+                    || past_m >= depth_m[1]
+                    || !layout.is_clear(point, spread_m)
+                {
+                    continue;
+                }
+                for (side, sign) in [("red", 1.0_f32), ("blue", -1.0)] {
+                    let foot_m: Vec3 = Vec3::new(point.x * sign, 0.0, point.y * sign);
+                    layout.add_tree_in_detail(
+                        &format!("{side} outer forest {count}"),
+                        foot_m,
+                        radius_m,
+                        height_m,
+                        detail,
+                    );
+                }
+                count += 1;
+            }
+        }
+    }
+}
+
 /// `materials` is the map's palette.
 fn materials() -> Vec<Material> {
     let entry = |id: u8, name: &str, color: [f32; 3], kind: &str| Material {
@@ -1013,7 +1197,7 @@ pub fn build() -> MapFile {
             format: "warped-map".to_string(),
             version: 1,
             name: "dark_forest".to_string(),
-            description: "Dark Forest: a bounded Euclidean forest with treehouses, rope ladders and bridges, two pylons per team"
+            description: "Dark Forest: a Euclidean forest with treehouses, rope ladders and bridges, two pylons per team, slowing players without end past its edge"
                 .to_string(),
             source: "demos/dark_forest_rust/src/forest_layout.rs".to_string(),
             space: Space {
@@ -1057,6 +1241,14 @@ pub fn build() -> MapFile {
                 fog_m: Some(40.0),
             },
             spawns: Vec::new(),
+            regions: Some(Regions {
+                boundary: Some(Boundary {
+                    kind: "fermi_rectangle".to_string(),
+                    u_m: HALF_LENGTH_M,
+                    v_m: HALF_WIDTH_M,
+                    soft_edge_m: Some(SOFT_EDGE_M),
+                }),
+            }),
             appearance: Appearance {
                 style: "forest".to_string(),
             lighting: serde_json::json!({"model": "ambient_sun", "ambient": 0.6, "sun": 3.7}),
@@ -1065,31 +1257,14 @@ pub fn build() -> MapFile {
         footprints: Vec::new(),
         random_state: BAMBOO_SEED,
     };
-    let margin_m: f32 = 12.0;
+    let margin_m: f32 = OUTER_FOREST_DEPTH_M + FLOOR_PAST_FOREST_M;
     layout.add_box_between(
         "the forest floor",
         Vec3::new(-HALF_WIDTH_M - margin_m, -0.5, -HALF_LENGTH_M - margin_m),
         Vec3::new(HALF_WIDTH_M + margin_m, 0.0, HALF_LENGTH_M + margin_m),
         FOREST_FLOOR,
     );
-    let (w, l, t) = (HALF_WIDTH_M, HALF_LENGTH_M, 1.0);
-    for (a, b) in [
-        (
-            Vec3::new(-w - t, 0.0, -l - t),
-            Vec3::new(w + t, BORDER_HEIGHT_M, -l),
-        ),
-        (
-            Vec3::new(-w - t, 0.0, l),
-            Vec3::new(w + t, BORDER_HEIGHT_M, l + t),
-        ),
-        (
-            Vec3::new(-w - t, 0.0, -l),
-            Vec3::new(-w, BORDER_HEIGHT_M, l),
-        ),
-        (Vec3::new(w, 0.0, -l), Vec3::new(w + t, BORDER_HEIGHT_M, l)),
-    ] {
-        layout.add_box_between("the border rocks", a, b, ROCK);
-    }
+    let (w, l) = (HALF_WIDTH_M, HALF_LENGTH_M);
     layout.add_tree("the great tree", Vec3::ZERO, 2.2, 30.0);
     layout.add_deck(
         "the great tree deck",
@@ -1122,6 +1297,7 @@ pub fn build() -> MapFile {
             );
         }
     }
+    add_outer_forest(&mut layout);
     layout.map
 }
 
@@ -1134,10 +1310,215 @@ pub fn build() -> MapFile {
 /// | symmetry | red's half against blue's | `test_halves_mirror` |
 /// | warps | no black holes and 5 paired wormholes, each reach clear of boxes, shapes, ladders and spawns | `test_warps_are_paired_and_clear` |
 /// | walking into a mouth | each of the 10 mouths, from 16 directions | `test_every_mouth_lets_out_onto_solid_ground` |
+/// | the map file | as this layout exports it, to rounding | `test_the_map_file_is_this_layout` |
+/// | the map's edge (W-145, no walls at map edges) | each of the 4 sides: no box past the rectangle, mostly open ground just past it, a soft-edge boundary in the map | `test_no_wall_closes_the_map` |
+/// | looking out at eye height, against the culms | from the edge and from where the slowing stops players, on each of the 4 sides, from 60° left to 60° right of straight out | `test_looking_off_the_map_shows_forest` |
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::collision::Aabb;
+    use crate::game::world::Arena;
     use crate::map::frame_translation_m;
+
+    /// `EDGE_SAMPLE_STEP_M` is the spacing of the points sampled along each side of the rectangle.
+    const EDGE_SAMPLE_STEP_M: f32 = 1.0;
+    /// `BODY_HALF_M` is a standing player's collision box's half size.
+    const BODY_HALF_M: Vec3 = Vec3::new(0.3, 0.9, 0.3);
+    /// `MIN_OPEN_EDGE_FRAC` is the least share of points just past an edge where a player fits.
+    const MIN_OPEN_EDGE_FRAC: f32 = 0.5;
+    /// `EYE_HEIGHT_M` is a standing player's eye height, and `LOOK_STEP_DEG` and `MAX_LOOK_DEG` the
+    /// directions looked in, either side of straight out.
+    const EYE_HEIGHT_M: f32 = 1.68;
+    const LOOK_STEP_DEG: f32 = 10.0;
+    const MAX_LOOK_DEG: f32 = 60.0;
+    /// `MAX_SEE_THROUGH_FRAC` is the most of the looks out that may pass the whole outer forest.
+    const MAX_SEE_THROUGH_FRAC: f32 = 0.03;
+
+    /// `get_edge_points` gives points along the 4 sides of the rectangle grown by `past_m`, every
+    /// `EDGE_SAMPLE_STEP_M`, each with the side's outward direction.
+    fn get_edge_points(past_m: f32) -> Vec<(Vec3, Vec3)> {
+        let (w, l) = (HALF_WIDTH_M + past_m, HALF_LENGTH_M + past_m);
+        let mut points: Vec<(Vec3, Vec3)> = Vec::new();
+        for sign in [1.0_f32, -1.0] {
+            let along_x_count: usize = (2.0 * HALF_WIDTH_M / EDGE_SAMPLE_STEP_M) as usize;
+            for i in 0..=along_x_count {
+                let x: f32 = -HALF_WIDTH_M + i as f32 * EDGE_SAMPLE_STEP_M;
+                points.push((Vec3::new(x, 0.0, l * sign), Vec3::Z * sign));
+            }
+            let along_z_count: usize = (2.0 * HALF_LENGTH_M / EDGE_SAMPLE_STEP_M) as usize;
+            for i in 0..=along_z_count {
+                let z: f32 = -HALF_LENGTH_M + i as f32 * EDGE_SAMPLE_STEP_M;
+                points.push((Vec3::new(w * sign, 0.0, z), Vec3::X * sign));
+            }
+        }
+        points
+    }
+
+    /// `MAP_FILE_TOLERANCE` is how far a number in the map file may be from this layout's: debug
+    /// and release builds round the layout's trigonometry differently in the last bits.
+    const MAP_FILE_TOLERANCE: f64 = 1e-5;
+
+    /// `find_mismatch` gives the path of the first place where JSON values `a` and `b` differ
+    /// beyond `MAP_FILE_TOLERANCE`, if any.
+    fn find_mismatch(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
+        use serde_json::Value;
+        match (a, b) {
+            (Value::Number(x), Value::Number(y)) => {
+                let (x, y) = (x.as_f64()?, y.as_f64()?);
+                ((x - y).abs() > MAP_FILE_TOLERANCE).then(|| format!("{path}: {x} against {y}"))
+            }
+            (Value::Array(xs), Value::Array(ys)) if xs.len() == ys.len() => xs
+                .iter()
+                .zip(ys)
+                .enumerate()
+                .find_map(|(i, (x, y))| find_mismatch(x, y, &format!("{path}/{i}"))),
+            (Value::Object(xs), Value::Object(ys)) if xs.len() == ys.len() => {
+                xs.iter().find_map(|(key, x)| match ys.get(key) {
+                    Some(y) => find_mismatch(x, y, &format!("{path}/{key}")),
+                    None => Some(format!("{path}/{key}: missing")),
+                })
+            }
+            _ => (a != b).then(|| path.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_the_map_file_is_this_layout() {
+        let file: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(crate::map::default_map_path()).expect("the map file"),
+        )
+        .expect("the map file's JSON");
+        let layout: serde_json::Value = serde_json::to_value(build()).expect("map JSON");
+        let mismatch: Option<String> = find_mismatch(&file, &layout, "");
+        assert!(
+            mismatch.is_none(),
+            "{mismatch:?}: run `make export-map` to write this layout to the map file"
+        );
+    }
+
+    #[test]
+    fn test_no_wall_closes_the_map() {
+        let map: MapFile = build();
+        let boundary: &Boundary = map
+            .regions
+            .as_ref()
+            .and_then(|regions| regions.boundary.as_ref())
+            .expect("the map's boundary");
+        assert_eq!(
+            (boundary.kind.as_str(), boundary.u_m, boundary.v_m),
+            ("fermi_rectangle", HALF_LENGTH_M, HALF_WIDTH_M)
+        );
+        assert_eq!(boundary.soft_edge_m, Some(SOFT_EDGE_M));
+        for map_box in &map.boxes[1..] {
+            let (low_m, high_m) = world_bounds(
+                Mat4::from_cols_array(&map_box.frame),
+                Vec3::from(map_box.half_size_m),
+            );
+            assert!(
+                low_m.x >= -HALF_WIDTH_M
+                    && high_m.x <= HALF_WIDTH_M
+                    && low_m.z >= -HALF_LENGTH_M
+                    && high_m.z <= HALF_LENGTH_M,
+                "{} ({}) reaches past the edge",
+                map_box.name,
+                map_box.group
+            );
+        }
+        let solids: Vec<Aabb> = Arena::from_map(&map)
+            .boxes
+            .iter()
+            .map(|world_box| world_box.aabb)
+            .collect();
+        let points: Vec<(Vec3, Vec3)> = get_edge_points(BODY_HALF_M.x + 0.05);
+        for side in [Vec3::X, Vec3::NEG_X, Vec3::Z, Vec3::NEG_Z] {
+            let side_points: Vec<Vec3> = points
+                .iter()
+                .filter(|(_, out)| *out == side)
+                .map(|(point_m, _)| *point_m)
+                .collect();
+            let open_count: usize = side_points
+                .iter()
+                .filter(|point_m| {
+                    let body: Aabb = Aabb::from_center(
+                        **point_m + Vec3::Y * (BODY_HALF_M.y + 0.05),
+                        BODY_HALF_M,
+                    );
+                    !solids.iter().any(|solid| solid.overlaps(&body))
+                })
+                .count();
+            let open_frac: f32 = open_count as f32 / side_points.len() as f32;
+            assert!(open_frac > MIN_OPEN_EDGE_FRAC, "side {side}: {open_frac}");
+        }
+    }
+
+    /// `get_culms_at_height` gives where every upright culm (a cylinder along its frame's y) of
+    /// `map` crosses the height `y_m`, and its radius: what blocks a level look at that height.
+    fn get_culms_at_height(map: &MapFile, y_m: f32) -> Vec<(Vec2, f32)> {
+        map.structures
+            .iter()
+            .filter_map(|structure| {
+                let shape: &Shape = structure.shapes.first()?;
+                let is_culm: bool = shape.kind == "cylinder" && shape.axis == 1;
+                let frame: Mat4 = Mat4::from_cols_array(&structure.frame);
+                let foot_m: Vec3 = frame.transform_point3(Vec3::ZERO);
+                let up: Vec3 = frame.transform_vector3(Vec3::Y);
+                let length_m: f32 = 2.0 * shape.half_m[1];
+                let along_m: f32 = (y_m - foot_m.y) / up.y;
+                let crossing_m: Vec3 = foot_m + up * along_m;
+                (is_culm && up.y > 0.9 && along_m >= 0.0 && along_m <= length_m)
+                    .then(|| (Vec2::new(crossing_m.x, crossing_m.z), shape.half_m[0]))
+            })
+            .collect()
+    }
+
+    /// `is_circle_on_ray` says whether the ray from `origin` along the unit `direction` meets the
+    /// circle at `centre` of `radius_m` within `length_m`.
+    fn is_circle_on_ray(
+        origin: Vec2,
+        direction: Vec2,
+        length_m: f32,
+        centre: Vec2,
+        radius_m: f32,
+    ) -> bool {
+        let along_m: f32 = (centre - origin).dot(direction).clamp(0.0, length_m);
+        (origin + direction * along_m).distance(centre) <= radius_m
+    }
+
+    #[test]
+    fn test_looking_off_the_map_shows_forest() {
+        let culms_at_eye: Vec<(Vec2, f32)> = get_culms_at_height(&build(), EYE_HEIGHT_M);
+        let look_count: usize = (2.0 * MAX_LOOK_DEG / LOOK_STEP_DEG) as usize + 1;
+        for past_m in [0.0, SOFT_EDGE_M] {
+            let (mut see_through_count, mut look_total) = (0_usize, 0_usize);
+            for (point_m, out) in get_edge_points(past_m) {
+                let eye_m: Vec3 = point_m + Vec3::Y * EYE_HEIGHT_M;
+                for k in 0..look_count {
+                    let turn_rad: f32 = (-MAX_LOOK_DEG + k as f32 * LOOK_STEP_DEG).to_radians();
+                    let direction: Vec3 = Quat::from_rotation_y(turn_rad) * out;
+                    let out_of_forest_m: f32 = (OUTER_FOREST_DEPTH_M - past_m) / turn_rad.cos();
+                    look_total += 1;
+                    let is_blocked: bool = culms_at_eye.iter().any(|&(centre, radius_m)| {
+                        is_circle_on_ray(
+                            Vec2::new(eye_m.x, eye_m.z),
+                            Vec2::new(direction.x, direction.z),
+                            out_of_forest_m,
+                            centre,
+                            radius_m,
+                        )
+                    });
+                    see_through_count += usize::from(!is_blocked);
+                }
+            }
+            let see_through_frac: f32 = see_through_count as f32 / look_total as f32;
+            println!(
+                "from {past_m} m past the edge: {see_through_frac} of the looks pass the forest"
+            );
+            assert!(
+                see_through_frac <= MAX_SEE_THROUGH_FRAC,
+                "from {past_m} m past the edge: {see_through_frac}"
+            );
+        }
+    }
 
     /// `test_each_team_has_two_consoles_and_spawns` checks the objective's pieces exist.
     #[test]
