@@ -1,12 +1,15 @@
 //! `game_settings_page.rs` is the game master's settings page, opened from the game menu (W-158,
 //! per-map game settings): the match server's game settings (`warped_shared::game_settings`) in
 //! sections, the shared one (every level that has the key) and one per level (its own keys, shown
-//! even when it has none), edited with the shared settings editor. Each change and each reset goes
-//! to the match server, which holds the settings and gives each round's level server its merged
-//! copy; the page shows the server's latest answer.
+//! even when it has none), edited with the shared settings editor. Changes and resets stay on the
+//! page until the game master chooses SAVE SETTINGS (W-209, game settings checked when saved,
+//! with the reason): the page then checks every level's settings against the rules
+//! (`warped_shared::setting_rules`) and either says which rule is broken, where and why, or sends
+//! them all to the match server, which checks them again, holds them and gives each round's level
+//! server its merged copy.
 //!
-//! Interface: `GameSettingsPage` (`New`, `update`, `handle`, `show_message`, `get_shapes`,
-//! `is_waiting`; in tests `get_row_keys`),
+//! Interface: `GameSettingsPage` (`New`, `update`, `handle`, `save`, `select`,
+//! `has_unsaved_changes`, `show_message`, `get_shapes`, `is_waiting`; in tests `get_row_keys`),
 //! `GameSettingsOutcome`.
 //!
 //! Example: `if let GameSettingsOutcome::Send(message) = page.handle(MenuInput::Right) { client.send_settings(&message)?; }`
@@ -15,13 +18,15 @@
 //! - Gotchas: the page's rows come from the keys the levels' settings files have, so settings that
 //!   other changes add show up without changing this file.
 //! - Gotchas: a switch (`true` or `false` in the file) shows as 1 or 0, stepping between them.
-//! - Gotchas: only finite numbers of at least 0 are allowed, whole where the default is; a level
-//!   that refuses a value (a speed of 0, say) stops its round's level server at start.
+//! - Gotchas: while a number is typed or stepped only "a finite number of at least 0, whole where
+//!   the default is" is asked of it, so a group can be changed one setting at a time (three
+//!   shares that must add up to 1); the rules are checked when the settings are saved.
+//! - Gotchas: Escape with unsaved changes asks once; a second Escape leaves and drops them.
 
 use std::error::Error;
 
 use serde_json::{Map, Value};
-use warped_shared::game_settings::{GameSettings, SettingsMessage, SettingsScope};
+use warped_shared::game_settings::{GameSettings, Overrides, SettingsMessage, SettingsScope};
 use warped_shared::page::Shape;
 use warped_shared::settings_editor::{EditorOutcome, EditorRow, RowKind, SettingsEditor, get_at};
 
@@ -33,7 +38,21 @@ const PAGE_SIZE: [f32; 2] = [800.0, 455.0];
 const VISIBLE_ROW_COUNT: usize = 28;
 const ROWS_TOP: f32 = 36.0;
 const TITLE: &str = "GAME SETTINGS (GAME MASTER)";
-const HELP: &str = "Left/Right: change   type a number, Return: set   R: back to the level's default   Escape: back";
+const HELP: &str = "Left/Right: change  type a number, Return: set  R: default  SAVE SETTINGS: apply  Escape: back";
+const UNSAVED_HELP: &str =
+    "UNSAVED CHANGES  Return on SAVE SETTINGS: apply  on DROP: undo  Escape twice: leave them";
+const MESSAGE_WIDTH_CHARS: usize = 92;
+const SAVE_ID: &str = "save";
+const SECTION_ROW_ALLOWANCE: usize = 32;
+const DROP_ID: &str = "drop";
+const SAVE_LABEL: &str = "SAVE SETTINGS (checks them all, then applies them)";
+const DROP_LABEL: &str = "DROP UNSAVED CHANGES";
+const NOTHING_TO_SAVE_LINE: &str = "Nothing to save: no unsaved changes.";
+const SAVING_LINE: &str = "Checked. Saving to the match server...";
+const SAVED_LINE: &str = "Saved: the next round of each level plays by these settings.";
+const DROPPED_LINE: &str = "Dropped the unsaved changes.";
+const LEAVE_LINE: &str =
+    "Unsaved changes: save or drop them, or press Escape again to leave without them.";
 const WAITING_LINE: &str = "Asking the match server for its game settings...";
 const OLD_SERVER_LINE: &str = "(A match server older than the game settings never answers.)";
 const HEADING_ID: &str = "heading";
@@ -139,6 +158,24 @@ fn check_numbers(values: &Value, defaults: &Value, key: &str) -> Result<(), Box<
     }
 }
 
+/// `wrap_message` breaks `message` between words into lines of at most `width_chars` characters
+/// (a longer word gets a line of its own), joined by newlines.
+///
+/// Example: `assert_eq!(wrap_message("not saved at all", 9), "not saved\nat all");`
+fn wrap_message(message: &str, width_chars: usize) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for word in message.split(' ') {
+        match lines.last_mut() {
+            Some(line) if line.len() + 1 + word.len() <= width_chars => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines.join("\n")
+}
+
 /// `push_heading_row` adds a row that only labels: a section's heading, or a note under it.
 ///
 /// Example: `push_heading_row(&mut rows, "DUST ONLY".to_string());`
@@ -150,14 +187,20 @@ fn push_heading_row(rows: &mut Vec<EditorRow>, label: String) {
 }
 
 /// `GameSettingsPage` is the page's state: the editor (once the server's settings came), its
-/// rows' keys, the values and defaults it shows (sections `shared` and `level_<index>`), and the
-/// levels' names.
+/// rows' keys, the values and defaults it shows (sections `shared` and `level_<index>`), the
+/// levels' names, the match server's latest settings, those settings with the game master's
+/// unsaved changes, whether a save is on its way, and whether Escape was pressed once over
+/// unsaved changes.
 pub struct GameSettingsPage {
     editor: Option<SettingsEditor>,
     row_keys: Vec<String>,
     values: Value,
     defaults: Value,
     level_names: Vec<String>,
+    server: Option<GameSettings>,
+    edited: Option<GameSettings>,
+    is_saving: bool,
+    is_leaving: bool,
 }
 
 impl GameSettingsPage {
@@ -172,6 +215,32 @@ impl GameSettingsPage {
             values: Value::Object(Map::new()),
             defaults: Value::Object(Map::new()),
             level_names,
+            server: None,
+            edited: None,
+            is_saving: false,
+            is_leaving: false,
+        }
+    }
+
+    /// `has_unsaved_changes` says whether the page holds changes the match server doesn't have.
+    ///
+    /// Example: `if page.has_unsaved_changes() { ... }`
+    pub fn has_unsaved_changes(&self) -> bool {
+        let get: fn(&GameSettings) -> Overrides = GameSettings::get_overrides;
+        self.edited.as_ref().map(get) != self.server.as_ref().map(get)
+    }
+
+    /// `name_level` gives `level`'s name for a message, or `the save` for no level.
+    ///
+    /// Example: `let name: String = self.name_level(Some(2));`
+    fn name_level(&self, level: Option<usize>) -> String {
+        match level {
+            Some(level) => self
+                .level_names
+                .get(level)
+                .cloned()
+                .unwrap_or(format!("level {level}")),
+            None => "the save".to_string(),
         }
     }
 
@@ -191,12 +260,57 @@ impl GameSettingsPage {
         self.editor.is_none()
     }
 
-    /// `update` shows `settings`, the match server's latest: their values and defaults, and new
-    /// rows (keeping the selection) only if their keys changed.
+    /// `update` takes `settings`, the match server's latest. Without unsaved changes the page
+    /// shows them; with some it keeps showing those. A save on its way ends here: taken (the
+    /// server has the page's overrides) or refused (the server says why, for these overrides).
     ///
     /// Example: `page.update(client.settings.as_ref().unwrap());`
     pub fn update(&mut self, settings: &GameSettings) {
-        let mut rows: Vec<EditorRow> = Vec::new();
+        let had_unsaved_changes: bool = self.has_unsaved_changes();
+        self.server = Some(settings.clone());
+        let mut message: Option<String> = None;
+        match &mut self.edited {
+            Some(edited) if had_unsaved_changes => {
+                edited.defaults = settings.defaults.clone();
+                let overrides: Overrides = edited.get_overrides();
+                let refusal = settings
+                    .refusal
+                    .as_ref()
+                    .filter(|refusal| self.is_saving && refusal.overrides == overrides);
+                if let Some(refusal) = refusal {
+                    message = Some(format!(
+                        "Not saved. {}: {}",
+                        self.name_level(refusal.level),
+                        refusal.reason
+                    ));
+                    self.is_saving = false;
+                }
+            }
+            _ => self.edited = Some(settings.clone()),
+        }
+        if self.is_saving && !self.has_unsaved_changes() {
+            self.is_saving = false;
+            message = Some(SAVED_LINE.to_string());
+        }
+        self.show_edited();
+        if let Some(message) = message {
+            self.show_message(message);
+        }
+    }
+
+    /// `show_edited` shows the settings with the unsaved changes: their values and defaults, and
+    /// new rows (keeping the selection) only if their keys changed.
+    ///
+    /// Example: `self.show_edited();`
+    fn show_edited(&mut self) {
+        let settings: GameSettings = self.edited.clone().expect("the server's settings came");
+        let settings: &GameSettings = &settings;
+        let mut rows: Vec<EditorRow> = [(SAVE_LABEL, SAVE_ID), (DROP_LABEL, DROP_ID)]
+            .map(|(label, id)| EditorRow {
+                label: label.to_string(),
+                kind: RowKind::Button { id },
+            })
+            .to_vec();
         let mut row_keys: Vec<String> = Vec::new();
         let (mut values, mut defaults) = (Value::Object(Map::new()), Value::Object(Map::new()));
         let sections: Vec<(SettingsScope, String, Vec<String>)> = std::iter::once((
@@ -293,17 +407,90 @@ impl GameSettingsPage {
         self.defaults = defaults;
     }
 
-    /// `handle` applies one input: a change or a reset of a number is sent to the match server
-    /// (and shown at once), Escape closes the page.
+    /// `save` checks every level's settings with the unsaved changes against the rules: broken,
+    /// it says where and why and sends nothing; kept, it sends them all to the match server.
+    ///
+    /// Example: `let outcome = page.save();`
+    pub fn save(&mut self) -> GameSettingsOutcome {
+        if !self.has_unsaved_changes() {
+            self.show_message(NOTHING_TO_SAVE_LINE.to_string());
+            return GameSettingsOutcome::Stay;
+        }
+        let edited: &GameSettings = self.edited.as_ref().expect("the server's settings came");
+        if let Some((level, reason)) = edited.find_problem() {
+            let message: String = format!("Not saved. {}: {reason}", self.name_level(Some(level)));
+            self.show_message(message);
+            return GameSettingsOutcome::Stay;
+        }
+        let overrides: Overrides = edited.get_overrides();
+        self.is_saving = true;
+        self.show_message(SAVING_LINE.to_string());
+        GameSettingsOutcome::Send(SettingsMessage::Save(overrides))
+    }
+
+    /// `select` moves the selection down to the number row `row_key` (`shared.<key>` or
+    /// `level_<index>.<key>`); it fails if the page has no such row.
+    ///
+    /// Example: `page.select("shared.beam_speckle.black_frac")?;`
+    pub fn select(&mut self, row_key: &str) -> Result<(), String> {
+        for _ in 0..(self.row_keys.len() + SECTION_ROW_ALLOWANCE) * 2 {
+            let is_selected: bool = self.editor.as_ref().is_some_and(|editor| {
+                matches!(&editor.get_selected_row().kind, RowKind::Number { key, .. } if key == row_key)
+            });
+            if is_selected {
+                return Ok(());
+            }
+            self.handle(MenuInput::Down);
+        }
+        Err(format!("the game settings page has no row {row_key}"))
+    }
+
+    /// `keep_change` keeps the change just made to the row `row_key` among the unsaved changes:
+    /// its value as an override of its scope, or no override after a reset.
+    ///
+    /// Example: `self.keep_change("shared.respawn.delay_s", false);`
+    fn keep_change(&mut self, row_key: &str, is_reset: bool) {
+        let (scope, key) = parse_row_key(row_key);
+        let value: f64 = get_at(&self.values, row_key)
+            .and_then(Value::as_f64)
+            .expect("a number row's value");
+        let edited: &mut GameSettings = self.edited.as_mut().expect("the server's settings came");
+        let default: Value = edited
+            .get_default(scope, &key)
+            .cloned()
+            .expect("a key the scope has");
+        let overrides: &mut std::collections::BTreeMap<String, Value> = match scope {
+            SettingsScope::Shared => &mut edited.shared,
+            SettingsScope::Level(level) => &mut edited.levels[level],
+        };
+        if is_reset {
+            overrides.remove(&key);
+            return;
+        }
+        let held: Value = GameSettings::to_setting_value(&key, &default, value)
+            .expect("the editor checked the number");
+        overrides.insert(key, held);
+    }
+
+    /// `handle` applies one input: a change or a reset of a number is kept on the page, SAVE
+    /// SETTINGS checks and sends them all (`save`), DROP UNSAVED CHANGES shows the match server's
+    /// again, and Escape closes the page (asking once over unsaved changes).
     ///
     /// Example: `let outcome = page.handle(MenuInput::Reset);`
     pub fn handle(&mut self, input: MenuInput) -> GameSettingsOutcome {
+        let has_unsaved_changes: bool = self.has_unsaved_changes();
         let Some(editor) = &mut self.editor else {
             return match input {
                 MenuInput::Back => GameSettingsOutcome::Close,
                 _ => GameSettingsOutcome::Stay,
             };
         };
+        if input == MenuInput::Back && has_unsaved_changes && !self.is_leaving {
+            self.is_leaving = true;
+            editor.show_message(wrap_message(LEAVE_LINE, MESSAGE_WIDTH_CHARS));
+            return GameSettingsOutcome::Stay;
+        }
+        self.is_leaving = false;
         let is_reset: bool = input == MenuInput::Reset;
         let defaults: Value = self.defaults.clone();
         let check = move |values: &Value| check_numbers(values, &defaults, "");
@@ -319,26 +506,29 @@ impl GameSettingsPage {
         };
         match (outcome, row_key) {
             (EditorOutcome::Back, _) => GameSettingsOutcome::Close,
+            (EditorOutcome::Pressed(SAVE_ID), _) => self.save(),
+            (EditorOutcome::Pressed(DROP_ID), _) => {
+                self.edited = self.server.clone();
+                self.is_saving = false;
+                self.show_edited();
+                self.show_message(DROPPED_LINE.to_string());
+                GameSettingsOutcome::Stay
+            }
             (EditorOutcome::Changed, Some(row_key)) => {
-                let (scope, key) = parse_row_key(&row_key);
-                if is_reset {
-                    return GameSettingsOutcome::Send(SettingsMessage::Reset { scope, key });
-                }
-                let value: f64 = get_at(&self.values, &row_key)
-                    .and_then(Value::as_f64)
-                    .expect("a number row's value");
-                GameSettingsOutcome::Send(SettingsMessage::Set { scope, key, value })
+                self.keep_change(&row_key, is_reset);
+                GameSettingsOutcome::Stay
             }
             _ => GameSettingsOutcome::Stay,
         }
     }
 
-    /// `show_message` shows `message` under the rows until the next input.
+    /// `show_message` shows `message` under the rows until the next input, on as many lines as
+    /// it needs (`wrap_message`).
     ///
     /// Example: `page.show_message("the game ended".to_string());`
     pub fn show_message(&mut self, message: String) {
         if let Some(editor) = &mut self.editor {
-            editor.show_message(message);
+            editor.show_message(wrap_message(&message, MESSAGE_WIDTH_CHARS));
         }
     }
 
@@ -348,7 +538,12 @@ impl GameSettingsPage {
     /// Example: `let (shapes, size) = page.get_shapes();`
     pub fn get_shapes(&self) -> page_t {
         let mut shapes: Vec<Shape> = Vec::new();
-        push_title(&mut shapes, PAGE_SIZE, TITLE, HELP);
+        let help: &str = if self.has_unsaved_changes() {
+            UNSAVED_HELP
+        } else {
+            HELP
+        };
+        push_title(&mut shapes, PAGE_SIZE, TITLE, help);
         let Some(editor) = &self.editor else {
             push_heading(&mut shapes, [MARGIN, ROWS_TOP + LINE], WAITING_LINE);
             push_heading(
@@ -382,12 +577,16 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Sections | shared keys, a switch, a level's own, a level with none (shown, empty), a level without a file, the levels' names | `sections_show_every_level` |
-    //! | Changes | a step up (set sent), a reset (reset sent), a typed fraction where the default is whole (refused, nothing sent), a switch turned off (0 sent), a heading (nothing) | `changes_go_to_the_match_server` |
+    //! | Changes | nothing changed (nothing to save), a step up (kept, nothing sent), a reset (no longer unsaved), a typed fraction where the default is whole (refused), a switch turned off and a level's own key; then saved: one message with them all, unsaved until the server has them, then "Saved" | `changes_wait_for_a_save` |
+    //! | A save that breaks a rule | refused on the page (the level and the reason, nothing sent); refused by the server (its reason, only for these overrides, not an older refusal) | `a_save_that_breaks_a_rule_says_why` |
+    //! | Unsaved changes | dropped on DROP; Escape once asks, twice leaves | `unsaved_changes_are_dropped_on_request_or_on_leaving_twice` |
     //! | Server's answer | values follow it, same keys keep the selection, waiting before it, Escape closes | `the_page_follows_the_servers_answer` |
     //! | Steps | whole, 2.0, 0.33, 250, 0 | `steps_follow_the_default` |
+    //! | Message length | one line, two lines, a word longer than a line | `long_messages_wrap_between_words` |
 
     use super::*;
     use serde_json::json;
+    use warped_shared::game_settings::Refusal;
     use warped_shared::settings_editor::set_at;
 
     /// `make_settings` gives three levels: two sharing `respawn.delay_s`, `rifle.hits` and the switch `shooting.on`, the
@@ -437,14 +636,7 @@ mod tests {
     ///
     /// Example: `select(&mut page, "shared.rifle.hits");`
     fn select(page: &mut GameSettingsPage, row_key: &str) {
-        for _ in 0..page.row_keys.len() * 4 {
-            let row: &EditorRow = page.editor.as_ref().unwrap().get_selected_row();
-            if matches!(&row.kind, RowKind::Number { key, .. } if key == row_key) {
-                return;
-            }
-            page.handle(MenuInput::Down);
-        }
-        panic!("no row {row_key}");
+        page.select(row_key).unwrap();
     }
 
     #[test]
@@ -452,6 +644,8 @@ mod tests {
         let page: GameSettingsPage = make_page();
         let text: String = get_text(&page);
         for line in [
+            SAVE_LABEL,
+            DROP_LABEL,
             "EVERY LEVEL",
             "respawn.delay_s (levels differ)",
             "rifle.hits",
@@ -476,26 +670,39 @@ mod tests {
         );
     }
 
+    /// `press` gives the page `input` on its button `id`'s row (SAVE or DROP, the first rows).
+    ///
+    /// Example: `let outcome = press(&mut page, SAVE_ID);`
+    fn press(page: &mut GameSettingsPage, id: &'static str) -> GameSettingsOutcome {
+        for _ in 0..page.row_keys.len() * 4 {
+            let row: &EditorRow = page.editor.as_ref().unwrap().get_selected_row();
+            if matches!(&row.kind, RowKind::Button { id: row_id } if *row_id == id) {
+                return page.handle(MenuInput::Activate);
+            }
+            page.handle(MenuInput::Up);
+        }
+        panic!("no button {id}");
+    }
+
+    /// `get_message` gives the page's text with its message line.
+    ///
+    /// Example: `assert!(get_message(&page).contains("Saved"));`
+    fn get_message(page: &GameSettingsPage) -> String {
+        format!("{:?}", page.get_shapes().0)
+    }
+
     #[test]
-    fn changes_go_to_the_match_server() {
+    fn changes_wait_for_a_save() {
         let mut page: GameSettingsPage = make_page();
-        assert_eq!(page.handle(MenuInput::Activate), GameSettingsOutcome::Stay);
+        assert!(!page.has_unsaved_changes());
+        assert_eq!(press(&mut page, SAVE_ID), GameSettingsOutcome::Stay);
+        assert!(get_message(&page).contains(NOTHING_TO_SAVE_LINE));
         select(&mut page, "shared.rifle.hits");
-        assert_eq!(
-            page.handle(MenuInput::Right),
-            GameSettingsOutcome::Send(SettingsMessage::Set {
-                scope: SettingsScope::Shared,
-                key: "rifle.hits".to_string(),
-                value: 3.0,
-            })
-        );
-        assert_eq!(
-            page.handle(MenuInput::Reset),
-            GameSettingsOutcome::Send(SettingsMessage::Reset {
-                scope: SettingsScope::Shared,
-                key: "rifle.hits".to_string(),
-            })
-        );
+        assert_eq!(page.handle(MenuInput::Right), GameSettingsOutcome::Stay);
+        assert!(page.has_unsaved_changes());
+        assert!(get_message(&page).contains("UNSAVED CHANGES"));
+        assert_eq!(page.handle(MenuInput::Reset), GameSettingsOutcome::Stay);
+        assert!(!page.has_unsaved_changes());
         for input in [
             MenuInput::Typed('2'),
             MenuInput::Typed('.'),
@@ -506,23 +713,84 @@ mod tests {
         assert_eq!(page.handle(MenuInput::Activate), GameSettingsOutcome::Stay);
         assert!(get_text(&page).contains("whole number"));
         select(&mut page, "shared.shooting.on");
-        assert_eq!(
-            page.handle(MenuInput::Left),
-            GameSettingsOutcome::Send(SettingsMessage::Set {
-                scope: SettingsScope::Shared,
-                key: "shooting.on".to_string(),
-                value: 0.0,
-            })
-        );
+        assert_eq!(page.handle(MenuInput::Left), GameSettingsOutcome::Stay);
         select(&mut page, "level_1.glass.bounces");
+        assert_eq!(page.handle(MenuInput::Left), GameSettingsOutcome::Stay);
+        let mut expected: Overrides = make_settings().get_overrides();
+        expected
+            .shared
+            .insert("shooting.on".to_string(), json!(false));
+        expected.levels[1].insert("glass.bounces".to_string(), json!(1));
         assert_eq!(
-            page.handle(MenuInput::Left),
-            GameSettingsOutcome::Send(SettingsMessage::Set {
-                scope: SettingsScope::Level(1),
-                key: "glass.bounces".to_string(),
-                value: 1.0,
-            })
+            press(&mut page, SAVE_ID),
+            GameSettingsOutcome::Send(SettingsMessage::Save(expected.clone()))
         );
+        let mut answer: GameSettings = make_settings();
+        page.update(&answer);
+        assert!(page.has_unsaved_changes());
+        answer.apply(&SettingsMessage::Save(expected)).unwrap();
+        page.update(&answer);
+        assert!(!page.has_unsaved_changes());
+        assert!(get_message(&page).contains(SAVED_LINE));
+        assert_eq!(page.values["shared"]["shooting"]["on"], json!(0));
+    }
+
+    #[test]
+    fn a_save_that_breaks_a_rule_says_why() {
+        let mut page: GameSettingsPage = make_page();
+        select(&mut page, "shared.respawn.delay_s");
+        page.handle(MenuInput::Typed('0'));
+        assert_eq!(page.handle(MenuInput::Activate), GameSettingsOutcome::Stay);
+        assert_eq!(press(&mut page, SAVE_ID), GameSettingsOutcome::Stay);
+        let text: String = get_message(&page);
+        assert!(
+            text.contains("Not saved. Dark Forest: respawn.delay_s must be above 0, not 0"),
+            "{text}"
+        );
+        assert!(page.has_unsaved_changes());
+        select(&mut page, "shared.respawn.delay_s");
+        page.handle(MenuInput::Typed('4'));
+        page.handle(MenuInput::Activate);
+        let GameSettingsOutcome::Send(SettingsMessage::Save(overrides)) = press(&mut page, SAVE_ID)
+        else {
+            panic!("a save that keeps the rules is sent");
+        };
+        let mut refusing: GameSettings = make_settings();
+        refusing.refusal = Some(Refusal {
+            overrides: make_settings().get_overrides(),
+            level: Some(1),
+            reason: "an older refusal".to_string(),
+        });
+        page.update(&refusing);
+        assert!(!get_message(&page).contains("an older refusal"));
+        refusing.refusal = Some(Refusal {
+            overrides,
+            level: Some(1),
+            reason: "the server's reason".to_string(),
+        });
+        page.update(&refusing);
+        let text: String = get_message(&page);
+        assert!(
+            text.contains("Not saved. City Sphere: the server's reason"),
+            "{text}"
+        );
+        assert!(page.has_unsaved_changes());
+    }
+
+    #[test]
+    fn unsaved_changes_are_dropped_on_request_or_on_leaving_twice() {
+        let mut page: GameSettingsPage = make_page();
+        select(&mut page, "shared.rifle.hits");
+        page.handle(MenuInput::Right);
+        assert_eq!(page.values["shared"]["rifle"]["hits"].as_f64(), Some(3.0));
+        assert_eq!(press(&mut page, DROP_ID), GameSettingsOutcome::Stay);
+        assert!(!page.has_unsaved_changes());
+        assert_eq!(page.values["shared"]["rifle"]["hits"].as_f64(), Some(2.0));
+        select(&mut page, "shared.rifle.hits");
+        page.handle(MenuInput::Right);
+        assert_eq!(page.handle(MenuInput::Back), GameSettingsOutcome::Stay);
+        assert!(get_message(&page).contains(LEAVE_LINE));
+        assert_eq!(page.handle(MenuInput::Back), GameSettingsOutcome::Close);
     }
 
     #[test]
@@ -547,6 +815,16 @@ mod tests {
         set_at(&mut page.values, "shared.rifle.hits", json!(4)).unwrap();
         assert!(check_numbers(&page.values, &page.defaults, "").is_ok());
         assert_eq!(page.handle(MenuInput::Back), GameSettingsOutcome::Close);
+    }
+
+    #[test]
+    fn long_messages_wrap_between_words() {
+        assert_eq!(wrap_message("Saved.", 9), "Saved.");
+        assert_eq!(wrap_message("not saved at all", 9), "not saved\nat all");
+        assert_eq!(
+            wrap_message("a beam_speckle.black_frac b", 9),
+            "a\nbeam_speckle.black_frac\nb"
+        );
     }
 
     #[test]

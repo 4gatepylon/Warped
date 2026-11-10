@@ -95,6 +95,7 @@ pub mod player_settings;
 pub mod pull_dynamics;
 #[cfg(target_os = "macos")]
 pub mod render_mesh;
+pub mod setting_rules;
 pub mod settings_editor;
 pub mod shapes;
 pub mod shot_gate;

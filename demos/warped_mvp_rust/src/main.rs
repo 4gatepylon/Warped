@@ -95,6 +95,8 @@ const SETTINGS_FILE_NAME: &str = "server_settings.yaml";
 const SAMPLE_SHARED_KEY: &str = "respawn.start_s";
 const SAMPLE_SHARED_VALUE: f64 = 5.0;
 const DEFAULT_LEVEL_PORT: u16 = 47_852;
+const REFUSED_SAMPLE_KEY: &str = "shared.beam_speckle.black_frac";
+const REFUSED_SAMPLE_STEP_COUNT: usize = 10;
 const FRAME_MS: u64 = 16;
 
 /// `Arguments` is the command line (see the file's docstring).
@@ -493,6 +495,22 @@ fn make_sample_settings_page(levels: &[LevelEntry]) -> Result<GameSettingsPage> 
     Ok(page)
 }
 
+/// `make_refused_settings_page` gives the game master's settings page after a save the rules
+/// refuse: one of the beam speckle's three shares raised, so they no longer add up to 1.
+///
+/// Example: `let page = make_refused_settings_page(&levels)?;`
+fn make_refused_settings_page(levels: &[LevelEntry]) -> Result<GameSettingsPage> {
+    let names: Vec<String> = levels.iter().map(|level| level.name.clone()).collect();
+    let mut page: GameSettingsPage = GameSettingsPage::New(names);
+    page.update(&load_shipped_settings(levels)?);
+    page.select(REFUSED_SAMPLE_KEY)?;
+    for _ in 0..REFUSED_SAMPLE_STEP_COUNT {
+        page.handle(MenuInput::Right);
+    }
+    page.save();
+    Ok(page)
+}
+
 /// `save_screen_pictures` draws every screen without a window at the arguments' size into a run
 /// folder, as PNGs, and prints their folder.
 ///
@@ -528,6 +546,10 @@ fn save_screen_pictures(
         ("player_settings", settings_page.get_shapes()),
         ("game_settings", game_settings_page.get_shapes()),
         ("game_settings_levels", game_settings_end_page.get_shapes()),
+        (
+            "game_settings_refused",
+            make_refused_settings_page(levels)?.get_shapes(),
+        ),
         (
             "game_settings_waiting",
             GameSettingsPage::New(Vec::new()).get_shapes(),
@@ -627,6 +649,7 @@ mod tests {
     //! | Toured game | no bots (alone), allies only, enemies only, both; a count over the most | `a_tour_plays_alone_or_with_bots` |
     //! | Shipped settings files | every level's file on the game master's page: shared respawn, shooting switches and gravity, each level's own setting (City Sphere's glass, its team domes' size and its glass lights' pulse), Dark Forest's none | `the_shipped_settings_all_show` |
     //! | Shipped settings on the network | the answer a match server sends for them, over loopback in one datagram | `the_shipped_settings_reach_a_client_in_one_datagram` |
+    //! | Shipped settings and the rules | every level's file keeps `setting_rules`' kinds and groups | `the_shipped_settings_pass_the_rules` |
 
     use super::*;
     use std::net::{Ipv4Addr, UdpSocket};
@@ -695,6 +718,13 @@ mod tests {
             .expect("a settings answer")
             .unwrap();
         assert_eq!(received, settings);
+    }
+
+    #[test]
+    fn the_shipped_settings_pass_the_rules() {
+        let levels: Vec<LevelEntry> = load_levels(&get_levels_manifest_path()).unwrap();
+        let settings: GameSettings = load_shipped_settings(&levels).unwrap();
+        assert_eq!(settings.find_problem(), None);
     }
 
     #[test]
