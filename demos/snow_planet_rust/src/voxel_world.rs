@@ -17,6 +17,7 @@
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
 use crate::map::Blizzard;
+use rayon::prelude::*;
 use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
@@ -968,7 +969,8 @@ impl VoxelWorld {
     }
 
     /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
-    /// in `poses` (a clip and a time in it, one per body), squashed to its height share; lasers
+    /// in `poses` (a clip and a time in it, one per body; posed in parallel, since posing is most of
+    /// a frame with 10 players), squashed to its height share; lasers
     /// still hit the shapes. After the
     /// bodies come `corpses` (a feet frame, an avatar colour index and a pose each), only drawn:
     /// lasers pass through them.
@@ -989,8 +991,14 @@ impl VoxelWorld {
             poses.len()
         );
         let mut shared: VoxelWorld = self.clone();
-        for (&(feet, color_index, height_frac), &(clip, time_s)) in bodies.iter().zip(poses) {
-            let posed: MeshModel = self.body.make_squashed(clip, time_s, height_frac);
+        let posed_bodies: Vec<MeshModel> = bodies
+            .par_iter()
+            .zip(poses)
+            .map(|(&(_, _, height_frac), &(clip, time_s))| {
+                self.body.make_squashed(clip, time_s, height_frac)
+            })
+            .collect();
+        for (&(feet, color_index, height_frac), posed) in bodies.iter().zip(posed_bodies) {
             shared.add_avatar(feet, color_index, colors, Some(posed), height_frac);
         }
         for &(feet, color_index, (clip, time_s)) in corpses {
