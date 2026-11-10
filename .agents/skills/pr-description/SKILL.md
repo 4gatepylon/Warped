@@ -15,10 +15,13 @@ Files in this skill:
 - [`wishlist-transitions.md`](wishlist-transitions.md): the line every wishlist commit carries. Read it before
   any commit that changes a wishlist checklist.
 
-Keep every file here under 400 lines. Split a longer one by topic, and have each file name the files to read
-for what it leaves out, so that an agent that finds a gap knows where to look next.
+> NOTE: If you modify this skill (at the user's request), keep every file in it under 400 lines. Split a longer
+> file by topic, for progressive disclosure, and have each file name the files to read for what it leaves out,
+> so that an agent that finds a gap knows where to look next.
 
 ## Pull requests
+
+A PR's commits follow the "Commits" section below. That is critical for a PR with a wishlist commit.
 
 > NOTE: The template is a living document: it may change, but at any point in time every PR uses
 > the current version. If a PR doesn't fit it (a section makes no sense, or something important
