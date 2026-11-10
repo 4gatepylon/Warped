@@ -5,7 +5,7 @@
 //! window of its own through the same `level::Level`.
 //!
 //! Interface: `play_level` (a `warped_shared::app::play_level_fn_t`), and for `main.rs` the
-//! modules `args`, `level`, `platform`, `server`, `map` and `forest_layout`.
+//! modules `args`, `level`, `server`, `map`, `forest_layout` and `title`.
 //!
 //! Example: `let end: LevelEnd = warped_dark_forest::play_level(&mut level_window, &join)?;`
 //!
@@ -32,7 +32,6 @@ mod menu;
 mod minimap;
 #[allow(dead_code)]
 mod net;
-pub mod platform;
 mod render;
 mod scene;
 pub mod server;

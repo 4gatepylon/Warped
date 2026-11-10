@@ -12,18 +12,16 @@
 //!
 //! Example: `cargo test --test play_twice -- --ignored`
 
-use objc2::rc::{Retained, autoreleasepool};
-use objc2::runtime::ProtocolObject;
-use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice};
-use objc2_quartz_core::CAMetalLayer;
+use objc2::rc::autoreleasepool;
+use objc2_metal::MTLDevice;
 use sdl3::event::Event;
 use sdl3::keyboard::{Mod, Scancode};
 use warped_shared::app::{LevelEnd, LevelWindow};
+use warped_shared::metal_window::{MetalWindow, NoMatchLink, WindowOptions};
 
 use clap::Parser;
 use warped_dark_forest::args::Args;
-use warped_dark_forest::level::{Alone, Level, LevelFiles};
-use warped_dark_forest::platform::Platform;
+use warped_dark_forest::level::{Level, LevelFiles};
 
 /// `PLAY_COUNT` is how many times the forest is played in the one process.
 const PLAY_COUNT: usize = 2;
@@ -65,21 +63,18 @@ fn main() {
         "400",
     ])
     .expect("valid flags");
-    let platform: Platform = Platform::new("Dark Forest play_twice", 640, 400, false, true);
-    let layer: Retained<CAMetalLayer> = platform.metal_layer();
-    let device: Retained<ProtocolObject<dyn MTLDevice>> =
-        MTLCreateSystemDefaultDevice().expect("this Mac has no Metal device");
-    let mut event_pump = platform.sdl.event_pump().expect("SDL event pump failed");
-    let events = platform.sdl.event().expect("SDL events failed");
-    let mut alone: Alone = Alone;
-    let mut window: LevelWindow = LevelWindow {
-        sdl: &platform.sdl,
-        window: &platform.window,
-        event_pump: &mut event_pump,
-        layer: &layer,
-        device: &device,
-        match_link: &mut alone,
-    };
+    let mut metal_window: MetalWindow = MetalWindow::Open(
+        "Dark Forest play_twice",
+        (640, 400),
+        WindowOptions {
+            is_fullscreen: false,
+            is_hidden: true,
+        },
+    )
+    .expect("the window opens");
+    let events = metal_window.get_sdl().event().expect("SDL events failed");
+    let mut no_match_link: NoMatchLink = NoMatchLink;
+    let mut window: LevelWindow = metal_window.get_level_window(&mut no_match_link);
     let mut allocated_bytes_after_plays: Vec<usize> = Vec::new();
     for _ in 0..PLAY_COUNT {
         let end: Option<LevelEnd> = autoreleasepool(|_| {
@@ -93,7 +88,7 @@ fn main() {
             level.play(&mut window, &args, false).expect("played")
         });
         assert_eq!(end, Some(LevelEnd::LeaveLevel));
-        allocated_bytes_after_plays.push(device.currentAllocatedSize());
+        allocated_bytes_after_plays.push(window.device.currentAllocatedSize());
     }
     println!("play_twice: GPU bytes allocated after each play: {allocated_bytes_after_plays:?}");
     let first_bytes: usize = allocated_bytes_after_plays[0];

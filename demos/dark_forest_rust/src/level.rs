@@ -5,7 +5,7 @@
 //! `MatchLink` says the round is over, or a flag's run (a photo, a benchmark) ends. Dropping the
 //! `Level` frees its GPU resources and gives the layer back as it found it.
 //!
-//! Interface: `LevelFiles` (`Find`), `Level` (`Load`, `run_title_screen`, `play`), `Alone`.
+//! Interface: `LevelFiles` (`Find`), `Level` (`Load`, `run_title_screen`, `play`).
 //!
 //! Example:
 //!     let files: LevelFiles = LevelFiles::Find(&args)?;
@@ -17,11 +17,11 @@
 //!   centre (`render::metal::foveation`, D40) need nothing from the window but its size and its
 //!   display's refresh rate, so they work the same in the one-window app's window.
 
-use warped_shared::app::{LevelEnd, LevelWindow, MatchLink};
+use warped_shared::app::{LevelEnd, LevelWindow};
 use warped_shared::hud::get_death_lines;
-use warped_shared::match_protocol::MatchView;
 use warped_shared::match_state::Team;
 use warped_shared::menu_and_map::{Cover, MenuAndMap, MouseChange, PlayOutcome};
+use warped_shared::metal_window::set_window_title;
 use warped_shared::shot_noise;
 
 use std::path::{Path, PathBuf};
@@ -624,34 +624,6 @@ impl LevelFiles {
     }
 }
 
-/// `Alone` is the `MatchLink` of the forest run alone, outside the one-window app: no match ends
-/// its rounds and its menu has no MATCH page.
-pub struct Alone;
-
-impl MatchLink for Alone {
-    /// `is_round_over` says no: only the window's close button and the menu's QUIT page end a
-    /// game run alone.
-    ///
-    /// Example: `assert!(!Alone.is_round_over());`
-    fn is_round_over(&mut self) -> bool {
-        false
-    }
-
-    /// `get_match_view` has no match to show.
-    ///
-    /// Example: `assert!(Alone.get_match_view().is_none());`
-    fn get_match_view(&self) -> Option<&MatchView> {
-        None
-    }
-
-    /// `get_match_lines` has no MATCH page to show.
-    ///
-    /// Example: `assert!(Alone.get_match_lines().is_none());`
-    fn get_match_lines(&self) -> Option<Vec<(String, bool)>> {
-        None
-    }
-}
-
 /// `FrameEvents` is what one frame's events asked of play: the mouse's motion, the controls
 /// pressed, and whether the view (`V`) or the autopilot (`F5`) switches.
 #[derive(Default)]
@@ -1209,7 +1181,7 @@ impl Level {
             if last_title.elapsed().as_secs_f32() > 0.5 {
                 last_title = Instant::now();
                 if is_titling_window {
-                    let _ = window.window.clone().set_title(&play.status(&session));
+                    let _ = set_window_title(window.window, &play.status(&session));
                 }
             }
 

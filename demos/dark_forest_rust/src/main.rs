@@ -11,15 +11,12 @@
 use std::sync::atomic::AtomicBool;
 
 use clap::Parser;
-use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
-use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice};
-use objc2_quartz_core::CAMetalLayer;
 use warped_shared::app::LevelWindow;
+use warped_shared::metal_window::{MetalWindow, NoMatchLink, WindowOptions};
 
 use warped_dark_forest::args::Args;
-use warped_dark_forest::level::{Alone, Level, LevelFiles};
-use warped_dark_forest::platform::Platform;
+use warped_dark_forest::level::{Level, LevelFiles};
+use warped_dark_forest::title::Choice;
 use warped_dark_forest::{forest_layout, server};
 
 /// `MAP_PICTURE_SHADOW_DISTANCE_M` lets the sun's shadows reach the forest from as high as
@@ -65,26 +62,17 @@ fn main() {
     let files: LevelFiles =
         LevelFiles::Find(&args).unwrap_or_else(|message| exit_with_error(&message));
 
-    let platform: Platform = Platform::new(
+    let mut metal_window: MetalWindow = MetalWindow::Open(
         "Dark Forest",
-        args.width_pt,
-        args.height_pt,
-        args.fullscreen,
-        args.bot,
-    );
-    let layer: Retained<CAMetalLayer> = platform.metal_layer();
-    let device: Retained<ProtocolObject<dyn MTLDevice>> =
-        MTLCreateSystemDefaultDevice().expect("this Mac has no Metal device");
-    let mut event_pump = platform.sdl.event_pump().expect("SDL event pump failed");
-    let mut alone: Alone = Alone;
-    let mut window: LevelWindow = LevelWindow {
-        sdl: &platform.sdl,
-        window: &platform.window,
-        event_pump: &mut event_pump,
-        layer: &layer,
-        device: &device,
-        match_link: &mut alone,
-    };
+        (args.width_pt, args.height_pt),
+        WindowOptions {
+            is_fullscreen: args.fullscreen,
+            is_hidden: args.bot,
+        },
+    )
+    .unwrap_or_else(|error| exit_with_error(&format!("can't open the window: {error}")));
+    let mut no_match_link: NoMatchLink = NoMatchLink;
+    let mut window: LevelWindow = metal_window.get_level_window(&mut no_match_link);
     let mut level: Level = Level::Load(&window, &args, files);
     let is_title_shown: bool = !(args.no_title
         || args.host
@@ -98,10 +86,10 @@ fn main() {
         || args.video_frames.is_some());
     if is_title_shown {
         match level.run_title_screen(&mut window) {
-            None | Some(warped_dark_forest::title::Choice::Quit) => return,
-            Some(warped_dark_forest::title::Choice::PlayAlone) => {}
-            Some(warped_dark_forest::title::Choice::Host) => args.host = true,
-            Some(warped_dark_forest::title::Choice::Join) => args.join = Some("auto".to_string()),
+            None | Some(Choice::Quit) => return,
+            Some(Choice::PlayAlone) => {}
+            Some(Choice::Host) => args.host = true,
+            Some(Choice::Join) => args.join = Some("auto".to_string()),
         }
     }
     if let Err(message) = level.play(&mut window, &args, true) {

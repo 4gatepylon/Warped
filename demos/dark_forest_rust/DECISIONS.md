@@ -284,8 +284,8 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
     display sync and drawable size back, since the app's layer is not framebuffer-only. In the app the forest leaves
     the window's title alone and releases the mouse when it returns.
   - **Not yet:** the forest doesn't read `LevelJoin::player_settings_path` (its keys and look speed are still its own
-    constants, Lunar Surface's defaults), and `main.rs` still opens its window with `platform.rs` until the shared
-    `warped_shared::metal_window` lands. **Gives up:** nothing in play; the wormhole lens atlas is drawn again each
+    constants, Lunar Surface's defaults). `main.rs` opens its window with the shared `warped_shared::metal_window`
+    (`platform.rs` removed) and plays with its `NoMatchLink`, as every level run alone does. **Gives up:** nothing in play; the wormhole lens atlas is drawn again each
     time the level starts (about 0.8 s).
 
 ## Follow-ups for the next agent
