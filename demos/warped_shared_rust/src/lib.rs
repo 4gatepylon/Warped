@@ -25,6 +25,7 @@
 //! - `app`: the interface between the one-window app (`../warped_mvp_rust/`) and a level.
 //! - `match_state`, `match_protocol`, `match_menu`: the match's rules, what its server and clients
 //!   share (levels file, view, client, network beacon) and its progression page.
+//! - `game_settings`: the game master's settings, overrides of each level's server settings.
 //! - `page`: a menu page's shapes in the debug font, and drawing them with SDL.
 //! - `metal_window`: the one window a program draws in with Metal (SDL3 window, `CAMetalLayer`,
 //!   device, event pump), lent to a level as an `app::LevelWindow`.
@@ -42,6 +43,7 @@ pub mod app_bundle;
 pub mod avatar_model;
 pub mod fps_demo_assets;
 pub mod gait;
+pub mod game_settings;
 pub mod geometry;
 pub mod health;
 #[cfg(target_os = "macos")]

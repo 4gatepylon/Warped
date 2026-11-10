@@ -115,3 +115,4 @@ black_hole:  # On Lunar Surface, each console turned off grows the black hole, a
 glass:  # City Sphere: shots fired on the glass level (inside the glass shell) reflect off the glass about its normal; shots from the street stop at it.
   max_bounce_count: 2  # The most reflections a shot makes (0 for none); the next time it meets the glass it stops there.
   range_m: 90.0  # How far a shot goes in all, every leg after a reflection counted (the sphere is 48 m across).
+  reflectivity_frac: 1.0  # Share of the range left that each reflection keeps (1 for a perfect mirror, 0 stops a shot at its first; W-158).

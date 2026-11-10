@@ -29,7 +29,9 @@ make join-game SERVER=127.0.0.1      # terminal 2: your window; press 1 (blue) o
   over the game while you keep playing.
 - The blizzard (the white column in the middle, the map's only one): inside, you walk at half speed and freeze
   (health falls 8% a second, with the same red, blur and shake as a shot), and a laser goes only 8 m into it. It is
-  in the map's `regions.blizzards` with its numbers (DECISIONS S3).
+  in the map's `regions.blizzards` with its numbers (DECISIONS S3). `blizzard.radius_per_map_radius` in
+  `server_settings.yaml` widens or narrows it (W-158, per-map game settings; 0 for none), on the server and in
+  every window.
 - Everything else plays as on Lunar Surface, W-126 (same play in every level): the same settings files, and a jump
   as high and as long (DECISIONS S12).
 

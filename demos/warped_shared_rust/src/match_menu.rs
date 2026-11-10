@@ -786,6 +786,7 @@ mod tests {
                     client_args: Vec::new(),
                     stand_in_for: None,
                     takes_bot_label: true,
+                    server_settings: None,
                     map_picture: None,
                 })
                 .collect(),

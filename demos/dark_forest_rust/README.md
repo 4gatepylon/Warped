@@ -116,7 +116,7 @@ The match session (`demos/warped_match_rust/`) starts levels with these flags:
 
 | Command | Does |
 | --- | --- |
-| `dark-forest --serve --port <port> [--map <map.json>] [--level-result-file <path>]` | runs a server without a window. With `--level-result-file`, once a team has turned off every console of the other, it writes `{"winner": "blue"}` or `{"winner": "red"}` to `<path>.partial`, renames it to `<path>`, and keeps running (no new game) until killed. Without it, a new game starts 10 s after a win. |
+| `dark-forest --serve --port <port> [--map <map.json>] [--level-result-file <path>] [--server-settings <path>]` | runs a server without a window, playing by `--server-settings` (a whole copy of [`server_settings.yaml`](server_settings.yaml), YAML or JSON; the match server writes one each round with the game master's settings) or the built-in file. With `--level-result-file`, once a team has turned off every console of the other, it writes `{"winner": "blue"}` or `{"winner": "red"}` to `<path>.partial`, renames it to `<path>`, and keeps running (no new game) until killed. Without it, a new game starts 10 s after a win. |
 | `dark-forest --join <address> --port <port> [--map <map.json>] [--team blue\|red]` | joins a server, on that team at once if `--team` is given. |
 | `dark-forest --join <address> --port <port> --bot --exit-after-s <s> --team <team> [--bot-objective consoles]` | a bot for tests and matches, in a hidden window that draws nothing. It hunts the other team's players and shoots them; with `--bot-objective consoles` it walks instead (by the ladders where needed) to each of the other team's consoles, holds `E` once in reach (which the server checks), and logs `bot reached console <i> on foot in <t> s`, until its team wins. |
 

@@ -239,6 +239,9 @@ struct Args {
     /// With --serve: write {"winner": "blue"|"red"} here on a win, and start no new game.
     #[arg(long)]
     level_result_file: Option<PathBuf>,
+    /// With --serve or --host: the server settings file (default: the built-in server_settings.yaml).
+    #[arg(long)]
+    server_settings: Option<PathBuf>,
     /// A name the match server gives this window or bot; accepted and ignored.
     #[arg(long)]
     label: Option<String>,
@@ -912,6 +915,7 @@ fn main() {
             map_path,
             level_result_file: args.level_result_file.clone(),
             game_password: Vec::new(),
+            server_settings: args.server_settings.clone(),
         };
         if let Err(error) = server::run(&options, &AtomicBool::new(false)) {
             eprintln!("error: {error}");
@@ -1010,6 +1014,7 @@ fn main() {
                 map_path: map_path.clone(),
                 level_result_file: args.level_result_file.clone(),
                 game_password: Vec::new(),
+                server_settings: args.server_settings.clone(),
             };
             std::thread::spawn(move || {
                 if let Err(error) = server::run(&options, &AtomicBool::new(false)) {

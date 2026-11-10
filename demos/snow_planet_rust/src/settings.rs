@@ -13,7 +13,8 @@
 //! Must know:
 //! - Every key is required and unknown keys fail, so a typo can't silently keep a default. The only
 //!   exceptions are named: player keys removed since saves began (`REMOVED_PLAYER_KEYS`) are
-//!   dropped, and those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing.
+//!   dropped, those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing, and
+//!   so does the server's `blizzard` section (W-158), so older server settings files still load.
 //! - The built-in settings are the two files themselves, compiled in.
 //! - `PerPlayerSettings` exists only on macOS, where the game's window runs (its keys are SDL's);
 //!   the game server also builds for Linux.
@@ -44,7 +45,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 22] = [
     "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
     "sniper.reload_s",
@@ -66,6 +67,7 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
+    "blizzard.radius_per_map_radius",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
 #[cfg(target_os = "macos")]
@@ -117,6 +119,26 @@ pub struct PerPlayerSettings {
     pub minimap: MinimapSettings,
 }
 
+/// `BlizzardSettings` is Snow Planet's own game setting (W-158, per-map game settings): how wide
+/// each blizzard is, its radius times the map's (0 for none), where it slows and freezes players
+/// and hides what is inside.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct BlizzardSettings {
+    pub radius_per_map_radius: f64,
+}
+
+impl Default for BlizzardSettings {
+    /// `default` is the map's own blizzards.
+    ///
+    /// Example: `let blizzard: BlizzardSettings = BlizzardSettings::default();`
+    fn default() -> BlizzardSettings {
+        BlizzardSettings {
+            radius_per_map_radius: 1.0,
+        }
+    }
+}
+
 /// `ServerSettings` is everything in `server_settings.yaml`.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -135,6 +157,8 @@ pub struct ServerSettings {
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
     pub black_hole: BlackHoleSettings,
+    #[serde(default)]
+    pub blizzard: BlizzardSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is

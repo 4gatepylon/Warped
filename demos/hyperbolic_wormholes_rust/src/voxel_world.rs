@@ -907,7 +907,8 @@ impl VoxelWorld {
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
-    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
+    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows),
+    /// under that gravity times `surface.gravity_per_jump_gravity` (the jump's speed kept).
     ///
     /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
     pub fn set_settings(&mut self, settings: ServerSettings) {
@@ -921,7 +922,8 @@ impl VoxelWorld {
             jump_m_per_s,
             ..self.map_player
         };
-        self.gravity_m_per_s2 = jump_m_per_s / half_jump_s;
+        self.gravity_m_per_s2 =
+            jump_m_per_s / half_jump_s * settings.surface.gravity_per_jump_gravity;
         self.settings = settings;
     }
 

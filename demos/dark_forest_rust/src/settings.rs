@@ -2,7 +2,8 @@
 //! long a console takes to switch off, how far it reaches, how long a player waits to respawn,
 //! both guns (with the rifle hits that eliminate a player), aiming, movement, sprint energy, how a
 //! hit slows, the flashlight and thrown wormholes; and the head bob, a player setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
-//! settings, under the same names and with the same values (W-126).
+//! settings, under the same names and with the same values (W-126), in its own
+//! `server_settings.yaml` (built in, or `--server-settings`).
 //!
 //! Example: `let settings: ServerSettings = ServerSettings::Builtin();`
 //!
@@ -14,8 +15,11 @@
 //! level).
 
 use std::error::Error;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use warped_shared::game_settings::{parse_settings_text, read_settings_file};
 pub use warped_shared::play_settings::{
     AimSettings, BeamSpeckleSettings, ConsoleSettings, FlashlightSettings, HeadBobSettings,
     HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings, SniperSettings,
@@ -37,6 +41,9 @@ pub struct WormholeSettings {
     pub rifle_hits_to_destroy: u8,
     pub hit_flash_s: f64,
 }
+
+/// `BUILTIN_SERVER_YAML` is `server_settings.yaml`, built into the program.
+const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 
 /// `HIT_EFFECTS` is the Lunar Surface demo's `hit_effects` player setting
 /// (`demos/hyperbolic_wormholes_rust/player_settings.yaml`): how long a hit's red, shake and blur
@@ -82,90 +89,32 @@ pub struct ServerSettings {
 }
 
 impl ServerSettings {
-    /// `Builtin` gives the default settings.
+    /// `Builtin` gives the settings in `server_settings.yaml` as this program was built with it.
     ///
     /// Example: `let settings = ServerSettings::Builtin();`
     #[allow(non_snake_case)]
     pub fn Builtin() -> ServerSettings {
-        ServerSettings {
-            consoles: ConsoleSettings {
-                hold_to_disable_s: 10.0,
-                reach_m: 3.0,
-            },
-            respawn: RespawnSettings { delay_s: 3.0 },
-            wormholes: WormholeSettings {
-                throw_speed_m_per_s: 16.0,
-                throw_up_rad: 0.3,
-                gravity_m_per_s_per_s: 20.0,
-                max_flight_s: 4.0,
-                sniper_hits_to_destroy: 2,
-                rifle_hits_to_destroy: 5,
-                hit_flash_s: 0.25,
-            },
-            sniper: SniperSettings {
-                shot_s: 0.25,
-                reload_s: 2.0,
-                hits_to_eliminate: 1,
-                beam_speed_m_per_s: 250.0,
-                beam_trail_s: 0.25,
-                noise_mean_rad: 0.003,
-                noise_max_rad: 0.015,
-                beam_speckle_mean_frac: 0.2,
-                beam_speckle_max_frac: 0.5,
-            },
-            rifle: RifleSettings {
-                shots_per_s: 8.0,
-                pulse_s: 0.06,
-                beam_speed_m_per_s: 250.0,
-                beam_trail_s: 0.05,
-                shots_until_overheat: 20,
-                cool_down_s: 2.0,
-                head_hits_to_eliminate: 2,
-                body_hits_to_eliminate: 12,
-                recoil_up_rad: 0.0075,
-                recoil_sideways_rad: 0.0025,
-                recoil_settle_s: 0.08,
-                noise_start_rad: 0.002,
-                noise_max_rad: 0.02,
-                beam_speckle_start_frac: 0.0,
-                beam_speckle_max_frac: 0.5,
-            },
-            beam_speckle: BeamSpeckleSettings {
-                black_frac: 0.1,
-                white_frac: 0.1,
-                dropout_frac: 0.8,
-            },
-            aim: AimSettings {
-                sniper_zoom: 2.5,
-                rifle_zoom: 1.5,
-                zoom_s: 0.15,
-            },
-            movement: MovementSettings {
-                walk_speed_per_map_speed: 1.6,
-                sprint_speed_per_map_speed: 1.72,
-                jump_height_m: 1.25,
-                jump_time_per_map_jump_time: 1.0 / 3.0,
-                crouch_speed_frac: 0.5,
-                crouch_eye_height_frac: 0.6,
-                crouch_s: 0.15,
-                shoot_after_moving_s: 0.25,
-            },
-            sprint_energy: SprintEnergySettings {
-                drain_s: 7.5,
-                refill_crouching_s: 7.5,
-                refill_walking_s: 15.0,
-            },
-            when_hit: WhenHitSettings {
-                slow_speed_frac: 0.5,
-                slow_s: 1.0,
-            },
-            flashlight: FlashlightSettings {
-                cone_half_angle_rad: 0.3,
-                soft_edge_rad: 0.08,
-                range_m: 25.0,
-                brightness_frac: 2.0,
-            },
-        }
+        ServerSettings::FromText(BUILTIN_SERVER_YAML, "server_settings.yaml (built in)")
+            .expect("the built-in server_settings.yaml is valid (tested)")
+    }
+
+    /// `Load` reads settings from a file like `server_settings.yaml` (YAML or JSON), every key
+    /// required: `--server-settings`, such as the match server's copy for each round.
+    ///
+    /// Example: `let settings = ServerSettings::Load(Path::new("fast.yaml"))?;`
+    #[allow(non_snake_case)]
+    pub fn Load(path: &Path) -> Result<ServerSettings, Box<dyn Error>> {
+        let value: Value = read_settings_file(path)?;
+        serde_json::from_value(value).map_err(|error| format!("{}: {error}", path.display()).into())
+    }
+
+    /// `FromText` reads settings from the text of a settings file, naming `source` in its errors.
+    ///
+    /// Example: `let settings = ServerSettings::FromText(BUILTIN_SERVER_YAML, "built in")?;`
+    #[allow(non_snake_case)]
+    fn FromText(text: &str, source: &str) -> Result<ServerSettings, Box<dyn Error>> {
+        let value: Value = parse_settings_text(text, source)?;
+        serde_json::from_value(value).map_err(|error| format!("{source}: {error}").into())
     }
 
     /// `FromJson` reads settings sent by a game server (`to_json`).
@@ -232,6 +181,7 @@ pub fn read_lunar_setting(file_name: &str, section_path: &[&str], key: &str) -> 
 /// | Partitioning | Part | Covered by |
 /// | --- | --- | --- |
 /// | source | built in, sent as JSON | `test_builtin_survives_json` |
+/// | | a file (`--server-settings`): JSON of the built-in, one key missing, no file | `test_settings_files_load_whole` |
 /// | Lunar Surface file | `server_settings.yaml` | `test_guns_and_aim_match_lunar_surface` |
 /// | | movement, sprint energy, when hit, flashlight | `test_movement_matches_lunar_surface` |
 /// | | `player_settings.yaml` (head bob, hit effects) | `test_head_bob_matches_lunar_surface` |
@@ -370,6 +320,24 @@ mod tests {
             let lunar: f64 = read_lunar_setting("server_settings.yaml", &["wormholes"], key);
             assert_eq!(value.as_f64().unwrap(), lunar, "wormholes.{key}");
         }
+    }
+
+    /// `test_settings_files_load_whole` checks `Load` reads a whole settings file (the match
+    /// server's JSON copy of the built-in ones) and refuses one with a key missing, or none.
+    #[test]
+    fn test_settings_files_load_whole() {
+        let folder = std::env::temp_dir().join(format!("forest_settings_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut value: serde_json::Value = serde_json::to_value(ServerSettings::Builtin()).unwrap();
+        value["respawn"]["delay_s"] = serde_json::json!(7.5);
+        let path = folder.join("round_1_server_settings.yaml");
+        std::fs::write(&path, value.to_string()).unwrap();
+        assert_eq!(ServerSettings::Load(&path).unwrap().respawn.delay_s, 7.5);
+        value["respawn"].as_object_mut().unwrap().remove("delay_s");
+        std::fs::write(&path, value.to_string()).unwrap();
+        assert!(ServerSettings::Load(&path).is_err());
+        assert!(ServerSettings::Load(&folder.join("none.yaml")).is_err());
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     /// `test_builtin_survives_json` checks `FromJson` inverts `to_json`.

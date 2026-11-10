@@ -521,17 +521,22 @@ pub struct Freezing {
 
 impl Freezing {
     /// `FromMapName` reads the blizzards of the built-in map `map_name`, in the nearly flat space
-    /// the game puts a Euclidean map in (`Map::curve_flat`).
+    /// the game puts a Euclidean map in (`Map::curve_flat`), each `radius_per_map_radius` times
+    /// as wide (the server settings' `blizzard`).
     ///
-    /// Example: `let freezing = Freezing::FromMapName("snow_planet")?;`
+    /// Example: `let freezing = Freezing::FromMapName("snow_planet", 1.0)?;`
     #[allow(non_snake_case)]
-    pub fn FromMapName(map_name: &str) -> Result<Freezing> {
+    pub fn FromMapName(map_name: &str, radius_per_map_radius: f64) -> Result<Freezing> {
         let mut map: Map = Map::Builtin(map_name)?;
         if map.is_euclidean() {
             map.curve_flat(FLAT_CURVATURE_RADIUS_M);
         }
+        let mut blizzards: Vec<Blizzard> = map.get_blizzards();
+        for blizzard in &mut blizzards {
+            blizzard.radius_m *= radius_per_map_radius;
+        }
         Ok(Freezing {
-            blizzards: map.get_blizzards(),
+            blizzards,
             curvature_radius_m: map.get_curvature_radius_m(),
         })
     }

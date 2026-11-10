@@ -1,0 +1,94 @@
+# `server_settings.yaml` holds the numbers that shape play in Dark Forest: consoles, respawning, thrown
+# wormholes, both guns and how their beams speckle, aiming, movement, sprint energy, how a hit slows a player
+# and the flashlight. They are Lunar Surface's (`../hyperbolic_wormholes_rust/server_settings.yaml`, W-126)
+# but for the forest's own walking and sprinting speeds; the sections Lunar Surface has and the forest
+# doesn't use are left out. The game server reads it (built in, or `--server-settings`) and sends it to every
+# player who joins.
+#
+# Interface:
+#     Copy this file, change the numbers, and pass the copy to the server with `--server-settings` (`dark-forest
+#     --serve` or `dark-forest-server`). Every key is required and unknown keys fail. JSON works too. The match
+#     server writes each round's copy, with the game master's settings laid over this file.
+#
+# Example:
+#     cp server_settings.yaml fast.yaml  # edit fast.yaml, then:
+#     .build/release/dark-forest --serve --server-settings fast.yaml
+
+consoles:
+  hold_to_disable_s: 10.0  # Seconds of holding E that turn off one of the other team's consoles.
+  reach_m: 3.0  # How close a player must be to a console to turn it off.
+
+respawn:
+  delay_s: 3.0  # Seconds a player who was hit waits before coming back (0 for at once).
+
+wormholes:  # Q throws your purple wormhole mouth, then your green one, and so on; once both are down they link.
+  throw_speed_m_per_s: 16.0  # How fast a mouth leaves your hand.
+  throw_up_rad: 0.3  # How far above the crosshair it leaves (0 for along it).
+  gravity_m_per_s_per_s: 20.0  # How fast its flight curves down (on the house, a fast throw upward escapes the curved ground).
+  max_flight_s: 4.0  # Seconds it may fly before it fizzles without landing.
+  sniper_hits_to_destroy: 2  # Sniper shots through an enemy's mouths (either one) that destroy both.
+  rifle_hits_to_destroy: 5  # Rifle shots through an enemy's mouths (either one) that destroy both.
+  hit_flash_s: 0.25  # Seconds both mouths of a pair flash red after a hit.
+
+sniper:  # Gun 1 (key 1): the thin laser wand, one shot per click.
+  shot_s: 0.25  # How long each shot hits whatever the crosshair crosses.
+  reload_s: 2.0  # Seconds from one shot until the next can fire (0 for none); its ammo bar is one block.
+  hits_to_eliminate: 1  # Hits that eliminate a player.
+  beam_speed_m_per_s: 250.0  # How fast the beam flies out from the tip.
+  beam_trail_s: 0.25  # How long each point of the beam stays lit after the beam's front passes it.
+  noise_mean_rad: 0.003  # Mean angle a shot strays from the crosshair, sampled per shot, exponentially (0 for none).
+  noise_max_rad: 0.015  # The most a shot strays: a larger sampled angle is cut to this (0 for none).
+  beam_speckle_mean_frac: 0.2  # Mean share of beam pixels speckled each frame; exponential per shot (0 for none).
+  beam_speckle_max_frac: 0.5  # The most of the beam that speckles: a larger sampled share is cut to this (0 for none).
+
+rifle:  # Gun 2 (key 2): the grey block, fires while the button is held.
+  shots_per_s: 8.0  # Shots a second while the button is held.
+  pulse_s: 0.06  # How long each shot hits whatever the crosshair crosses.
+  beam_speed_m_per_s: 250.0  # How fast each shot's beam flies out from the tip.
+  beam_trail_s: 0.05  # How long each point of the beam stays lit after the beam's front passes it.
+  shots_until_overheat: 20  # Shots in a row before it overheats.
+  cool_down_s: 2.0  # Seconds without firing to cool down fully.
+  head_hits_to_eliminate: 2  # Hits to the head (the top half-meter) that eliminate a player.
+  body_hits_to_eliminate: 12  # Hits to the body that eliminate a player.
+  recoil_up_rad: 0.0075  # How far each shot kicks the view up (0 for none).
+  recoil_sideways_rad: 0.0025  # How far each shot kicks the view left or right, alternately (0 for none).
+  recoil_settle_s: 0.08  # Seconds the gun takes to settle after a shot's jolt (0 for none).
+  noise_start_rad: 0.002  # Most a shot strays from the crosshair with the rifle cold, sampled per shot (0 for none).
+  noise_max_rad: 0.02  # Most a shot strays at full heat; the limit grows in step with the heat (0 for none).
+  beam_speckle_start_frac: 0.0  # Share of the beam's pixels speckled each frame with the rifle cold (0 for none).
+  beam_speckle_max_frac: 0.5  # ...growing in step with the heat to this share at full heat (0 for none).
+
+beam_speckle:  # How a laser beam's speckled pixels look, with both guns: shares of them that add up to 1 (0 allowed).
+  black_frac: 0.1  # Share painted black where the beam shines.
+  white_frac: 0.1  # Share turned white where the beam shines.
+  dropout_frac: 0.8  # Share where the beam drops out, so what is behind it shows through.
+
+aim:  # Holding the aim control (the right button) zooms in; the mouse turns the view more slowly by the same factor.
+  sniper_zoom: 2.5  # How much closer things look with the sniper (gun 1) at full zoom (1 for no zoom).
+  rifle_zoom: 1.5  # How much closer things look with the rifle (gun 2) at full zoom (1 for no zoom).
+  zoom_s: 0.15  # Seconds to zoom fully in or out.
+
+movement:
+  walk_speed_per_map_speed: 1.6  # Walking speed, times the map's (the forest's own).
+  sprint_speed_per_map_speed: 1.72  # Sprinting speed, times the map's (the forest's own).
+  jump_height_m: 1.25  # How high a jump rises. Blocks are 1 m tall.
+  jump_time_per_map_jump_time: 0.3333333333333333  # Time in the air, times the map's; sets gravity.
+  crouch_speed_frac: 0.5  # Speed while crouching (holding Ctrl), as a fraction of walking speed.
+  crouch_eye_height_frac: 0.6  # Eye height while crouching, as a fraction of standing eye height.
+  crouch_s: 0.15  # Seconds it takes to crouch down or stand up.
+  shoot_after_moving_s: 0.25  # Seconds after the last movement key (moving upright, jumping) until a shot (0 for none).
+
+sprint_energy:
+  drain_s: 7.5  # Seconds of sprinting that empty a full bar.
+  refill_crouching_s: 7.5  # Seconds to refill an empty bar while crouched (as fast as sprinting empties it).
+  refill_walking_s: 15.0  # Seconds to refill it while walking or standing upright (half as fast).
+
+when_hit:  # How a hit slows the player who takes it (how it looks is each player's own choice).
+  slow_speed_frac: 0.5  # Their walking and sprinting speed while slowed, as a fraction (1 for not slowed).
+  slow_s: 1.0  # Seconds they stay slowed.
+
+flashlight:  # It shines while the right button is held, lighting the scene in a cone from your eye.
+  cone_half_angle_rad: 0.3  # Half the cone's opening angle, out to where its edge starts to soften.
+  soft_edge_rad: 0.08  # How wide the cone's soft edge is.
+  range_m: 25.0  # Distance at which its light has fallen to half.
+  brightness_frac: 2.0  # How bright it is, as a fraction of full sunlight.

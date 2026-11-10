@@ -25,6 +25,7 @@
 mod app_state;
 mod children;
 mod game_menu;
+mod game_settings_page;
 mod levels_manifest;
 mod main_menu;
 mod menu_page;
@@ -41,6 +42,9 @@ use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
+use warped_shared::game_settings::{
+    GameSettings, SettingsMessage, SettingsScope, read_settings_file,
+};
 use warped_shared::key_bindings::get_pressed_control;
 use warped_shared::match_protocol::{
     LevelEntry, MATCH_DISCOVERY_PORT, MATCH_PORT, MatchView, Phase,
@@ -53,6 +57,7 @@ use warped_shared::player_settings::{PerPlayerSettings, get_saved_player_setting
 use crate::app_state::{App, Ports, format_utc_now, get_address_shapes, get_credits_shapes};
 use crate::children::make_run_folder;
 use crate::game_menu::{GameMenu, LevelMenu, get_level_shapes};
+use crate::game_settings_page::GameSettingsPage;
 use crate::levels_manifest::{Picture, get_levels_manifest_path, load_levels, load_map_pictures};
 use crate::main_menu::MainMenu;
 use crate::menu_page::{MenuInput, page_t};
@@ -63,6 +68,10 @@ use crate::player_settings_page::PlayerSettingsPage;
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const WINDOW_TITLE: &str = "Warped";
+const REPOSITORY_FROM_CRATE: &str = "../..";
+const SETTINGS_FILE_NAME: &str = "server_settings.yaml";
+const SAMPLE_SHARED_KEY: &str = "respawn.delay_s";
+const SAMPLE_SHARED_VALUE: f64 = 5.0;
 const DEFAULT_LEVEL_PORT: u16 = 47_852;
 const FRAME_MS: u64 = 16;
 
@@ -264,6 +273,33 @@ fn make_sample_view(levels: &[LevelEntry]) -> MatchView {
     }
 }
 
+/// `make_sample_settings_page` gives the game master's settings page over the levels' own
+/// settings files in this checkout (each `<folder>/server_settings.yaml`, none for a level without
+/// one), with a shared and a level's change, for the screen pictures.
+///
+/// Example: `let page = make_sample_settings_page(&levels)?;`
+fn make_sample_settings_page(levels: &[LevelEntry]) -> Result<GameSettingsPage> {
+    let repository: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join(REPOSITORY_FROM_CRATE);
+    let mut defaults: Vec<Option<serde_json::Value>> = Vec::new();
+    for level in levels {
+        let path: PathBuf = repository.join(&level.folder).join(SETTINGS_FILE_NAME);
+        defaults.push(match path.exists() {
+            true => Some(read_settings_file(&path)?),
+            false => None,
+        });
+    }
+    let mut settings: GameSettings = GameSettings::New(defaults);
+    settings.apply(&SettingsMessage::Set {
+        scope: SettingsScope::Shared,
+        key: SAMPLE_SHARED_KEY.to_string(),
+        value: SAMPLE_SHARED_VALUE,
+    })?;
+    let names: Vec<String> = levels.iter().map(|level| level.name.clone()).collect();
+    let mut page: GameSettingsPage = GameSettingsPage::New(names);
+    page.update(&settings);
+    Ok(page)
+}
+
 /// `save_screen_pictures` draws every screen without a window at the arguments' size into a run
 /// folder, as PNGs, and prints their folder.
 ///
@@ -290,10 +326,19 @@ fn save_screen_pictures(
     free_view.state.record_free_round(Team::Red);
     let settings_page: PlayerSettingsPage =
         PlayerSettingsPage::New(&PerPlayerSettings::Builtin(), player_settings_path);
+    let game_settings_page: GameSettingsPage = make_sample_settings_page(levels)?;
+    let mut game_settings_end_page: GameSettingsPage = make_sample_settings_page(levels)?;
+    game_settings_end_page.handle(MenuInput::Up);
     let screens: Vec<(&str, page_t)> = vec![
         ("main_menu", main_menu.get_shapes(&main_rows, levels, None)),
         ("join_by_address", get_address_shapes("192.168.1.", None)),
         ("player_settings", settings_page.get_shapes()),
+        ("game_settings", game_settings_page.get_shapes()),
+        ("game_settings_levels", game_settings_end_page.get_shapes()),
+        (
+            "game_settings_waiting",
+            GameSettingsPage::New(Vec::new()).get_shapes(),
+        ),
         ("credits", get_credits_shapes()),
         (
             "game_menu_connecting",

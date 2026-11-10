@@ -18,6 +18,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use warped_shared::game_settings::SettingsMessage;
 use warped_shared::match_menu::{PageClick, get_click_target};
 use warped_shared::match_protocol::{
     LevelEntry, MATCH_PORT, MatchClient, MatchListener, MatchView,
@@ -30,6 +31,7 @@ use crate::children::{GameKind, HostedGame, Programs, make_run_folder};
 use crate::game_menu::{
     GameAction, GameMenu, LevelMenu, LevelMenuAction, get_level_shapes, get_round,
 };
+use crate::game_settings_page::{GameSettingsOutcome, GameSettingsPage};
 use crate::levels_manifest::Picture;
 use crate::main_menu::{MainAction, MainMenu, MainRow};
 use crate::menu_page::{LINE, MARGIN, MenuInput, MenuRow, push_heading, push_rows, push_title};
@@ -37,6 +39,7 @@ use crate::player_settings_page::{PageOutcome, PlayerSettingsPage};
 use crate::screens::{Navigator, Screen};
 
 const PLAY_RESEND_S: f64 = 0.5;
+const SETTINGS_REQUEST_PERIOD_S: f64 = 0.5;
 const SMALL_PAGE_SIZE: [f32; 2] = [640.0, 455.0];
 const ADDRESS_HELP: &str =
     "Type the address (e.g. 192.168.1.20 or 192.168.1.20:47850). Return joins, Escape goes back.";
@@ -123,6 +126,8 @@ pub struct App {
     game_menu: GameMenu,
     level_menu: LevelMenu,
     player_page: Option<PlayerSettingsPage>,
+    game_settings_page: Option<GameSettingsPage>,
+    settings_requested_at: Option<Instant>,
     address_text: String,
     address_message: Option<String>,
     levels: Vec<LevelEntry>,
@@ -163,6 +168,8 @@ impl App {
             game_menu: GameMenu::New(),
             level_menu: LevelMenu::New(),
             player_page: None,
+            game_settings_page: None,
+            settings_requested_at: None,
             address_text: String::new(),
             address_message: None,
             levels,
@@ -243,6 +250,7 @@ impl App {
     fn leave(&mut self) {
         self.client = None;
         self.pending_play = None;
+        self.game_settings_page = None;
         self.navigator.leave_game();
     }
 
@@ -306,6 +314,48 @@ impl App {
         self.navigator.open(Screen::PlayerSettings);
     }
 
+    /// `open_game_settings` opens the game master's settings page over the game menu; it asks the
+    /// match server for the settings at once.
+    ///
+    /// Example: `self.open_game_settings();`
+    fn open_game_settings(&mut self) {
+        let level_names: Vec<String> = self.get_view().map_or(Vec::new(), |view| {
+            view.levels.iter().map(|level| level.name.clone()).collect()
+        });
+        self.game_settings_page = Some(GameSettingsPage::New(level_names));
+        self.settings_requested_at = None;
+        self.navigator.open(Screen::GameSettings);
+    }
+
+    /// `handle_game_settings` applies an input to the game master's settings page, sending each
+    /// change to the match server.
+    ///
+    /// Example: `self.handle_game_settings(MenuInput::Right);`
+    fn handle_game_settings(&mut self, input: MenuInput) {
+        let page: &mut GameSettingsPage = self
+            .game_settings_page
+            .as_mut()
+            .expect("the game settings page is open");
+        match page.handle(input) {
+            GameSettingsOutcome::Stay => {}
+            GameSettingsOutcome::Send(message) => {
+                let result: Result<(), String> = match &mut self.client {
+                    Some(client) => client
+                        .send_settings(&message)
+                        .map_err(|error| error.to_string()),
+                    None => Err("You left the game.".to_string()),
+                };
+                if let Err(error) = result {
+                    page.show_message(error);
+                }
+            }
+            GameSettingsOutcome::Close => {
+                self.game_settings_page = None;
+                self.navigator.go_back();
+            }
+        }
+    }
+
     /// `click` applies a left click at `at` in a window of `size` (both in window points): on the
     /// game menu, a click on a level of the match's status plays it freely (the game master's
     /// choice), and during free play the "back to the match" button goes back.
@@ -360,6 +410,7 @@ impl App {
                     self.navigator.go_back();
                 }
             }
+            Screen::GameSettings => self.handle_game_settings(input),
             Screen::GameMenu => self.handle_game_menu(input),
             Screen::Level => {
                 if input == MenuInput::Back {
@@ -469,6 +520,10 @@ impl App {
                     );
                     Ok(())
                 }
+                GameAction::OpenGameSettings => {
+                    self.open_game_settings();
+                    Ok(())
+                }
                 GameAction::OpenPlayerSettings => {
                     self.open_player_settings();
                     Ok(())
@@ -524,6 +579,20 @@ impl App {
             self.main_menu.message = Some(format!("Lost the game: {error}"));
             self.leave();
             return;
+        }
+        if let Some(page) = &mut self.game_settings_page {
+            if self
+                .settings_requested_at
+                .is_none_or(|at| at.elapsed().as_secs_f64() >= SETTINGS_REQUEST_PERIOD_S)
+            {
+                if let Err(error) = client.send_settings(&SettingsMessage::Request) {
+                    page.show_message(error.to_string());
+                }
+                self.settings_requested_at = Some(Instant::now());
+            }
+            if let Some(settings) = &client.settings {
+                page.update(settings);
+            }
         }
         if let (Some((choice, sent_at)), Some(view)) = (self.pending_play, &client.view) {
             if view.state.get_free_play().map(|free_play| free_play.level) == choice {
@@ -603,6 +672,11 @@ impl App {
                 .expect("the settings page is open")
                 .get_shapes(),
             Screen::Credits => get_credits_shapes(),
+            Screen::GameSettings => self
+                .game_settings_page
+                .as_ref()
+                .expect("the game settings page is open")
+                .get_shapes(),
             Screen::GameMenu => {
                 let label: String = self
                     .client
@@ -671,11 +745,13 @@ mod tests {
     //! | Following the match | no team (stays in the game menu), a round starts (level), Escape (in-level menu), exit (game menu, not re-entered), rejoin (level), the round ends (game menu), Escape (main menu) | `the_app_follows_the_match_into_and_out_of_levels` |
     //! | Game master | a choice sent until the server's view shows it | `the_game_masters_choice_is_sent_until_taken` |
     //! | Clicks on the game menu | elsewhere (nothing), on the first level (free play there) | `clicking_a_level_plays_it` |
+    //! | Game master's settings | the page asks, shows the answer, sends a step up, Escape back to the game menu (UDP 48392, 48393) | `the_game_masters_settings_go_to_the_match_server` |
     //! | Run id | the format | `run_ids_are_utc_times` |
 
     use super::*;
     use std::net::UdpSocket;
     use std::time::Duration;
+    use warped_shared::game_settings::{GameSettings, SettingsScope, parse_settings_message};
     use warped_shared::match_protocol::{Phase, parse_play};
     use warped_shared::match_state::MatchState;
 
@@ -844,6 +920,66 @@ mod tests {
         exchange(&mut app, &server, &freely);
         app.update();
         assert!(app.pending_play.is_none());
+    }
+
+    #[test]
+    fn the_game_masters_settings_go_to_the_match_server() {
+        let server: FakeServer = start_server(48_392);
+        let mut app: App = make_app(48_393);
+        app.join("127.0.0.1:48392".parse().unwrap(), Some(Team::Blue))
+            .unwrap();
+        let waiting: MatchView = make_view(&app, Phase::WaitingForTeams);
+        exchange(&mut app, &server, &waiting);
+        app.open_game_settings();
+        assert_eq!(app.navigator.get_screen(), Screen::GameSettings);
+        let mut settings: GameSettings = GameSettings::New(vec![
+            Some(serde_json::json!({"respawn": {"delay_s": 3.0}})),
+            Some(serde_json::json!({"respawn": {"delay_s": 3.0}})),
+        ]);
+        let mut buffer: Vec<u8> = vec![0; 65_000];
+        let deadline: Instant = Instant::now() + Duration::from_secs(2);
+        let mut changes: Vec<SettingsMessage> = Vec::new();
+        let mut has_changed: bool = false;
+        while Instant::now() < deadline && changes.is_empty() {
+            app.update();
+            while let Ok((length, sender)) = server.socket.recv_from(&mut buffer) {
+                match parse_settings_message(&buffer[..length], 2) {
+                    Ok(message) => {
+                        settings.apply(&message).unwrap();
+                        if message != SettingsMessage::Request {
+                            changes.push(message);
+                        }
+                        server
+                            .socket
+                            .send_to(&settings.to_answer(), sender)
+                            .unwrap();
+                    }
+                    Err(_) => {
+                        let view: Vec<u8> = serde_json::to_vec(&waiting).unwrap();
+                        server.socket.send_to(&view, sender).unwrap();
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            app.update();
+            let page: &GameSettingsPage = app.game_settings_page.as_ref().unwrap();
+            if !page.is_waiting() && !has_changed {
+                app.handle(MenuInput::Down);
+                app.handle(MenuInput::Right);
+                has_changed = true;
+            }
+        }
+        assert_eq!(
+            changes,
+            [SettingsMessage::Set {
+                scope: SettingsScope::Shared,
+                key: "respawn.delay_s".to_string(),
+                value: 3.1,
+            }]
+        );
+        app.handle(MenuInput::Back);
+        assert_eq!(app.navigator.get_screen(), Screen::GameMenu);
+        assert!(app.game_settings_page.is_none());
     }
 
     #[test]
