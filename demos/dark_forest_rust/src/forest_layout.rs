@@ -1310,7 +1310,7 @@ pub fn build() -> MapFile {
 /// | symmetry | red's half against blue's | `test_halves_mirror` |
 /// | warps | no black holes and 5 paired wormholes, each reach clear of boxes, shapes, ladders and spawns | `test_warps_are_paired_and_clear` |
 /// | walking into a mouth | each of the 10 mouths, from 16 directions | `test_every_mouth_lets_out_onto_solid_ground` |
-/// | the map file | as this layout exports it, byte for byte | `test_the_map_file_is_this_layout` |
+/// | the map file | as this layout exports it, to rounding | `test_the_map_file_is_this_layout` |
 /// | the map's edge (W-145, no walls at map edges) | each of the 4 sides: no box past the rectangle, mostly open ground just past it, a soft-edge boundary in the map | `test_no_wall_closes_the_map` |
 /// | looking out at eye height, against the culms | from the edge and from where the slowing stops players, on each of the 4 sides, from 60° left to 60° right of straight out | `test_looking_off_the_map_shows_forest` |
 #[cfg(test)]
@@ -1354,14 +1354,45 @@ mod tests {
         points
     }
 
+    /// `MAP_FILE_TOLERANCE` is how far a number in the map file may be from this layout's: debug
+    /// and release builds round the layout's trigonometry differently in the last bits.
+    const MAP_FILE_TOLERANCE: f64 = 1e-5;
+
+    /// `find_mismatch` gives the path of the first place where JSON values `a` and `b` differ
+    /// beyond `MAP_FILE_TOLERANCE`, if any.
+    fn find_mismatch(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
+        use serde_json::Value;
+        match (a, b) {
+            (Value::Number(x), Value::Number(y)) => {
+                let (x, y) = (x.as_f64()?, y.as_f64()?);
+                ((x - y).abs() > MAP_FILE_TOLERANCE).then(|| format!("{path}: {x} against {y}"))
+            }
+            (Value::Array(xs), Value::Array(ys)) if xs.len() == ys.len() => xs
+                .iter()
+                .zip(ys)
+                .enumerate()
+                .find_map(|(i, (x, y))| find_mismatch(x, y, &format!("{path}/{i}"))),
+            (Value::Object(xs), Value::Object(ys)) if xs.len() == ys.len() => {
+                xs.iter().find_map(|(key, x)| match ys.get(key) {
+                    Some(y) => find_mismatch(x, y, &format!("{path}/{key}")),
+                    None => Some(format!("{path}/{key}: missing")),
+                })
+            }
+            _ => (a != b).then(|| path.to_string()),
+        }
+    }
+
     #[test]
     fn test_the_map_file_is_this_layout() {
-        let file: String =
-            std::fs::read_to_string(crate::map::default_map_path()).expect("the map file");
-        let layout: String = serde_json::to_string(&build()).expect("map JSON") + "\n";
+        let file: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(crate::map::default_map_path()).expect("the map file"),
+        )
+        .expect("the map file's JSON");
+        let layout: serde_json::Value = serde_json::to_value(build()).expect("map JSON");
+        let mismatch: Option<String> = find_mismatch(&file, &layout, "");
         assert!(
-            file == layout,
-            "run `make export-map` to write this layout to the map file"
+            mismatch.is_none(),
+            "{mismatch:?}: run `make export-map` to write this layout to the map file"
         );
     }
 
