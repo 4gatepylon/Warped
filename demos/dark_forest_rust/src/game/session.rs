@@ -1329,6 +1329,11 @@ impl Session {
         if !self.is_autopilot {
             player_input.look_delta_rad /= self.weapons.get_zoom(&self.settings.aim) as f32;
         }
+        self.player.pull_m_per_s = self.warps.get_walk_pull_m_per_s(
+            &self.settings.gravity,
+            self.movement.walk_m_per_s,
+            self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M,
+        );
         self.player.update(
             &player_input,
             &self.movement,
@@ -1413,8 +1418,16 @@ impl Session {
             self.respawn_player();
         }
 
+        let get_warp_pull_m_per_s = |centre_m: Vec3| -> Vec3 {
+            self.warps.get_walk_pull_m_per_s(
+                &self.settings.gravity,
+                self.movement.walk_m_per_s,
+                centre_m,
+            )
+        };
         let context: BotContext = BotContext {
             solids: &scene.solids,
+            get_warp_pull_m_per_s: &get_warp_pull_m_per_s,
             nav: &self.nav,
             ladders: &self.arena.ladders,
             player_eye_m: self.player.eye_position_m(),

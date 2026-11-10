@@ -36,6 +36,7 @@ use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
+use warped_shared::gravity::{HyperbolicWarp, add_pull, get_hyperbolic_pull_m_per_s};
 use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -1617,6 +1618,32 @@ impl VoxelWorld {
             .position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
     }
 
+    /// `get_warp_pull_m_per_s` gives the pull of every warp, the map's and the linked thrown mouths
+    /// (W-144, gravity toward black holes and wormholes; `gravity::get_hyperbolic_pull_m_per_s`),
+    /// on a player whose body's frame is `body` and whose eye is `eye`, as speeds along the body's
+    /// right and back axes.
+    ///
+    /// Example: `let [right_m_per_s, back_m_per_s] = world.get_warp_pull_m_per_s(player.body, eye);`
+    pub fn get_warp_pull_m_per_s(&self, body: DMat4, eye: DVec4) -> [f64; 2] {
+        let warps: Vec<HyperbolicWarp> = self
+            .warps
+            .iter()
+            .map(|warp| HyperbolicWarp {
+                centre: warp.centre,
+                radius_m: warp.m * self.r,
+                is_mouth: warp.is_mouth,
+            })
+            .collect();
+        get_hyperbolic_pull_m_per_s(
+            &self.settings.gravity,
+            self.player.walk_m_per_s,
+            body,
+            eye,
+            self.r,
+            &warps,
+        )
+    }
+
     /// `get_time_rate_frac` gives how fast time runs at x (W-107), as a share of time far from every
     /// black hole. Near each black hole it is general relativity's rate for someone standing still,
     /// (1 − q) / (1 + q) in isotropic coordinates, with q = k m / ρ: ρ the distance to its centre,
@@ -2225,6 +2252,8 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying;
     /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
+    /// pulled along the ground toward black holes and wormhole mouths (`get_warp_pull_m_per_s`,
+    /// W-144: faster toward one, slower away, drifting toward one standing still),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to the spawn
     /// of index `spawn_index`, the player's team),
     /// slowing down without end on the way out up the crater's wall (`get_edge_frac`: each step
@@ -2299,15 +2328,25 @@ impl VoxelPlayer {
             };
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
-        let has_moved: bool = len > 0.0;
-        let walked_m_per_s: f64 = if has_moved {
+        let pull_m_per_s: [f64; 2] = if self.is_flying {
+            [0.0, 0.0]
+        } else {
+            world.get_warp_pull_m_per_s(self.body, eye)
+        };
+        let walk_dir: [f64; 2] = if len > 0.0 {
+            [side / len, -forward / len]
+        } else {
+            [0.0, 0.0]
+        };
+        let step_move: Option<([f64; 2], f64)> = add_pull(walk_dir, speed_m_per_s, pull_m_per_s);
+        let has_moved: bool = step_move.is_some();
+        let walked_m_per_s: f64 = if len > 0.0 {
             speed_m_per_s * forward / len
         } else {
             0.0
-        };
-        if has_moved {
-            let dir: [f64; 2] = [side / len, -forward / len];
-            let distance_m: f64 = speed_m_per_s * dt_s;
+        } - pull_m_per_s[1];
+        if let Some((dir, move_m_per_s)) = step_move {
+            let distance_m: f64 = move_m_per_s * dt_s;
             if let Some(w) = warp.filter(|&w| world.warps[w].is_mouth) {
                 (body_new, h_new, crossed) = self.move_optically(world, dir, distance_m, w);
             } else {
@@ -2449,6 +2488,8 @@ mod tests {
     //! | Thrown pair | walked into (the walker comes out of the other mouth), shot into (the laser goes through, naming the mouth's warp), flashing (both mouths) | `a_thrown_pair_carries_walkers_and_lasers` |
     //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
     //! | Marker | inside a thrown mouth's reach (in its list, hit by a laser) | `a_marker_is_listed_and_hit` |
+    //! | Walk near a thrown mouth (W-144) | toward it (faster), away (slower, still away), standing (drifts in), toward it at the full pull's edge (walking plus the strongest pull) | `warps_pull_walkers_toward_them` |
+    //! | Distance from every warp | past the pull's reach (each walk and standing as with no thrown mouths, bit for bit) | `warps_pull_walkers_toward_them` |
 
     use super::*;
     use crate::geometry::orthonormalize_frame;
@@ -2505,6 +2546,8 @@ mod tests {
     const WALK_THROUGH_STEP_COUNT: usize = 120;
     const BLACK_HOLE_NEIGHBOUR_U_M: f64 = -20.0;
     const MARKER_RADIUS_M: f64 = 0.3;
+    const PULL_TEST_OUT_M: f64 = 5.0;
+    const PULL_TEST_TOLERANCE_M_PER_S: f64 = 0.01;
 
     /// `make_block_world` gives the Lunar Surface world with flat ground and nothing on it but a
     /// box `height_m` tall, 1 m deep and 6 m long at u = -80 m, and a spot on the ground
@@ -2634,6 +2677,64 @@ mod tests {
             yaw_rad: 0.0,
         };
         (world, [place(OPEN_V_M), place(OPEN_V_M - OPEN_GAP_M)])
+    }
+
+    #[test]
+    fn warps_pull_walkers_toward_them() {
+        let (mut world, pair) = make_open_world();
+        world.set_thrown_wormholes(&[pair]);
+        let (walk_m_per_s, gravity) = (world.player.walk_m_per_s, world.settings.gravity.clone());
+        let max_m_per_s: f64 = gravity.max_pull_per_walk_speed * walk_m_per_s;
+        let radius_m: f64 = world.warps[world.static_warp_count].m * world.r;
+        let step_from = |world: &VoxelWorld, out_m: f64, input: &Input| -> (VoxelPlayer, f64) {
+            let start: [f64; 2] = [OPEN_U_M, OPEN_V_M + out_m];
+            let mut player: VoxelPlayer =
+                VoxelPlayer::AtView(world, start, [OPEN_U_M, OPEN_V_M], None, 0.0);
+            let report: StepReport = player.step(world, input, STEP_S, 0);
+            (player, report.forward_m_per_s)
+        };
+        let (forward, back, still) = (
+            Input {
+                forward: true,
+                ..Input::default()
+            },
+            Input {
+                back: true,
+                ..Input::default()
+            },
+            Input::default(),
+        );
+        let near_m: f64 = radius_m + PULL_TEST_OUT_M;
+        let (_, toward_m_per_s) = step_from(&world, near_m, &forward);
+        assert!(toward_m_per_s > walk_m_per_s && toward_m_per_s < walk_m_per_s + max_m_per_s);
+        let (_, away_m_per_s) = step_from(&world, near_m, &back);
+        assert!(-away_m_per_s < walk_m_per_s && -away_m_per_s > walk_m_per_s - max_m_per_s);
+        let (drifted, drift_m_per_s) = step_from(&world, near_m, &still);
+        assert!(drift_m_per_s > 0.0 && drift_m_per_s < max_m_per_s);
+        let mouth: DVec4 = world.warps[world.static_warp_count].centre;
+        let start: VoxelPlayer = VoxelPlayer::AtView(
+            &world,
+            [OPEN_U_M, OPEN_V_M + near_m],
+            [OPEN_U_M, OPEN_V_M],
+            None,
+            0.0,
+        );
+        assert!(
+            get_distance(drifted.body.col(AXIS_W), mouth)
+                < get_distance(start.body.col(AXIS_W), mouth)
+        );
+        let (_, full_m_per_s) = step_from(&world, radius_m + gravity.full_pull_m, &forward);
+        assert!(
+            (full_m_per_s - (walk_m_per_s + max_m_per_s)).abs() < PULL_TEST_TOLERANCE_M_PER_S,
+            "{full_m_per_s}"
+        );
+        let far_m: f64 = radius_m + gravity.reach_m + PULL_TEST_OUT_M;
+        let without: VoxelWorld = make_open_world().0;
+        for input in [&forward, &back, &still] {
+            let (pulled, pulled_m_per_s) = step_from(&world, far_m, input);
+            let (alone, alone_m_per_s) = step_from(&without, far_m, input);
+            assert_eq!((pulled.body, pulled_m_per_s), (alone.body, alone_m_per_s));
+        }
     }
 
     #[test]

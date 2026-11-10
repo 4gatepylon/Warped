@@ -47,4 +47,14 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   edits every key binding and the in-level menu's nine numbers with the shared
   `settings_editor`, which the game master's settings page will use too.
 - **Children's logs** go to `.artifacts/warped/<run_id>/` in the checkout and to
-  `~/Library/Logs/Warped/<run_id>/` from `Warped.app` (as the match crate's app already did).
+  `~/Library/Logs/Warped/warped/<run_id>/` from `Warped.app` (the match server's to
+  `~/Library/Logs/Warped/serve_match/`).
+- **The Mac app holds every program it starts** (`make package-mac-app`): the app as
+  `Contents/MacOS/Warped`, the match server (which is also Lunar Surface and runs the bots) as
+  `warped-match`, and each other level as `levels/<level>`, named from the manifest; the match
+  server finds them there (`app_bundle::get_app_level_program`). The levels build one after another
+  into one shared target folder, which saves several GB over building each in its own `.build/`.
+- **The packaged levels still read their files from the checkout** (`CARGO_MANIFEST_DIR`: maps,
+  textures, settings), so the app plays levels only on a Mac with the checkout where it was built.
+  Making them relocatable changes every level crate, left to the levels-as-libraries and W-143
+  work. **Weigh in** on when the app must run on another Mac.
