@@ -1,7 +1,7 @@
 # The end-to-end bot match: match_levels.yaml with consoles turned off in 1 s (fast_server_settings.yaml).
-# The match's levels, blue's deepest first (game_design/DESIGN.md): Dust, Snow Planet, City Sphere,
-# Dark Forest, Lunar Surface. This file is the source of truth for which program plays each level;
-# see README.md, "Level interface". `program: self` is this demo's own binary; any other program
+# The match's levels, blue's deepest first (game_design/INSIDE_GAME_DESIGN.md): Dust, Snow Planet,
+# City Sphere, Dark Forest, Lunar Surface. This file is the source of truth for which program plays
+# each level; see README.md, "Level interface". `program: self` is this demo's own binary; any other program
 # is a path from this folder, as is `map_picture` (the level's picture on the progression page;
 # this demo's own maps draw theirs). `stand_in_for` marks a level played on another map until its own
 # demo is plugged in.

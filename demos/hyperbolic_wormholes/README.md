@@ -1,7 +1,7 @@
 # Hyperbolic wormholes
 
 Traversable wormholes in hyperbolic space (H³), the space of the Dust and Lunar Surface levels in
-[`game_design/DESIGN.md`](../../game_design/DESIGN.md). It combines the two three.js demos in
+[`game_design/INSIDE_GAME_DESIGN.md`](../../game_design/INSIDE_GAME_DESIGN.md). It combines the two three.js demos in
 [`three_js_vibecode_demo/`](../three_js_vibecode_demo/README.md): the block world in H³ (`hyperbolic.html`) and
 the ray-traced wormholes in flat space (`wormholes.html`).
 

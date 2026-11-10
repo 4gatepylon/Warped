@@ -12,7 +12,7 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
    **Weigh in:** the other reading (standing on the glass's outer face, between it and the street) would put a roof
    (the street's buildings) overhead, which the user said the glass level doesn't have.
 2. **A shot from the street that meets the glass stops there.** The user said below the glass is a normal shooter, and
-   `game_design/DESIGN.md` says shots don't pass the glass. **Weigh in:** shots from below could reflect too, or pass
+   `game_design/INSIDE_GAME_DESIGN.md` says shots don't pass the glass. **Weigh in:** shots from below could reflect too, or pass
    through.
 3. **Only shots coming from the inner side reflect**, about the glass's normal at the hit (angle in = angle out), at
    most `glass.max_bounce_count` times (2 by default, 0 for none); the next time such a shot meets the glass it stops

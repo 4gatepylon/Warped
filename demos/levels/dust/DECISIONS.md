@@ -2,7 +2,7 @@
 
 - **Question:** What does Dust (blue, depth 2, hyperbolic, very large, long range, open zones, 5 consoles) look and play
   like as a blocky level with real obstacles, with light following H³ geodesics bent by a black hole and a wormhole?
-- **Given:** the level's row in `game_design/DESIGN.md` (theme, space, gravity onto the ground, warp objects, size,
+- **Given:** the level's row in `game_design/INSIDE_GAME_DESIGN.md` (theme, space, gravity onto the ground, warp objects, size,
   combat focus, consoles, open zone layout, 2–3 routes with a connector) and the shared level brief (files, controls,
   HUD, hash parameters, code practices, laser fading over about 2 s, 10 s per console, energy 30 s / 60 s).
 - **Outcomes:** a playable page with the space rendered correctly, the layout, walking, warp objects, laser and

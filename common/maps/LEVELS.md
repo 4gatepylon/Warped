@@ -154,7 +154,7 @@ When an engine learns a feature (as W-145, no walls at map edges, gave Dark Fore
 
 `"matches": {"default": {"levels": ["dust", "snow_planet", "city_sphere", "dark_forest", "lunar_surface"]}}`: each
 match is a line of levels, blue's deepest first, an odd number of distinct levels, at least 3
-([DESIGN.md](../../game_design/DESIGN.md), Matches). A level's place gives its team and depth: the middle one is
+([INSIDE_GAME_DESIGN.md](../../game_design/INSIDE_GAME_DESIGN.md), Matches). A level's place gives its team and depth: the middle one is
 purple, depth 0; those before it are blue's, those after it red's, and depth counts outward from the middle. It
 replaces `demos/warped_match_rust/match_levels.yaml`, whose other fields go: `name` is the level's `title`, `map` its
 folder, `map_picture` its `level.json`'s, `program` comes from the engine's `crate` and `binary` until levels are
@@ -166,7 +166,7 @@ Some names in a map mean something to engines. They are part of the format; the 
 
 - **Consoles and pylons:** a console is a `light` material named `<team> console <n>` (`blue console 1`), numbered
   from 1 within each team, and each structure or box that is made of one is one of that team's pylons (one console a
-  pylon, as DESIGN.md says). Each team has as many pylons as the other, at least 1. Lunar Surface, Dust and Snow
+  pylon, as INSIDE_GAME_DESIGN.md says). Each team has as many pylons as the other, at least 1. Lunar Surface, Dust and Snow
   Planet follow this already; City Sphere numbers from 0 and Dark Forest leaves the number out (one material for
   both of a team's pylons): until their migrations rename them, the validator counts pylons by the materials whatever
   their number, and the engines keep their own rules (`map::get_console_team`, City Sphere's `pylons` and `consoles`

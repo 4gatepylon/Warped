@@ -254,7 +254,7 @@ Details, and when to ask the user who an author is, are in the `compatible-chang
 ## Game design
 
 Before merging any PR, tell the user whether it changes the game's design (rules, controls, screens, menus, weapons,
-levels), whether `game_design/DESIGN.md` describes the change, and anything else you know the design doc gets wrong
+levels), whether the design docs in `game_design/` describe the change, and anything else you know they get wrong
 (the `merging-to-staging` skill).
 
 ## Machine-specific workarounds

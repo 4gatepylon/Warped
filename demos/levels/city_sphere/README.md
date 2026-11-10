@@ -1,7 +1,7 @@
 # City Sphere
 
 `index.html` is a playable demo of City Sphere, the purple level (depth 0) of the default map in
-[`game_design/DESIGN.md`](../../../game_design/DESIGN.md): the middle level, played exactly once, the
+[`game_design/INSIDE_GAME_DESIGN.md`](../../../game_design/INSIDE_GAME_DESIGN.md): the middle level, played exactly once, the
 smallest, and built for close quarters. It is a city on the inside of a hollow sphere (radius 36 m).
 Gravity pulls outward, so the ground curves up into the sky all around you and the far side of the
 city hangs overhead. A smaller glass sphere (radius 28.8 m) is the second floor: it roofs every

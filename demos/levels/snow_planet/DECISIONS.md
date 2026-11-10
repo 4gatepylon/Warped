@@ -2,7 +2,7 @@
 
 - **Question:** What could Snow Planet (blue, depth 1, T² × ℝ, paired bands, mid range) look and play like as a
   single-player voxel level with its warp objects, and does the ray-traced torus run fast enough?
-- **Given:** the design doc (`game_design/DESIGN.md`) and the shared level brief: T² × ℝ with large loops, gravity down,
+- **Given:** the design doc (`game_design/INSIDE_GAME_DESIGN.md`) and the shared level brief: T² × ℝ with large loops, gravity down,
   black holes and wormholes that repeat with the space, a large level, mid range, 4 consoles per pylon, paired bands
   with 2–3 routes per middle band, the controls, HUD and testing rules, and extending the voxel ray tracers of
   `three_js_vibecode_demo/` with periodic wrapping in x and z.

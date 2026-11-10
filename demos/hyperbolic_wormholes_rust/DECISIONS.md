@@ -623,7 +623,7 @@
   - **Heat:** it overheats after 20 shots in a row (the design: 15–25), shown as a bar above the energy bar, and
     cools fully in 2 s without firing (the design leaves the cooling time open).
   - **Looks:** the rifle is a thick grey block with a long, thin glowing barrel; the laser stays a thin dark wand.
-  - **Design document:** `game_design/DESIGN.md` now says that a player with two weapons switches with the wheel or
+  - **Design document:** `game_design/INSIDE_GAME_DESIGN.md` now says that a player with two weapons switches with the wheel or
     `1`/`2`, and has a table of the controls.
 - **Alternatives:** a health bar for the player who is hit (it needs damage in the snapshots); slowing a player
   who is hit, as the design says (not yet).
@@ -951,7 +951,7 @@
 - **Alternatives:**
   - a block that fills up gradually while reloading (you asked for it to come back when the timer resets);
   - no reload, with the block only flashing empty during the shot (a quarter second is too short to see, and
-    `game_design/DESIGN.md` calls for about one sniper shot every 2 s).
+    `game_design/INSIDE_GAME_DESIGN.md` calls for about one sniper shot every 2 s).
 - **Rationale:** you asked for an ammo bar for the sniper of only one block, which comes back when the timer
   resets, letting you shoot again.
 
@@ -1421,7 +1421,7 @@ users will want to see where on the map they are pretty often". This replaces D8
   - **Frame time:** no change measured. The machine's GPU was shared with other agents' renders, so the same view
     varied by up to 40% between runs at 2560 × 1600.
 - **Alternatives:**
-  - a second glass kind that stops lasers (City Sphere's design in `game_design/DESIGN.md` wants a glass floor that
+  - a second glass kind that stops lasers (City Sphere's design in `game_design/INSIDE_GAME_DESIGN.md` wants a glass floor that
     players see through but can't shoot through; the format can add one when that level is built);
   - thinner panes in the middle of the wall (the level's 1 m panes were kept);
   - holes without glass, as doorways are (nothing would show it is a window, and players could climb through);

@@ -1,7 +1,7 @@
 # Warped match (Rust)
 
 The whole game end to end: a **match** across the five levels by the rules of
-`game_design/DESIGN.md` (Match, Wavefront). A match server keeps the match state (every round
+`game_design/INSIDE_GAME_DESIGN.md` (Match, Wavefront). A match server keeps the match state (every round
 and its winner, each team's wavefront, offensive and defensive ownership, who attacks, the
 result), starts each round's level as its own program, reads back which team won it, and shows
 the progression in each player's match window. W-123.
@@ -83,7 +83,7 @@ and send their announcements there instead of broadcasting them, so macOS never 
 
 ## Match rules (`src/match_state.rs`)
 
-Exactly `game_design/DESIGN.md`: round 1 is City Sphere with no attacker; its winner attacks. Each
+Exactly `game_design/INSIDE_GAME_DESIGN.md`: round 1 is City Sphere with no attacker; its winner attacks. Each
 team's wavefront starts at the other team's depth-1 level. An attacker that wins moves its
 wavefront one level deeper, or wins the match on the defender's deepest level. A defender that
 wins becomes the attacker, at its own wavefront (wavefronts never move back). City Sphere is
@@ -186,7 +186,7 @@ start to its win: City Sphere 1.2–1.4, Dark Forest 14.7–22.7 (its own consol
 Surface 3.3–4.0, Snow Planet 2.6–2.9, Dust 3.5–4.3 (consoles off in 1 s). With Dark Forest's client killed 6 s into
 its round, the match client started it again and the round ended at 37 s. Pylons a team, counted as the consoles the
 winner turned off (and the other team's with a lone bot): City Sphere 1, Dark Forest 2, Lunar Surface 3, Snow Planet
-2, Dust 3, as `game_design/DESIGN.md` says. No level's console bot walked to a pylon then (each held `E` from where
+2, Dust 3, as `game_design/INSIDE_GAME_DESIGN.md` says. No level's console bot walked to a pylon then (each held `E` from where
 it stood, and the servers took its word).
 
 With walking console bots and the servers' reach check (W-126, same play in every level), `make play-all-levels`
@@ -198,7 +198,7 @@ the longest walk, to the farthest pylon (192 m to 204 m away), took 22 s to 25 s
 the way (Lunar Surface's hesco rows among them), the others 2 s to 10 s.
 
 The match takes no pylon or console count: each level program has its own (the column above
-follows `game_design/DESIGN.md`, 3-2-1-2-3 from the outside in) and reports only the winner.
+follows `game_design/INSIDE_GAME_DESIGN.md`, 3-2-1-2-3 from the outside in) and reports only the winner.
 
 ## Performance
 

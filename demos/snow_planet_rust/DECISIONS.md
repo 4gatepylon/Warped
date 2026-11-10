@@ -22,7 +22,7 @@ renderer (wrong near black holes), (c) keep the edge. I recommend (a) once the g
 
 ## S2. Two pylons a team, one console each
 
-`game_design/DESIGN.md` says 2 pylons per team on levels other than Dust and Lunar Surface, 1 console each; the
+`game_design/INSIDE_GAME_DESIGN.md` says 2 pylons per team on levels other than Dust and Lunar Surface, 1 console each; the
 WebGL prototype has more. The map follows the design: blue pylons at (u, v) = (−34, ±11), red at (34, ±11).
 
 ## S3. Blizzards (User: the numbers)

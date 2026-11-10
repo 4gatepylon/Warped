@@ -2,7 +2,7 @@
 
 State on 2026-11-08, when the four level demos, the match and their side PRs were merged into
 `staging/user-4gatepylon`. Read this first if you continue this work; the details live in each folder's
-`README.md` and `DECISIONS.md`, and the rules in `DESIGN.md`.
+`README.md` and `DECISIONS.md`, and the rules in `INSIDE_GAME_DESIGN.md`.
 
 ## What is here
 
@@ -15,7 +15,7 @@ State on 2026-11-08, when the four level demos, the match and their side PRs wer
 | Lunar Surface | `demos/hyperbolic_wormholes_rust/` (and the match's copy) | #410, #409 | 47800 | The original demo; new photo-like Tab → E map page (30° sun). |
 | Match (W-123) | `demos/warped_match_rust/` | #403 | 47850 | Runs the five levels in order (Dust, Snow, City, Forest, Lunar), each as its own program; progression page with tinted level boxes and map pictures. |
 
-Also merged: #406 (`DESIGN.md`: pylons per team 3-2-1-2-3, Dust to Lunar) and #386 (wishlist items W-118 to W-124).
+Also merged: #406 (`INSIDE_GAME_DESIGN.md`: pylons per team 3-2-1-2-3, Dust to Lunar) and #386 (wishlist items W-118 to W-124).
 
 ## Level interface (every level)
 
