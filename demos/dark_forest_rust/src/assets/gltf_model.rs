@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use gltf::animation::util::ReadOutputs;
 use gltf::animation::{Interpolation, Property};
+use warped_shared::fps_demo_assets::import_gltf;
 
 use super::textures::{TextureRequest, TextureSource, decode_textures};
 use crate::render::{
@@ -452,11 +453,9 @@ fn read_animations(document: &gltf::Document, buffers: &[gltf::buffer::Data]) ->
 /// Example:
 ///     let model: Model = load_model(&mut renderer, &path, &ModelOptions::default());
 pub fn load_model(renderer: &mut dyn Renderer, path: &Path, options: &ModelOptions) -> Model {
-    let gltf::Gltf { document, blob } = gltf::Gltf::open(path)
-        .unwrap_or_else(|error| panic!("cannot open {}: {error}", path.display()));
+    let (document, buffers) =
+        import_gltf(path).unwrap_or_else(|error| panic!("cannot open the model {error}"));
     let base_dir: &Path = path.parent().unwrap_or(Path::new("."));
-    let buffers: Vec<gltf::buffer::Data> = gltf::import_buffers(&document, Some(base_dir), blob)
-        .unwrap_or_else(|error| panic!("cannot read buffers of {}: {error}", path.display()));
     let (materials, default_material) = create_materials(
         renderer,
         &document,

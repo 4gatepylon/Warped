@@ -61,6 +61,7 @@ mod world;
 mod zone_walls;
 
 use warped_shared::app::{LevelEnd, LevelJoin, LevelWindow};
+use warped_shared::app_bundle::get_level_folder;
 use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, HudBars, HudPulses, describe_gun,
@@ -1394,7 +1395,7 @@ const MAP_PICTURE_EYE_H_M: f64 = 60.0;
 ///
 /// Example: `let path = get_map_picture_path(&map, MapName::Dust);`
 fn get_map_picture_path(map: &map::Map, map_name: MapName) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    get_level_folder(env!("CARGO_MANIFEST_DIR"))
         .join("map_pictures")
         .join(format!(
             "{}_r{:.0}m.png",
