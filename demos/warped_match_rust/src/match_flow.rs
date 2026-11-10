@@ -35,8 +35,8 @@ use crate::match_state::{MatchState, Team};
 use crate::net;
 use warped_shared::game_settings::{GameSettings, SettingsMessage, parse_settings_message};
 use warped_shared::match_protocol::{
-    CLIENT_TIMEOUT_S, MAX_DATAGRAM_BYTES, MatchAnnouncer, MatchBeacon, is_play_now, parse_hello,
-    parse_play,
+    CLIENT_TIMEOUT_S, MAX_DATAGRAM_BYTES, MatchAnnouncer, MatchBeacon, allow_full_datagrams,
+    is_play_now, parse_hello, parse_play,
 };
 pub use warped_shared::match_protocol::{
     LevelEntry, LoadLevels, MATCH_PORT, MatchClient, MatchTimes, MatchView, Phase, SELF_PROGRAM,
@@ -202,6 +202,7 @@ pub fn serve_match_on(
     let match_port: u16 = address.port();
     let socket: UdpSocket = UdpSocket::bind(address)
         .map_err(|error| format!("can't use UDP port {match_port} for the match: {error}"))?;
+    allow_full_datagrams(&socket)?;
     socket.set_read_timeout(Some(Duration::from_millis(SOCKET_TIMEOUT_MS)))?;
     let mut state: MatchState = MatchState::New(levels.len());
     let mut phase: Phase = Phase::WaitingForTeams;

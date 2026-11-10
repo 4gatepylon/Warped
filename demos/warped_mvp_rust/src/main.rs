@@ -456,12 +456,12 @@ fn make_sample_view(levels: &[LevelEntry]) -> MatchView {
     }
 }
 
-/// `make_sample_settings_page` gives the game master's settings page over the levels' own
-/// settings files in this checkout (each `<folder>/server_settings.yaml`, none for a level without
-/// one), with a shared and a level's change, for the screen pictures.
+/// `load_shipped_settings` gives the game settings over the levels' own settings files in this
+/// checkout (each `<folder>/server_settings.yaml`, none for a level without one), with no
+/// overrides.
 ///
-/// Example: `let page = make_sample_settings_page(&levels)?;`
-fn make_sample_settings_page(levels: &[LevelEntry]) -> Result<GameSettingsPage> {
+/// Example: `let settings = load_shipped_settings(&levels)?;`
+fn load_shipped_settings(levels: &[LevelEntry]) -> Result<GameSettings> {
     let repository: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join(REPOSITORY_FROM_CRATE);
     let mut defaults: Vec<Option<serde_json::Value>> = Vec::new();
     for level in levels {
@@ -471,7 +471,15 @@ fn make_sample_settings_page(levels: &[LevelEntry]) -> Result<GameSettingsPage> 
             false => None,
         });
     }
-    let mut settings: GameSettings = GameSettings::New(defaults);
+    Ok(GameSettings::New(defaults))
+}
+
+/// `make_sample_settings_page` gives the game master's settings page over the shipped settings
+/// (`load_shipped_settings`), with a shared and a level's change, for the screen pictures.
+///
+/// Example: `let page = make_sample_settings_page(&levels)?;`
+fn make_sample_settings_page(levels: &[LevelEntry]) -> Result<GameSettingsPage> {
+    let mut settings: GameSettings = load_shipped_settings(levels)?;
     settings.apply(&SettingsMessage::Set {
         scope: SettingsScope::Shared,
         key: SAMPLE_SHARED_KEY.to_string(),
@@ -616,8 +624,11 @@ mod tests {
     //! | Toured levels | none named (all), a name, a slug, a name no level has | `toured_levels_are_picked_by_name` |
     //! | Toured game | no bots (alone), allies only, enemies only, both; a count over the most | `a_tour_plays_alone_or_with_bots` |
     //! | Shipped settings files | every level's file on the game master's page: shared respawn, shooting switches and gravity, each level's own setting (City Sphere's glass, its team domes' size and its glass lights' pulse), Dark Forest's none | `the_shipped_settings_all_show` |
+    //! | Shipped settings on the network | the answer a match server sends for them, over loopback in one datagram | `the_shipped_settings_reach_a_client_in_one_datagram` |
 
     use super::*;
+    use std::net::{Ipv4Addr, UdpSocket};
+    use warped_shared::match_protocol::{MAX_DATAGRAM_BYTES, allow_full_datagrams};
 
     #[test]
     fn toured_levels_are_picked_by_name() {
@@ -655,6 +666,33 @@ mod tests {
         ];
         assert!(Arguments::try_parse_from(flags).is_err());
         assert!(Arguments::try_parse_from(["warped", "--tour-ally-bot-count", "1"]).is_err());
+    }
+
+    #[test]
+    fn the_shipped_settings_reach_a_client_in_one_datagram() {
+        let levels: Vec<LevelEntry> = load_levels(&get_levels_manifest_path()).unwrap();
+        let settings: GameSettings = load_shipped_settings(&levels).unwrap();
+        let answer: Vec<u8> = settings.to_answer();
+        assert!(
+            answer.len() <= MAX_DATAGRAM_BYTES,
+            "the answer is {} bytes",
+            answer.len()
+        );
+        let client: UdpSocket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let server: UdpSocket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        allow_full_datagrams(&server).unwrap();
+        server
+            .send_to(&answer, client.local_addr().unwrap())
+            .unwrap();
+        let mut buffer: Vec<u8> = vec![0; MAX_DATAGRAM_BYTES];
+        let (length, _) = client.recv_from(&mut buffer).unwrap();
+        let received: GameSettings = GameSettings::FromAnswer(&buffer[..length])
+            .expect("a settings answer")
+            .unwrap();
+        assert_eq!(received, settings);
     }
 
     #[test]
