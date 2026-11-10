@@ -1188,18 +1188,17 @@ fn unit_direction(direction: [f64; 3]) -> [f64; 3] {
     direction.map(|x| x / length)
 }
 
-/// `build` makes the whole Dark Forest map.
-///
-/// Example: `let map: MapFile = build();`
 /// `ZONE_EDGE_U_M` is where each team's zone begins, along Fermi u (−z): blue's spawns and pylons
 /// are beyond +24 m, red's beyond −24 m, and the middle of the forest is between.
 const ZONE_EDGE_U_M: f32 = 24.0;
 /// `ZONE_WALL_HEIGHT_M` is how tall the team boundary planes are: above the treehouses' decks
 /// (7 m) and a player's eye on them.
 const ZONE_WALL_HEIGHT_M: f32 = 10.0;
-/// `ZONE_WALL_THICKNESS_M` and `ZONE_WALL_OPACITY_FRAC` are every map's zone walls' (Lunar Surface's).
+/// `ZONE_WALL_THICKNESS_M` is every map's zone walls' thickness (Lunar Surface's).
 const ZONE_WALL_THICKNESS_M: f32 = 0.6;
-const ZONE_WALL_OPACITY_FRAC: f32 = 0.25;
+/// `ZONE_WALL_OPACITY_FRAC` is how opaque the planes are at their foot: fainter than the other
+/// maps' 0.25, which hides the dark forest behind a plane.
+const ZONE_WALL_OPACITY_FRAC: f32 = 0.1;
 
 /// `make_regions` gives the forest's team zones (blue toward −z, red toward +z) and their walls,
 /// the team boundary planes (W-148, team boundary planes in every level).
@@ -1226,6 +1225,9 @@ fn make_regions() -> Regions {
     }
 }
 
+/// `build` makes the whole Dark Forest map.
+///
+/// Example: `let map: MapFile = build();`
 pub fn build() -> MapFile {
     let mut layout: Layout = Layout {
         map: MapFile {

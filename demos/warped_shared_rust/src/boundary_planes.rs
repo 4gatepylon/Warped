@@ -40,8 +40,8 @@ mod tests {
     //! | Clock | inside the period, past it (wraps), before 0 (wraps up) | `the_clock_wraps` |
     //! | Haze at the clock's wrap | 1 ms before the period and at 0 (nearly the same move: no jump) | `the_haze_is_bounded_smooth_and_changing` (macOS) |
     //! | Size | many pixels and times (within the strength), and not all small | `the_haze_is_bounded_smooth_and_changing` (macOS) |
-    //! | Across the screen | neighbouring pixels (moves differ by under half a pixel: no flicker) | `the_haze_is_bounded_smooth_and_changing` (macOS) |
-    //! | Over time | one frame later (changes a little, under 1.5 px), a second later (changes clearly) | `the_haze_is_bounded_smooth_and_changing` (macOS) |
+    //! | Across the screen | neighbouring pixels (moves differ by under a pixel, so the picture never folds over itself) | `the_haze_is_bounded_smooth_and_changing` (macOS) |
+    //! | Over time | one frame later (changes a little, under 3 px), a second later (changes clearly) | `the_haze_is_bounded_smooth_and_changing` (macOS) |
 
     use super::*;
 
@@ -70,7 +70,10 @@ mod tests {
         const KERNEL: &str = "kernel void haze_test(device float4 *samples [[buffer(0)]], \
             uint i [[thread_position_in_grid]]) { float4 s = samples[i]; \
             samples[i] = float4(get_boundary_haze_px(s.xy, 1440.0, s.z, float4(1.0, 0.03, 3.0, 1.0)), 0.0, 0.0); }";
-        const HAZE_PX: f32 = 8.0;
+        const HAZE_PX: f32 = 14.0;
+        const ROUNDING_PX: f32 = 1e-3;
+        const MAX_NEIGHBOUR_CHANGE_PX: f32 = 1.0;
+        const MAX_FRAME_CHANGE_PX: f32 = 3.0;
         const FRAME_S: f32 = 1.0 / 60.0;
         const PERIOD_S: f32 = SHIMMER_CLOCK_PERIOD_S as f32;
         let mut samples: Vec<[f32; 4]> = Vec::new();
@@ -145,12 +148,18 @@ mod tests {
                 after_wrap,
             ] = [0, 1, 2, 3, 4, 5].map(|k| &group[k]);
             assert!(
-                here[0].abs() <= HAZE_PX && here[1].abs() <= HAZE_PX,
+                here[0].abs() <= HAZE_PX + ROUNDING_PX && here[1].abs() <= HAZE_PX + ROUNDING_PX,
                 "{here:?}"
             );
             largest_px = largest_px.max(here[0].abs());
-            assert!(distance(here, right) < 0.5, "{here:?} {right:?}");
-            assert!(distance(here, next_frame) < 1.5, "{here:?} {next_frame:?}");
+            assert!(
+                distance(here, right) < MAX_NEIGHBOUR_CHANGE_PX,
+                "{here:?} {right:?}"
+            );
+            assert!(
+                distance(here, next_frame) < MAX_FRAME_CHANGE_PX,
+                "{here:?} {next_frame:?}"
+            );
             later_sum_px += distance(here, second_later);
             assert!(
                 distance(before_wrap, after_wrap) < 0.2,

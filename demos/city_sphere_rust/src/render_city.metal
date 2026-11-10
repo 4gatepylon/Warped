@@ -403,7 +403,7 @@ constant float BOUNDARY_SRGB_GAMMA = 2.2;
 constant uint MAX_HAZE_PLANE_COUNT = 4;
 constant float HAZE_FOOT_M = 0.3;
 constant float HAZE_RAY_DEPTH = 0.5;
-constant float4 CITY_HAZE_STYLE = float4(1.0, 0.06, 1.0, 1.0);
+constant float4 CITY_HAZE_STYLE = float4(1.5, 0.06, 1.0, 1.0);
 
 /**
  * @brief `boundary_fragment` draws a team boundary plane (W-148, team boundary planes in every level) over what is

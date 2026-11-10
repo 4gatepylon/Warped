@@ -268,6 +268,8 @@ Every level follows these rules:
   players nor lasers. What is seen through one shimmers like air over hot ground (W-149, shimmer through boundary
   planes): the picture behind it wobbles a little, rising and changing all the time, in every level alike. The
   shimmer is only where a wall covers the view, so it stops once you have crossed the wall and look away from it.
+  City Sphere's teams each have a hemisphere, so its one wall is a disc through the centre, blue from blue's side
+  and red from red's.
 
 | Zone layout | Shape |
 | --- | --- |
