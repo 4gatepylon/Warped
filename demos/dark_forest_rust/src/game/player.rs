@@ -125,7 +125,9 @@ pub struct PlayerInput {
 /// `Player` is the player's body and view: where its feet are, how it moves and looks, whether it
 /// stands on something, how tall it is now, its health and death, the movement rules' state
 /// (`moves`: crouch, sprint energy, sprinting, the head bob and a hit's slow), the landing dip,
-/// whether this frame was a footstep, and whether it climbs a ladder.
+/// whether this frame was a footstep, whether it climbs a ladder, and the warps' pull on it
+/// along the ground (W-144, `Warps::get_walk_pull_m_per_s`), which its owner sets before each
+/// `update`.
 pub struct Player {
     pub feet_m: Vec3,
     pub velocity_m_s: Vec3,
@@ -140,6 +142,7 @@ pub struct Player {
     pub landing_dip_m: f32,
     pub did_step: bool,
     pub is_climbing: bool,
+    pub pull_m_per_s: Vec3,
 }
 
 /// `Forest` is the forest as the movement rules' `Ground`: its boxes to collide with, its rope
@@ -191,6 +194,7 @@ impl Player {
             landing_dip_m: 0.0,
             did_step: false,
             is_climbing: false,
+            pull_m_per_s: Vec3::ZERO,
         }
     }
 
@@ -375,7 +379,8 @@ impl Ground for Forest<'_> {
     type Body = Player;
 
     /// `move_body` carries out a step's `intent` for the player in the forest: the walk at its
-    /// speed, set at once on the ground and in the air, a jump from the ground, gravity up to
+    /// speed plus the warps' pull (`Player::pull_m_per_s`), set at once on the ground and in the
+    /// air, a jump from the ground, gravity up to
     /// `MAX_FALL_SPEED_M_PER_S`; on a rope ladder (walked into, or already climbing), climbing
     /// up with forward (down while looking down, or holding crouch) and stepping off at the top;
     /// collision, stepping up ledges, in steps of at most `MAX_MOVE_STEP_M`; and the landing dip.
@@ -388,7 +393,12 @@ impl Ground for Forest<'_> {
         let right: Vec3 = Quat::from_rotation_y(body.yaw_rad) * Vec3::X;
         let (forward_frac, right_frac) = (intent.forward_frac as f32, intent.right_frac as f32);
         let direction: Vec3 = forward * forward_frac + right * right_frac;
-        let target_m_s: Vec3 = direction * intent.speed_m_per_s as f32;
+        let walk_m_s: Vec3 = direction * intent.speed_m_per_s as f32;
+        let target_m_s: Vec3 = if body.pull_m_per_s == Vec3::ZERO {
+            walk_m_s
+        } else {
+            walk_m_s + body.pull_m_per_s
+        };
         body.velocity_m_s = target_m_s.with_y(
             (body.velocity_m_s.y - self.movement.gravity_m_per_s2 * dt_s)
                 .max(-MAX_FALL_SPEED_M_PER_S),
@@ -472,6 +482,7 @@ impl Ground for Forest<'_> {
 /// | sprint energy while sprinting | some left, empty | `test_sprinting_drains_energy_then_stops` |
 /// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
 /// | time since death | before the settings' respawn delay, after it | `test_respawn_waits_the_settings_delay` |
+/// | a mouth near a walker (W-144) | walking toward it (farther in the same time), away (less far, still away), standing (drifts toward it); past the pull's reach (each the same as with no mouth, bit for bit) | `test_warps_pull_walkers_toward_them` |
 /// | rules' state each step | walking, sprinting, crouching, jumping, standing, hit: the shared `MoveState` stepped with the same keys and ground, bit for bit | `test_the_rules_are_the_shared_ones` |
 /// | walking off the map's soft edge (W-145, no walls at map edges) | out past an end and past a side (slower each second, never at the band's far side), back in from deep in the band (full speed) | `test_walking_off_the_map_slows_without_end` |
 #[cfg(test)]
@@ -479,7 +490,10 @@ mod tests {
     use glam::Mat4;
 
     use super::*;
+    use crate::game::bots::BODY_CENTRE_HEIGHT_M;
+    use crate::game::warps::{Warps, WormholeMouth};
     use crate::map::{self, MapFile};
+    use crate::settings::GravitySettings;
 
     /// `DECK_TOP_M` is the test deck's height.
     const DECK_TOP_M: f32 = 7.0;
@@ -487,6 +501,13 @@ mod tests {
     const SPEED_TOLERANCE_M_S: f32 = 0.01;
     const FOREST_WALK_M_PER_S: f32 = 8.0;
     const FOREST_SPRINT_M_PER_S: f32 = 15.48;
+    const PULL_WALK_S: f32 = 0.5;
+    const NEAR_MOUTH_M: f32 = 8.0;
+    const FAR_MOUTH_M: f32 = 40.0;
+    const MOUTH_HEIGHT_M: f32 = 1.7;
+    const MOUTH_THROAT_M: f32 = 1.6;
+    const MOUTH_REACH_M: f32 = 5.0;
+    const MOUTH_LAMBDA_SQUARED: f32 = 0.25;
 
     /// `forest_movement` is the movement on the Dark Forest map with the built-in settings.
     fn forest_movement() -> Movement {
@@ -522,6 +543,66 @@ mod tests {
             shoot_after_moving_s: lunar("shoot_after_moving_s"),
         };
         Movement::New(&lunar_map.player, lunar_map.gravity_m_per_s2, &settings)
+    }
+
+    /// `walk_by_a_mouth` walks a player facing -z from the origin of `open_ground` with
+    /// `move_axes` for `PULL_WALK_S`, pulled each step by one mouth `mouth_m` ahead at the
+    /// map's mouths' height (none for `None`), and gives where the feet end up.
+    fn walk_by_a_mouth(move_axes: Vec2, mouth_m: Option<f32>) -> Vec3 {
+        let movement: Movement = forest_movement();
+        let gravity: GravitySettings = ServerSettings::Builtin().gravity;
+        let warps: Warps = Warps {
+            black_holes: Vec::new(),
+            mouths: mouth_m
+                .map(|ahead_m| WormholeMouth {
+                    centre_m: Vec3::new(0.0, MOUTH_HEIGHT_M, -ahead_m),
+                    throat_radius_m: MOUTH_THROAT_M,
+                    reach_m: MOUTH_REACH_M,
+                    lambda_squared: MOUTH_LAMBDA_SQUARED,
+                    partner: 0,
+                })
+                .into_iter()
+                .collect(),
+        };
+        let input: PlayerInput = PlayerInput {
+            move_axes,
+            ..PlayerInput::default()
+        };
+        let mut player: Player = Player::new(Vec3::ZERO, 0.0);
+        let dt_s: f32 = 1.0 / 60.0;
+        for _ in 0..(PULL_WALK_S / dt_s).round() as usize {
+            player.pull_m_per_s = warps.get_walk_pull_m_per_s(
+                &gravity,
+                movement.walk_m_per_s,
+                player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M,
+            );
+            player.update(&input, &movement, &open_ground(), &[], dt_s);
+        }
+        player.feet_m
+    }
+
+    /// `test_warps_pull_walkers_toward_them` walks toward, away from and stands by a mouth, and
+    /// far from one.
+    #[test]
+    fn test_warps_pull_walkers_toward_them() {
+        let (forward, back, still) = (Vec2::Y, Vec2::NEG_Y, Vec2::ZERO);
+        let ahead_m = |feet_m: Vec3| -> f32 { -feet_m.z };
+        let free_m: f32 = ahead_m(walk_by_a_mouth(forward, None));
+        let toward_m: f32 = ahead_m(walk_by_a_mouth(forward, Some(NEAR_MOUTH_M)));
+        assert!(toward_m > free_m, "{toward_m} against {free_m}");
+        let free_back_m: f32 = ahead_m(walk_by_a_mouth(back, None));
+        let away_m: f32 = ahead_m(walk_by_a_mouth(back, Some(NEAR_MOUTH_M)));
+        assert!(
+            free_back_m < away_m && away_m < 0.0,
+            "{away_m} against {free_back_m}"
+        );
+        assert!(ahead_m(walk_by_a_mouth(still, Some(NEAR_MOUTH_M))) > 0.0);
+        for move_axes in [forward, back, still] {
+            assert_eq!(
+                walk_by_a_mouth(move_axes, Some(FAR_MOUTH_M)),
+                walk_by_a_mouth(move_axes, None)
+            );
+        }
     }
 
     /// `open_ground` is a large flat floor at height 0.

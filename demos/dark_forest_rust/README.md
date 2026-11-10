@@ -82,6 +82,11 @@ countdown.
   culms under one low-detail canopy each, so looking out from anywhere a player can reach shows bamboo (at eye
   height, under 3% of the looks pass the whole outer forest: `test_looking_off_the_map_shows_forest`). Bots find their
   way only inside the rectangle.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): every wormhole mouth, the map's
+  gates and the linked thrown ones, pulls the player's middle along the ground (`Warps::get_walk_pull_m_per_s`, set as
+  `Player::pull_m_per_s` before each `update`, added to the walk off ladders): faster toward a mouth, slower away, a
+  slow drift standing still, stopping at the throat. The offline bots add the same pull to their walk.
 - **Bamboo labyrinth:** `add_labyrinth` carves red's half into a seeded maze of 4 m cells (a winding depth-first tree
   plus about 12% extra openings for loops, so there are dead ends and loops), grows a wall of bamboo clumps on every
   closed side where nothing else stands, and mirrors it onto blue's half. Corridors are about 1.5-3 m wide. The seed

@@ -5,7 +5,7 @@
 //! (`MatchAnnouncer`). What the server and its clients share (the levels file, the view, the
 //! client, the beacon) is `warped_shared::match_protocol`, re-exported here.
 //!
-//! Interface: `serve_match`, `make_level_client_command`, and from `match_protocol`:
+//! Interface: `serve_match`, `serve_match_on`, `make_level_client_command`, and from `match_protocol`:
 //! `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `MatchTimes`, `MatchClient`,
 //! `describe_outcome`, `is_sitting_out`, `is_level_restart_due`, `stop_child`, `MATCH_PORT`,
 //! `SELF_PROGRAM`.
@@ -20,7 +20,7 @@
 use std::error::Error;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -41,15 +41,19 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const SOCKET_TIMEOUT_MS: u64 = 50;
 
-/// `resolve_program` gives the program a level runs: this binary for `self`, else the path from
-/// this demo's folder.
+/// `resolve_program` gives the program a level runs: this binary for `self`; inside `Warped.app`
+/// the level's program in `Contents/MacOS/levels/` (`app_bundle::get_app_level_program`); else
+/// the path from this demo's folder.
 ///
 /// Example: `let program = resolve_program(&level)?;`
 fn resolve_program(level: &LevelEntry) -> Result<PathBuf> {
     if level.program == SELF_PROGRAM {
         return Ok(std::env::current_exe()?);
     }
-    let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join(&level.program);
+    let path: PathBuf = match warped_shared::app_bundle::get_app_level_program(&level.name) {
+        Some(path) => path,
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join(&level.program),
+    };
     if !path.exists() {
         return Err(format!(
             "{}'s program {} doesn't exist; build it in its folder ({}) first",
@@ -145,7 +149,31 @@ pub fn serve_match(
     match_port: u16,
     level_port: u16,
 ) -> Result<MatchState> {
-    let socket: UdpSocket = UdpSocket::bind(("0.0.0.0", match_port))
+    let announcer: MatchAnnouncer = MatchAnnouncer::OnNetwork()?;
+    let address: SocketAddr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, match_port));
+    serve_match_on(
+        levels,
+        times,
+        run_folder,
+        (address, level_port),
+        Some(announcer),
+    )
+}
+
+/// `serve_match_on` is `serve_match` listening at `address` (the match server's) with each
+/// round's level server on `level_port`, announcing itself with `announcer`, or not at all with
+/// `None` (a test on 127.0.0.1: no beacon, nothing open to the network).
+///
+/// Example: `serve_match_on(&levels, &times, &folder, ("127.0.0.1:48302".parse()?, 48303), None)?;`
+pub fn serve_match_on(
+    levels: &[LevelEntry],
+    times: &MatchTimes,
+    run_folder: &Path,
+    (address, level_port): (SocketAddr, u16),
+    mut announcer: Option<MatchAnnouncer>,
+) -> Result<MatchState> {
+    let match_port: u16 = address.port();
+    let socket: UdpSocket = UdpSocket::bind(address)
         .map_err(|error| format!("can't use UDP port {match_port} for the match: {error}"))?;
     socket.set_read_timeout(Some(Duration::from_millis(SOCKET_TIMEOUT_MS)))?;
     let mut state: MatchState = MatchState::New(levels.len());
@@ -158,7 +186,6 @@ pub fn serve_match(
     let mut round_result_path: Option<PathBuf> = None;
     let mut free_round_total: usize = 0;
     let mut buffer: Vec<u8> = vec![0; MAX_DATAGRAM_BYTES];
-    let mut announcer: MatchAnnouncer = MatchAnnouncer::OnNetwork()?;
     println!("Match server on UDP port {match_port}; levels on port {level_port}.");
     loop {
         let received: Option<(usize, SocketAddr)> = match socket.recv_from(&mut buffer) {
@@ -346,7 +373,9 @@ pub fn serve_match(
             team_counts,
             match_left_s,
         };
-        announcer.announce(&MatchBeacon::FromView(&view, match_port));
+        if let Some(announcer) = &mut announcer {
+            announcer.announce(&MatchBeacon::FromView(&view, match_port));
+        }
         if let Some((_, address)) = received {
             socket.send_to(&serde_json::to_vec(&view)?, address)?;
         }
@@ -367,7 +396,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Levels file | the shipped one (an even count: `warped_shared::match_protocol`) | `the_shipped_levels_file_loads` |
     //! | Level result | none yet, blue, red, garbage | `level_results_are_read` |
-    //! | Game master's choice | free play on a level (every round there, wins counted, no match round), back to the match (its next level) | `the_game_master_switches_levels_and_everyone_follows` |
+    //! | Game master's choice (a match server on 127.0.0.1, no beacon) | free play on a level (every round there, wins counted, no match round), back to the match (its next level) | `the_game_master_switches_levels_and_everyone_follows` |
 
     use super::*;
     use std::os::unix::fs::PermissionsExt;
@@ -449,12 +478,13 @@ mod tests {
         };
         let server_folder: PathBuf = folder.clone();
         std::thread::spawn(move || {
-            let result: Result<MatchState> = serve_match(
+            let address: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, TEST_MATCH_PORT));
+            let result: Result<MatchState> = serve_match_on(
                 &levels,
                 &times,
                 &server_folder,
-                TEST_MATCH_PORT,
-                TEST_LEVEL_PORT,
+                (address, TEST_LEVEL_PORT),
+                None,
             );
             result.map(|_| ()).map_err(|error| error.to_string())
         });
@@ -482,7 +512,7 @@ mod tests {
         let view: &MatchView = clients[0].view.as_ref().unwrap();
         assert_eq!(back.last().copied(), view.state.get_next_level());
         assert!(view.state.rounds().len() <= 1, "{:?}", view.state.rounds());
-        fs::remove_dir_all(&folder).unwrap();
+        let _ = fs::remove_dir_all(&folder);
     }
 
     #[test]

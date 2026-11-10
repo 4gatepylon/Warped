@@ -5,24 +5,20 @@
 //! draws its shapes.
 //!
 //! Interface: `MainMenu` (`New`, `get_rows`, `handle`, `get_choice`, `get_shapes`), `MainRow`,
-//! `MainAction`, `MAX_BOTS_PER_TEAM`.
+//! `MainAction`.
 //!
 //! Example: `let action = main_menu.handle(MenuInput::Activate, &rows, levels.len());`
 
 use std::net::SocketAddr;
 
 use warped_shared::match_protocol::{FoundMatch, LevelEntry};
-use warped_shared::match_state::Team;
 use warped_shared::page::Shape;
 
-use crate::children::{BotObjective, GameKind};
+use crate::children::{BotObjective, GameKind, MAX_ALLY_COUNT, MAX_BOT_COUNT, MAX_ENEMY_COUNT};
 use crate::menu_page::{
     LINE, MARGIN, MenuInput, MenuRow, move_selection, push_heading, push_rows, push_title,
 };
 
-/// `MAX_BOTS_PER_TEAM` is the most bots a team may get, so a full game (8 players) keeps room
-/// for people.
-pub const MAX_BOTS_PER_TEAM: u32 = 3;
 const PAGE_SIZE: [f32; 2] = [640.0, 455.0];
 const ROWS_TOP: f32 = 44.0;
 const HELP: &str = "Up/Down: choose   Left/Right: change   Return: go   Escape: back";
@@ -35,7 +31,8 @@ pub enum MainRow {
     GameChoice,
     Host,
     Alone,
-    BotCount(Team),
+    Allies,
+    Enemies,
     BotObjective,
     StartWithBots,
     BackToGame,
@@ -65,7 +62,8 @@ pub enum MainAction {
 }
 
 /// `MainMenu` is the main menu's state: the selected row, the game chosen (0 for the match, else
-/// a level's index plus 1), the bots per team (blue, red), what the bots do, and a message.
+/// a level's index plus 1), the bots on the player's team and on the other (allies, enemies),
+/// what the bots do, and a message.
 pub struct MainMenu {
     selected: usize,
     game_choice: usize,
@@ -75,7 +73,7 @@ pub struct MainMenu {
 }
 
 impl MainMenu {
-    /// `New` starts with the first row selected, the match chosen, and one console bot on red.
+    /// `New` starts with the first row selected, the match chosen, and one enemy console bot.
     ///
     /// Example: `let main_menu = MainMenu::New();`
     #[allow(non_snake_case)]
@@ -107,8 +105,8 @@ impl MainMenu {
             MainRow::GameChoice,
             MainRow::Host,
             MainRow::Alone,
-            MainRow::BotCount(Team::Blue),
-            MainRow::BotCount(Team::Red),
+            MainRow::Allies,
+            MainRow::Enemies,
             MainRow::BotObjective,
             MainRow::StartWithBots,
         ]);
@@ -138,10 +136,14 @@ impl MainMenu {
                     let count: i64 = level_count as i64 + 1;
                     self.game_choice = (self.game_choice as i64 + step).rem_euclid(count) as usize;
                 }
-                MainRow::BotCount(team) => {
-                    let count: &mut u32 = &mut self.bot_counts[team.get_index()];
-                    *count =
-                        (i64::from(*count) + step).clamp(0, i64::from(MAX_BOTS_PER_TEAM)) as u32;
+                MainRow::Allies | MainRow::Enemies => {
+                    let (side, max): (usize, u32) = match row {
+                        MainRow::Allies => (0, MAX_ALLY_COUNT),
+                        _ => (1, MAX_ENEMY_COUNT),
+                    };
+                    let room: u32 = MAX_BOT_COUNT - self.bot_counts[1 - side];
+                    let count: &mut u32 = &mut self.bot_counts[side];
+                    *count = (i64::from(*count) + step).clamp(0, i64::from(max.min(room))) as u32;
                 }
                 MainRow::BotObjective => {
                     self.bot_objective = match self.bot_objective {
@@ -168,15 +170,11 @@ impl MainMenu {
                 kind: GameKind::Alone,
                 choice,
             },
-            MainRow::StartWithBots if self.bot_counts == [0, 0] => {
-                self.message =
-                    Some("Choose at least one bot (Left/Right on a team's bots).".to_string());
-                MainAction::Stay
-            }
-            MainRow::StartWithBots | MainRow::BotCount(_) | MainRow::BotObjective => {
+            MainRow::StartWithBots | MainRow::Allies | MainRow::Enemies | MainRow::BotObjective => {
                 MainAction::Start {
                     kind: GameKind::Bots {
-                        counts: self.bot_counts,
+                        ally_count: self.bot_counts[0],
+                        enemy_count: self.bot_counts[1],
                         objective: self.bot_objective,
                     },
                     choice,
@@ -204,11 +202,8 @@ impl MainMenu {
             },
             MainRow::Host => "  Host it for others on this network".to_string(),
             MainRow::Alone => "  Play it alone".to_string(),
-            MainRow::BotCount(team) => format!(
-                "    Bots on {}:  < {} >",
-                team.get_name(),
-                self.bot_counts[team.get_index()]
-            ),
+            MainRow::Allies => format!("    Bots on your team:  < {} >", self.bot_counts[0]),
+            MainRow::Enemies => format!("    Bots on the other team:  < {} >", self.bot_counts[1]),
             MainRow::BotObjective => format!(
                 "    Bots:  < {} >",
                 match self.bot_objective {
@@ -280,7 +275,7 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Game choice | the match, every level of the shipped manifest, wrapping both ways | `every_manifest_level_can_be_chosen` |
-    //! | Start | hosted, alone, with bots (each team's count clamped, objective switched), no bots | `games_start_with_their_kind_and_bots` |
+    //! | Start | hosted, alone, with bots (allies and enemies clamped to their maxima and to 7 together, objective switched) | `games_start_with_their_kind_and_bots` |
     //! | Rows | found games first, hosting rows only while hosting | `rows_list_found_games_and_hosting` |
     //! | Other rows | join a found game, by address, back to the game, stop, settings, credits, quit | `rows_lead_to_their_actions` |
 
@@ -355,13 +350,14 @@ mod tests {
                 choice: None
             }
         );
-        select(&mut menu, &rows, &MainRow::BotCount(Team::Blue));
-        for _ in 0..5 {
+        select(&mut menu, &rows, &MainRow::Allies);
+        for _ in 0..9 {
             menu.handle(MenuInput::Right, &rows, 5);
         }
-        select(&mut menu, &rows, &MainRow::BotCount(Team::Red));
-        menu.handle(MenuInput::Left, &rows, 5);
-        menu.handle(MenuInput::Left, &rows, 5);
+        select(&mut menu, &rows, &MainRow::Enemies);
+        for _ in 0..9 {
+            menu.handle(MenuInput::Right, &rows, 5);
+        }
         select(&mut menu, &rows, &MainRow::BotObjective);
         menu.handle(MenuInput::Right, &rows, 5);
         select(&mut menu, &rows, &MainRow::StartWithBots);
@@ -369,19 +365,33 @@ mod tests {
             menu.handle(MenuInput::Activate, &rows, 5),
             MainAction::Start {
                 kind: GameKind::Bots {
-                    counts: [MAX_BOTS_PER_TEAM, 0],
+                    ally_count: MAX_ALLY_COUNT,
+                    enemy_count: MAX_BOT_COUNT - MAX_ALLY_COUNT,
                     objective: BotObjective::Fight
                 },
                 choice: None
             }
         );
-        select(&mut menu, &rows, &MainRow::BotCount(Team::Blue));
-        for _ in 0..5 {
+        select(&mut menu, &rows, &MainRow::Allies);
+        for _ in 0..9 {
             menu.handle(MenuInput::Left, &rows, 5);
         }
+        select(&mut menu, &rows, &MainRow::Enemies);
+        for _ in 0..9 {
+            menu.handle(MenuInput::Right, &rows, 5);
+        }
         select(&mut menu, &rows, &MainRow::StartWithBots);
-        assert_eq!(menu.handle(MenuInput::Activate, &rows, 5), MainAction::Stay);
-        assert!(menu.message.is_some());
+        assert_eq!(
+            menu.handle(MenuInput::Activate, &rows, 5),
+            MainAction::Start {
+                kind: GameKind::Bots {
+                    ally_count: 0,
+                    enemy_count: MAX_ENEMY_COUNT,
+                    objective: BotObjective::Fight
+                },
+                choice: None
+            }
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! Interface: `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `MatchTimes`, `MatchClient`
 //! (`Connect`, `poll`, `send_play`), `parse_hello`, `parse_play`, `make_play`, `stop_child`, `is_sitting_out`, `is_level_restart_due`,
 //! `describe_outcome`, `MatchBeacon`, `BeaconPhase`, `MatchAnnouncer`, `MatchListener`,
-//! `FoundMatch`, `update_found_matches`, `MATCH_PORT`, `MATCH_DISCOVERY_PORT`,
+//! `FoundMatch`, `update_found_matches`, `get_bind_ip`, `MATCH_PORT`, `MATCH_DISCOVERY_PORT`,
 //! `CLIENT_TIMEOUT_S`, `MAX_DATAGRAM_BYTES`, `SELF_PROGRAM`.
 //!
 //! Example: `let mut client = MatchClient::Connect(server, Some(Team::Blue))?; client.poll()?;`
@@ -268,12 +268,12 @@ pub struct MatchClient {
 
 impl MatchClient {
     /// `Connect` makes a client of the match server at `server` playing for `team` (`None` until
-    /// the player picks one).
+    /// the player picks one); a server on this Mac is reached on the loopback interface only.
     ///
     /// Example: `let client = MatchClient::Connect(server, Some(Team::Blue))?;`
     #[allow(non_snake_case)]
     pub fn Connect(server: SocketAddr, team: Option<Team>) -> Result<MatchClient> {
-        let socket: UdpSocket = UdpSocket::bind(("0.0.0.0", 0))?;
+        let socket: UdpSocket = UdpSocket::bind((get_bind_ip(server), 0))?;
         socket.set_nonblocking(true)?;
         Ok(MatchClient {
             socket,
@@ -476,13 +476,14 @@ pub struct MatchAnnouncer {
 }
 
 impl MatchAnnouncer {
-    /// `New` makes an announcer sending to `target`.
+    /// `New` makes an announcer sending to `target` (on the loopback interface only, for a target
+    /// on this Mac; broadcasts only to a broadcast address).
     ///
     /// Example: `let mut announcer = MatchAnnouncer::New("127.0.0.1:48301".parse()?)?;`
     #[allow(non_snake_case)]
     pub fn New(target: SocketAddr) -> Result<MatchAnnouncer> {
-        let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-        socket.set_broadcast(true)?;
+        let socket: UdpSocket = UdpSocket::bind((get_bind_ip(target), 0))?;
+        socket.set_broadcast(target.ip() == Ipv4Addr::BROADCAST)?;
         Ok(MatchAnnouncer {
             socket,
             target,
@@ -535,6 +536,18 @@ pub struct FoundMatch {
     pub heard_at: Instant,
 }
 
+/// `get_bind_ip` gives the address a socket talking to `peer` binds to: the loopback interface
+/// for a peer on this Mac (so tests and local games never open a port to the network), else every
+/// interface.
+///
+/// Example: `let socket = UdpSocket::bind((get_bind_ip(server), 0))?;`
+pub fn get_bind_ip(peer: SocketAddr) -> Ipv4Addr {
+    match peer.ip().is_loopback() {
+        true => Ipv4Addr::LOCALHOST,
+        false => Ipv4Addr::UNSPECIFIED,
+    }
+}
+
 /// `update_found_matches` adds the beacon `datagram` from its sender heard at `now` to `found`
 /// (replacing that server's older one), drops servers not heard from for
 /// `FOUND_MATCH_TIMEOUT_S`, and keeps `found` sorted by address. A datagram that isn't a beacon
@@ -571,13 +584,14 @@ pub struct MatchListener {
 }
 
 impl MatchListener {
-    /// `Bind` listens on UDP `port` (`MATCH_DISCOVERY_PORT` for the local network). It fails if
-    /// another program holds the port.
+    /// `Bind` listens on UDP `port` of `ip`: every interface (`Ipv4Addr::UNSPECIFIED`) for games
+    /// on the local network (`MATCH_DISCOVERY_PORT`), or the loopback interface alone for tests. It
+    /// fails if another program holds the port.
     ///
-    /// Example: `let mut listener = MatchListener::Bind(MATCH_DISCOVERY_PORT)?;`
+    /// Example: `let mut listener = MatchListener::Bind(Ipv4Addr::UNSPECIFIED, MATCH_DISCOVERY_PORT)?;`
     #[allow(non_snake_case)]
-    pub fn Bind(port: u16) -> Result<MatchListener> {
-        let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).map_err(|error| {
+    pub fn Bind(ip: Ipv4Addr, port: u16) -> Result<MatchListener> {
+        let socket: UdpSocket = UdpSocket::bind((ip, port)).map_err(|error| {
             format!(
                 "can't listen for games on UDP port {port} ({error}); join a game by its address"
             )
@@ -632,7 +646,8 @@ mod tests {
     //! | Bad beacon | too short, wrong magic, version 0, unknown phase | `bad_beacons_are_refused` |
     //! | Beacon from a view | waiting, intermission, playing, round over, over; a count above 255 | `beacons_summarise_the_view` |
     //! | Found list | a new server, the same server again (replaced), another server (sorted), a non-beacon, a server gone quiet | `found_matches_update_and_expire` |
-    //! | Over the network | a beacon sent to the listener's port is found at the sender's address | `a_listener_hears_an_announcer` |
+    //! | Over loopback | a beacon sent to the listener's port is found at the sender's address (both on 127.0.0.1) | `a_listener_hears_an_announcer` |
+    //! | Bind address | a peer on this Mac (loopback only), on the network (every interface) | `sockets_to_this_mac_bind_loopback_only` |
 
     use super::*;
     use std::path::PathBuf;
@@ -762,8 +777,21 @@ mod tests {
     }
 
     #[test]
+    fn sockets_to_this_mac_bind_loopback_only() {
+        assert_eq!(
+            get_bind_ip("127.0.0.1:48300".parse().unwrap()),
+            Ipv4Addr::LOCALHOST
+        );
+        assert_eq!(
+            get_bind_ip("10.0.0.2:48300".parse().unwrap()),
+            Ipv4Addr::UNSPECIFIED
+        );
+    }
+
+    #[test]
     fn a_listener_hears_an_announcer() {
-        let mut listener: MatchListener = MatchListener::Bind(TEST_DISCOVERY_PORT).unwrap();
+        let mut listener: MatchListener =
+            MatchListener::Bind(Ipv4Addr::LOCALHOST, TEST_DISCOVERY_PORT).unwrap();
         let target: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, TEST_DISCOVERY_PORT));
         let mut announcer: MatchAnnouncer = MatchAnnouncer::New(target).unwrap();
         let beacon: MatchBeacon =

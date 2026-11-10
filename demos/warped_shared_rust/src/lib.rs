@@ -10,6 +10,7 @@
 //! - `shapes`: the smooth solids structures are made of.
 //! - `movement`: the rules of moving: crouching, sprint energy, the head bob, a hit's slow.
 //! - `map_edge`: the soft edge of every map: past the playable area players slow without end.
+//! - `gravity`: the pull of black holes and wormhole mouths on a player on the ground.
 //! - `health`: the damage a hit adds, elimination, and what a fall in health shows (`HitFeedback`).
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
@@ -44,6 +45,7 @@ pub mod avatar_model;
 pub mod fps_demo_assets;
 pub mod gait;
 pub mod geometry;
+pub mod gravity;
 pub mod health;
 #[cfg(target_os = "macos")]
 pub mod hud;

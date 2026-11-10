@@ -352,8 +352,9 @@ struct Arguments {
     team: Option<TeamFlag>,
     /// With --bot: what the bot does. `consoles` holds E on the other team's consoles until its
     /// team wins (without walking there; the server, as in the hyperbolic demo, trusts players).
-    #[arg(long, value_enum, default_value_t = BotObjective::Fight, requires = "bot")]
-    bot_objective: BotObjective,
+    /// Defaults to `fight`, and with --match to `consoles` (each round's bot).
+    #[arg(long, value_enum, requires = "bot")]
+    bot_objective: Option<BotObjective>,
     /// Run a match server (match_flow.rs) on UDP --match-port, without a window: it plays the
     /// levels of --match-levels round by round and exits once the match is over.
     #[arg(long, conflicts_with_all = ["serve", "join", "match_server", "bench_views", "autopilot", "play_route"])]
@@ -783,6 +784,16 @@ fn run_match_server(arguments: &Arguments) -> Result<()> {
     Ok(())
 }
 
+/// `get_bot_objective_flag` gives a bot objective as `--bot-objective` takes it.
+///
+/// Example: `assert_eq!(get_bot_objective_flag(BotObjective::Fight), "fight");`
+fn get_bot_objective_flag(objective: BotObjective) -> &'static str {
+    match objective {
+        BotObjective::Fight => "fight",
+        BotObjective::Consoles => "consoles",
+    }
+}
+
 /// `run_match_client` joins the match server at `address`: it shows the progression page
 /// (`match_menu.rs`) in a window, or prints it with `--bot`, and for each round it starts the
 /// round's level joined to `--team` (a window, or a `--bot-objective consoles` bot) and stops it
@@ -859,8 +870,32 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                     Scancode::_2 if client.team.is_none() => {
                         client.team = Some(match_state::Team::Red)
                     }
+                    Scancode::M => client.send_play(None)?,
                     _ => {}
                 },
+                Event::MouseButtonDown {
+                    mouse_btn: sdl3::mouse::MouseButton::Left,
+                    x,
+                    y,
+                    ..
+                } => {
+                    if let (Some(view), Some(canvas)) = (&client.view, &canvas) {
+                        let (width, height) = canvas.window().size();
+                        let at: [f32; 2] = warped_shared::page::get_page_point(
+                            [x, y],
+                            [width as f32, height as f32],
+                            match_menu::PAGE_SIZE,
+                        );
+                        match match_menu::get_click_target(view, at) {
+                            Some(match_menu::PageClick::Level(level)) => {
+                                println!("playing {} freely (clicked)", view.levels[level].name);
+                                client.send_play(Some(level))?;
+                            }
+                            Some(match_menu::PageClick::Match) => client.send_play(None)?,
+                            None => {}
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -905,10 +940,12 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                 let extra: Vec<String> = match arguments.bot {
                     true => {
                         let label: String = format!("match-{}-round-{round}", team.get_name());
+                        let objective: BotObjective =
+                            arguments.bot_objective.unwrap_or(BotObjective::Consoles);
                         let mut extra: Vec<String> = [
                             "--bot",
                             "--bot-objective",
-                            "consoles",
+                            get_bot_objective_flag(objective),
                             "--exit-after-s",
                             "3600",
                         ]
@@ -1559,7 +1596,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
             &mut client,
             duration_s,
             arguments.black_hole_strength,
-            arguments.bot_objective,
+            arguments.bot_objective.unwrap_or(BotObjective::Fight),
             &console_reach::find_console_places(&map)?,
             |frame, id| {
                 saver.submit((frame, id));
@@ -1625,8 +1662,9 @@ fn save_frame(renderer: &mut dyn Renderer, frame: FrameData, path: &Path) -> Res
     save_png(path, &pixels, size.0, size.1)
 }
 
-/// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder, with
-/// `command.txt` holding the command line and the git commit, and returns its path.
+/// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder (inside
+/// `Warped.app`, `~/Library/Logs/Warped/<script>/<run_id>/`), with `command.txt` holding the
+/// command line and the git commit (`app` inside the app), and returns its path.
 ///
 /// Example: `let folder = make_run_folder("bench_views", None)?;`
 fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
@@ -1635,7 +1673,11 @@ fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
     if let Some(label) = label {
         run_id = format!("{run_id}-{label}");
     }
-    let folder: PathBuf = crate_folder.join(".artifacts").join(script).join(&run_id);
+    let app_logs: Option<PathBuf> = app_bundle::get_app_logs_folder();
+    let folder: PathBuf = match &app_logs {
+        Some(logs) => logs.join(script).join(&run_id),
+        None => crate_folder.join(".artifacts").join(script).join(&run_id),
+    };
     if folder.exists() {
         return Err(format!(
             "run folder {} already exists; wait a second or pass another --label",
@@ -1644,11 +1686,14 @@ fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
         .into());
     }
     fs::create_dir_all(&folder)?;
-    let commit: String = std::process::Command::new("git")
-        .args(["describe", "--always", "--dirty"])
-        .current_dir(crate_folder)
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?;
+    let commit: String = match app_logs {
+        Some(_) => "app".to_string(),
+        None => std::process::Command::new("git")
+            .args(["describe", "--always", "--dirty"])
+            .current_dir(crate_folder)
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?,
+    };
     let command: String = std::env::args().collect::<Vec<String>>().join(" ");
     fs::write(
         folder.join("command.txt"),
