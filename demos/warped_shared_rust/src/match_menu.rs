@@ -349,6 +349,7 @@ const LEVEL_GAP: f32 = 12.0;
 const CAPTURE_BAR: f32 = 6.0;
 const HISTORY_TOP: f32 = 232.0 + THUMBNAIL_PAD + THUMBNAIL_HEIGHT;
 const CHIP_WIDTH: f32 = 72.0;
+const TEAM_BOX_PAD: f32 = 3.0;
 const LEVEL_WINDOW_FOOTER: &str =
     "Escape quits. M: back to the match. Levels open in their own window.";
 const MATCH_BUTTON_TEXT: &str = "[ back to the match ]";
@@ -647,12 +648,19 @@ pub fn get_progression_shapes_with_footer(
         ),
         None => ("press 1 for blue, 2 for red".to_string(), HUD_RGB),
     };
-    push_text(
-        &mut shapes,
-        [PAGE_SIZE[0] - MARGIN - you.len() as f32 * GLYPH, 12.0],
-        you.clone(),
-        you_rgb,
-    );
+    let you_x: f32 = PAGE_SIZE[0] - MARGIN - you.len() as f32 * GLYPH;
+    if team.is_some() {
+        shapes.push(Shape::Panel {
+            min: [you_x - TEAM_BOX_PAD, 12.0 - TEAM_BOX_PAD],
+            size: [
+                you.len() as f32 * GLYPH + 2.0 * TEAM_BOX_PAD,
+                GLYPH + 2.0 * TEAM_BOX_PAD,
+            ],
+            rgba: get_dark_rgba(you_rgb),
+            border_rgb: Some(you_rgb),
+        });
+    }
+    push_text(&mut shapes, [you_x, 12.0], you.clone(), you_rgb);
     let phase_rgb: [u8; 3] = match view.phase {
         Phase::WaitingForTeams => HUD_RGB,
         _ => HIGHLIGHT_RGB,
@@ -752,6 +760,7 @@ mod tests {
     //! | Long matches | 40 rounds fit `MAX_LINE_COUNT` | `a_long_match_fits_the_page` |
     //! | Window page | five panels, a picture box inside each, next level outlined, wavefront markers, chips, result | `the_window_page_shows_levels_wavefronts_and_history` |
     //! | Window page bounds | every shape inside `PAGE_SIZE` after a long match | `the_window_page_stays_on_the_page` |
+    //! | Own team | none (no box), blue, red (a box in its colour around "you play ...") | `the_window_page_boxes_your_team` |
     //! | Clicks | each level's centre and corner, the gap between levels, elsewhere, the match button without and with free play (drawn then) | `clicks_choose_every_level_or_the_match` |
     //! | MATCH page | a long match cut to the in-level menu's lines and width | `the_match_page_fits_the_in_level_menu` |
     //! | Free play | each phase on a free level, after match rounds (no match round indexed), the level outlined | `free_play_shows_its_level_and_wins` |
@@ -1038,6 +1047,43 @@ mod tests {
             texts.iter().any(|(text, _)| text.starts_with("RESULT:"))
                 == view.state.outcome().is_some()
         );
+    }
+
+    #[test]
+    fn the_window_page_boxes_your_team() {
+        let view: MatchView = make_view(MatchState::New(5), Phase::WaitingForTeams);
+        let get_team_boxes = |shapes: &[Shape]| -> Vec<([f32; 2], [f32; 2], [u8; 3])> {
+            shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    Shape::Panel {
+                        min,
+                        size,
+                        border_rgb: Some(rgb),
+                        ..
+                    } if min[1] < LEVEL_TOP => Some((*min, *size, *rgb)),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(get_team_boxes(&get_progression_shapes(&view, None)).is_empty());
+        for team in [Team::Blue, Team::Red] {
+            let shapes: Vec<Shape> = get_progression_shapes(&view, Some(team));
+            let boxes = get_team_boxes(&shapes);
+            assert_eq!(boxes.len(), 1, "{boxes:?}");
+            let (min, size, rgb) = boxes[0];
+            assert_eq!(rgb, TEAM_RGB[team.get_index()]);
+            let you: String = format!("you play {}", team.get_name());
+            let at: [f32; 2] = shapes
+                .iter()
+                .find_map(|shape| match shape {
+                    Shape::Text { at, text, .. } if *text == you => Some(*at),
+                    _ => None,
+                })
+                .expect("the you-play line");
+            let end: [f32; 2] = [at[0] + you.len() as f32 * GLYPH, at[1] + GLYPH];
+            assert!((0..2).all(|a| min[a] < at[a] && end[a] < min[a] + size[a]));
+        }
     }
 
     #[test]
