@@ -18,13 +18,15 @@ popd
 
 - **Main menu**: the games on this network (each match server's beacon, UDP 47851) to join; joining
   a game by its address; the game to start, the five-level match or any one level of the levels
-  manifest (Left/Right on "Game"), hosted for others, played alone, or against bots (how many on
-  each team, turning off consoles or fighting); while this app hosts a game, going back to it or
+  manifest (Left/Right on "Game"), hosted for others, played alone, or with bots (on your team, 0
+  to 4, and on the other, 0 to 5, at most 7 together since a level takes 8 players; turning off
+  consoles or fighting; you play blue); while this app hosts a game, going back to it or
   stopping it; player settings; credits; quit.
 - **Game menu**: the match's status (the progression page shared with the match window: the level
   being played and its map picture, the wavefronts, the round, who attacks and defends, free play's
   wins, players per team); your team and switching it; rejoining the round being played; the game
-  master's choice of what everyone plays (the match, or any one level; no authentication yet, so
+  master's choice of what everyone plays (the match, or any one level: Left/Right on its row, or
+  click a level on the match's status, and "back to the match" there; no authentication yet, so
   anyone may set it); game settings (next update); player settings; leaving to the main menu.
 - **Level**: a round's level. Escape opens the in-level menu (the same match status; resume, player
   settings, exit to the game menu, quit); holding Tab shows the map. **Until the levels are
