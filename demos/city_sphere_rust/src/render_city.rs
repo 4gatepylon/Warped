@@ -1,9 +1,9 @@
 //! `render_city` draws City Sphere with Metal rasterization (light goes straight in its Euclidean
 //! space, so no ray marching is needed): the street sphere and buildings, textured with the
 //! fps_demo's CC0 Poly Haven textures and lit by the glowing core; consoles, pylons and robots
-//! (per frame); the see-through glass shell with its lift holes; the team boundary planes, which
-//! glow faintly (W-148); laser beams; a pass that makes the picture shimmer like heat haze where
-//! those planes cover the screen (W-149, `encode_haze`); and a last pass that shows the finished
+//! (per frame); the see-through glass shell with its lift holes; the team domes over the pylons,
+//! which glow faintly (W-148); laser beams; a pass that makes the picture shimmer like heat haze
+//! where those domes cover the screen (W-149, `encode_haze`); and a last pass that shows the finished
 //! frame in the player's visuals (W-51, basic visuals) when they aren't the identity.
 //!
 //! Interface: `CityVertex`, `CityScene`, `build_scene`, `CityFrame`, `CityGpu`, `push_rounded_box`,
@@ -28,7 +28,7 @@ use objc2_metal::{
 };
 use rayon::prelude::*;
 
-use crate::city_world::{BoundaryPlane, CityWorld, Hole, get_up};
+use crate::city_world::{CityWorld, Hole, TeamDome, get_up};
 use crate::fps_demo_assets::get_asset_path;
 use crate::mesh::{MeshMaterial, MeshModel};
 use crate::texture_arrays::{make_array, make_mips};
@@ -45,7 +45,11 @@ const MSAA_SAMPLE_COUNT: usize = 4;
 pub const MAX_HOLE_COUNT: usize = 8;
 const ROUND_HOLE_SIDE_DOT: f64 = 2.0;
 const MOUTH_RING_SEGMENT_COUNT: usize = 32;
-const BOUNDARY_SEGMENT_COUNT: usize = 96;
+const DOME_SEGMENT_COUNT: usize = 96;
+const DOME_RING_COUNT: usize = 24;
+/// `DOME_FADE_HEIGHTS` is the height over which a dome's glow fades, in dome radii: more than 1,
+/// so its top still shows.
+const DOME_FADE_HEIGHTS: f64 = 4.0;
 const MOUTH_RING_WIDTH_FRAC: f64 = 0.12;
 const MOUTH_DISC_TINT: f32 = 0.25;
 const MOUTH_DISC_OPACITY: f32 = 0.85;
@@ -151,10 +155,10 @@ pub struct CityScene {
     pub id: u64,
     pub opaque: Vec<CityVertex>,
     pub glass: Vec<CityVertex>,
-    /// `boundary` is the team boundary planes' triangles (W-148, `push_boundary_plane`).
+    /// `boundary` is the team domes' triangles (W-148, `push_team_dome`).
     pub boundary: Vec<CityVertex>,
-    /// `haze_planes` is each boundary plane as the haze pass reads it: (x, side, height, team).
-    pub haze_planes: Vec<[f32; 4]>,
+    /// `haze_domes` is each team dome as the haze pass reads it: its centre and its radius.
+    pub haze_domes: Vec<[f32; 4]>,
     pub holes: Vec<[f32; 4]>,
     pub hole_sides: Vec<[f32; 4]>,
     pub lift_hole_count: usize,
@@ -410,8 +414,8 @@ fn get_layer(name: &str) -> f32 {
 /// `build_scene` makes the static geometry: the street, every box but the consoles and pylons
 /// (drawn per frame, since they change colour), the core and the glass.
 ///
-/// Example: `let scene = build_scene(&world);`
-pub fn build_scene(world: &CityWorld) -> CityScene {
+/// Example: `let scene = build_scene(&world, 0.2);`
+pub fn build_scene(world: &CityWorld, dome_circumference_frac: f64) -> CityScene {
     let mut opaque: Vec<CityVertex> = Vec::new();
     let street = &world.materials[world.street_material as usize];
     let street_color: [f32; 4] = [
@@ -546,23 +550,20 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     push_pylon_beacons(&mut opaque, world);
     push_electronics(&mut opaque, world);
     let mut boundary: Vec<CityVertex> = Vec::new();
-    let haze_planes: Vec<[f32; 4]> = world
-        .boundary_planes
+    let domes: Vec<TeamDome> = world.get_team_domes(dome_circumference_frac);
+    let haze_domes: Vec<[f32; 4]> = domes
         .iter()
-        .map(|plane| {
-            [plane.x_m, plane.side, plane.height_m, f64::from(plane.team)].map(|x| x as f32)
-        })
+        .map(|dome| dome.centre.extend(dome.radius_m).as_vec4().to_array())
         .collect();
-    for plane in &world.boundary_planes {
-        let inner_m: f64 = f64::from(glass_radius_m) - plane.height_m;
-        push_boundary_plane(&mut boundary, plane, inner_m, street_radius_m);
+    for dome in &domes {
+        push_team_dome(&mut boundary, dome, f64::from(glass_radius_m));
     }
     CityScene {
         id: 1,
         opaque,
         glass,
         boundary,
-        haze_planes,
+        haze_domes,
         holes,
         hole_sides,
         lift_hole_count,
@@ -571,45 +572,43 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     }
 }
 
-/// `push_boundary_plane` adds a team boundary plane (W-148) as a flat ring in its plane x =
-/// `plane.x_m`, from radius `inner_m` to `outer_m` from the centre (the street), in
-/// `BOUNDARY_SEGMENT_COUNT` pieces. Each vertex carries the plane's height (uv.x), its opacity at
-/// the foot (alpha) and its team (layer); `boundary_fragment` draws its glow and the shimmer.
+/// `push_team_dome` adds a team's dome (W-148) as the part of the sphere of `dome.radius_m` around
+/// `dome.centre` that is above the glass level (within `glass_m` of the world's centre), in
+/// `DOME_RING_COUNT` rings of `DOME_SEGMENT_COUNT` pieces from its top down to its rim on the
+/// glass. Each vertex carries the height over which the glow fades (uv.x, `DOME_FADE_HEIGHTS`
+/// radii, so the whole dome shows), its opacity at the foot (alpha), its team (layer) and its
+/// outward normal; `boundary_fragment` draws its glow.
 ///
-/// Example: `push_boundary_plane(&mut boundary, &plane, 11.0, 24.0);`
-fn push_boundary_plane(
-    out: &mut Vec<CityVertex>,
-    plane: &BoundaryPlane,
-    inner_m: f64,
-    outer_m: f64,
-) {
-    let ring_radius = |r_m: f64| (r_m * r_m - plane.x_m * plane.x_m).max(0.0).sqrt();
-    let (inner_ring_m, outer_ring_m) = (ring_radius(inner_m), ring_radius(outer_m));
-    let normal: [f32; 3] = [plane.side as f32, 0.0, 0.0];
-    let vertex = |angle_rad: f64, ring_m: f64| CityVertex {
-        position: [
-            plane.x_m as f32,
-            (ring_m * angle_rad.cos()) as f32,
-            (ring_m * angle_rad.sin()) as f32,
-        ],
-        normal,
-        uv: [plane.height_m as f32, 0.0],
-        color: [1.0, 1.0, 1.0, plane.opacity_frac as f32],
-        layer: plane.team as f32,
+/// Example: `push_team_dome(&mut boundary, &dome, 17.0);`
+fn push_team_dome(out: &mut Vec<CityVertex>, dome: &TeamDome, glass_m: f64) {
+    let up: DVec3 = -dome.centre.normalize();
+    let side: DVec3 = up.any_orthonormal_vector();
+    let other: DVec3 = up.cross(side);
+    let rim_rad: f64 = (dome.radius_m / (2.0 * glass_m)).clamp(-1.0, 1.0).acos();
+    let vertex = |ring: usize, segment: usize| {
+        let polar_rad: f64 = rim_rad * ring as f64 / DOME_RING_COUNT as f64;
+        let around_rad: f64 = std::f64::consts::TAU * segment as f64 / DOME_SEGMENT_COUNT as f64;
+        let normal: DVec3 = up * polar_rad.cos()
+            + (side * around_rad.cos() + other * around_rad.sin()) * polar_rad.sin();
+        CityVertex {
+            position: (dome.centre + normal * dome.radius_m).as_vec3().to_array(),
+            normal: normal.as_vec3().to_array(),
+            uv: [(dome.radius_m * DOME_FADE_HEIGHTS) as f32, 0.0],
+            color: [1.0, 1.0, 1.0, dome.opacity_frac as f32],
+            layer: dome.team as f32,
+        }
     };
-    for k in 0..BOUNDARY_SEGMENT_COUNT {
-        let (a_rad, b_rad) = (
-            std::f64::consts::TAU * k as f64 / BOUNDARY_SEGMENT_COUNT as f64,
-            std::f64::consts::TAU * (k + 1) as f64 / BOUNDARY_SEGMENT_COUNT as f64,
-        );
-        out.extend([
-            vertex(a_rad, inner_ring_m),
-            vertex(a_rad, outer_ring_m),
-            vertex(b_rad, outer_ring_m),
-            vertex(a_rad, inner_ring_m),
-            vertex(b_rad, outer_ring_m),
-            vertex(b_rad, inner_ring_m),
-        ]);
+    for ring in 0..DOME_RING_COUNT {
+        for segment in 0..DOME_SEGMENT_COUNT {
+            out.extend([
+                vertex(ring, segment),
+                vertex(ring + 1, segment),
+                vertex(ring + 1, segment + 1),
+                vertex(ring, segment),
+                vertex(ring + 1, segment + 1),
+                vertex(ring, segment + 1),
+            ]);
+        }
     }
 }
 
@@ -1252,13 +1251,13 @@ fn make_pipeline(
         })?)
 }
 
-/// `MAX_HAZE_PLANE_COUNT` is how many team boundary planes the haze pass reads, `render_city.metal`'s.
-const MAX_HAZE_PLANE_COUNT: usize = 4;
+/// `MAX_HAZE_DOME_COUNT` is how many team domes the haze pass reads, `render_city.metal`'s.
+const MAX_HAZE_DOME_COUNT: usize = 4;
 
 /// `CityHaze` matches `render_city.metal`'s `CityHaze`: what the haze pass needs to find where the
-/// team boundary planes cover the screen (W-149): the inverse of the frame's view and projection,
+/// team domes cover the screen (W-149): the inverse of the frame's view and projection,
 /// the camera, the street's and the glass's radii with the shimmer's clock in `radii[3]`, the
-/// render size and the target's texel size, each plane's (x, side, height, team) and the count.
+/// render size and the target's texel size, each dome's centre and radius, and the count.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct CityHaze {
@@ -1266,7 +1265,7 @@ struct CityHaze {
     camera_m: [f32; 4],
     radii: [f32; 4],
     size: [f32; 4],
-    planes: [[f32; 4]; MAX_HAZE_PLANE_COUNT],
+    domes: [[f32; 4]; MAX_HAZE_DOME_COUNT],
     counts: [i32; 4],
 }
 
@@ -1618,7 +1617,7 @@ impl CityGpu {
             }
         }
         encoder.endEncoding();
-        if !frame.scene.haze_planes.is_empty() {
+        if !frame.scene.haze_domes.is_empty() {
             self.encode_haze(device, command_buffer, frame, target)?;
         }
         if frame.visuals != GpuPlayerVisuals::IDENTITY {
@@ -1654,9 +1653,9 @@ impl CityGpu {
             .ok_or("Metal: no blit encoder for the haze")?;
         unsafe { blit.copyFromTexture_toTexture(target, copy) };
         blit.endEncoding();
-        let mut planes: [[f32; 4]; MAX_HAZE_PLANE_COUNT] = [[0.0; 4]; MAX_HAZE_PLANE_COUNT];
-        for (slot, plane) in planes.iter_mut().zip(&frame.scene.haze_planes) {
-            *slot = *plane;
+        let mut domes: [[f32; 4]; MAX_HAZE_DOME_COUNT] = [[0.0; 4]; MAX_HAZE_DOME_COUNT];
+        for (slot, dome) in domes.iter_mut().zip(&frame.scene.haze_domes) {
+            *slot = *dome;
         }
         let haze = CityHaze {
             world_from_clip: frame.get_clip_from_world().inverse().to_cols_array_2d(),
@@ -1673,9 +1672,9 @@ impl CityGpu {
                 1.0 / target_px.0 as f32,
                 1.0 / target_px.1 as f32,
             ],
-            planes,
+            domes,
             counts: [
-                frame.scene.haze_planes.len().min(MAX_HAZE_PLANE_COUNT) as i32,
+                frame.scene.haze_domes.len().min(MAX_HAZE_DOME_COUNT) as i32,
                 0,
                 0,
                 0,
@@ -1746,32 +1745,36 @@ mod tests {
     //! | --- | --- |
     //! | The vertex layout matches the shader's (13 floats) | `vertex_is_13_floats` |
     //! | The scene has the street, boxes, core, hexagonal glass, glowing details, and the lifts' holes (round) before the stairs' (as wide as their stairs) | `scene_has_every_part` |
-    //! | The team boundary planes (W-148): a ring per plane in its plane, from the glass level's height to the street; the shaders with `boundary_planes.metal` compile into its pipeline | `boundary_planes_are_rings_in_their_planes` |
+    //! | The team domes (W-148): a cap per dome on its sphere, above the glass with its rim on it, normals outward, the same triangles at another size; the shaders with `boundary_planes.metal` compile into its pipeline | `team_domes_are_caps_above_the_glass` |
     //! | The shaders, with `visuals.metal` before them, compile into the opaque and visuals pipelines (W-51, basic visuals) | `the_visuals_pass_compiles` |
 
     use super::*;
 
+    const TEST_DOME_FRAC: f64 = 0.2;
+
     #[test]
-    fn boundary_planes_are_rings_in_their_planes() {
+    fn team_domes_are_caps_above_the_glass() {
         let world: CityWorld = CityWorld::Builtin().unwrap();
-        let scene: CityScene = build_scene(&world);
-        assert_eq!(
-            scene.boundary.len(),
-            world.boundary_planes.len() * BOUNDARY_SEGMENT_COUNT * 6
-        );
-        let inner_m: f64 = f64::from(scene.glass_radius_m) - world.boundary_planes[0].height_m;
-        for (plane, vertices) in world
-            .boundary_planes
-            .iter()
-            .zip(scene.boundary.chunks(BOUNDARY_SEGMENT_COUNT * 6))
-        {
+        let scene: CityScene = build_scene(&world, TEST_DOME_FRAC);
+        let domes: Vec<TeamDome> = world.get_team_domes(TEST_DOME_FRAC);
+        let per_dome: usize = DOME_RING_COUNT * DOME_SEGMENT_COUNT * 6;
+        assert_eq!(scene.boundary.len(), domes.len() * per_dome);
+        assert_eq!(scene.haze_domes.len(), domes.len());
+        for (dome, vertices) in domes.iter().zip(scene.boundary.chunks(per_dome)) {
+            let mut lowest_m: f64 = f64::MAX;
             for vertex in vertices {
                 let p: DVec3 = Vec3::from(vertex.position).as_dvec3();
-                assert!((p.x - plane.x_m).abs() < 1e-5, "{p}");
-                assert!(p.length() > inner_m - 1e-3 && p.length() < world.street_radius_m + 1e-3);
-                assert_eq!(vertex.layer, plane.team as f32);
+                let from_centre_m: f64 = (p - dome.centre).length();
+                assert!((from_centre_m - dome.radius_m).abs() < 1e-3, "{p}");
+                assert!(p.length() < f64::from(scene.glass_radius_m) + 1e-3, "{p}");
+                let normal: DVec3 = Vec3::from(vertex.normal).as_dvec3();
+                assert!((normal - (p - dome.centre) / dome.radius_m).length() < 1e-3);
+                assert_eq!(vertex.layer, dome.team as f32);
+                lowest_m = lowest_m.min(f64::from(scene.glass_radius_m) - p.length());
             }
+            assert!(lowest_m.abs() < 1e-3, "the rim is on the glass: {lowest_m}");
         }
+        assert!(build_scene(&world, 0.05).boundary.len() == scene.boundary.len());
         let device = objc2_metal::MTLCreateSystemDefaultDevice().expect("a Metal GPU");
         let source: String = get_shader_source();
         let library = device
@@ -1800,7 +1803,7 @@ mod tests {
     #[test]
     fn scene_has_every_part() {
         let world: CityWorld = CityWorld::Builtin().unwrap();
-        let scene: CityScene = build_scene(&world);
+        let scene: CityScene = build_scene(&world, TEST_DOME_FRAC);
         let street_edge_count: usize = 60 * STREET_FREQUENCY * STREET_FREQUENCY;
         assert!(
             scene.opaque.len()

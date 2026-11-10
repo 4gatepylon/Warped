@@ -400,45 +400,48 @@ fragment float4 beam_fragment(Fragment in [[stage_in]], constant CityUniforms& u
 constant float BOUNDARY_MAX_SLANT = 4.0;
 constant float BOUNDARY_MIN_FACE_COS = 0.001;
 constant float BOUNDARY_SRGB_GAMMA = 2.2;
-constant uint MAX_HAZE_PLANE_COUNT = 4;
+constant uint MAX_HAZE_DOME_COUNT = 4;
+constant float DOME_FADE_HEIGHTS = 4.0;
+constant float DOME_FROM_INSIDE_FRAC = 0.5;
 constant float HAZE_FOOT_M = 0.3;
 constant float HAZE_RAY_DEPTH = 0.5;
 constant float4 CITY_HAZE_STYLE = float4(1.5, 0.06, 1.0, 1.0);
 
 /**
- * @brief `boundary_fragment` draws a team boundary plane (W-148, team boundary planes in every level) over what is
- * behind it (`behind`, read back by programmable blending): its glow in its team's colour, as opaque as the map says at
- * each floor's foot (the street and the glass) and fading up its height (`get_boundary_profile`), thicker the more it
- * is seen edge-on (up to `BOUNDARY_MAX_SLANT` times). Each team's plane shows only from its own side (`in.normal`), so
- * the one disc between the hemispheres is blue from blue's half and red from red's.
+ * @brief `boundary_fragment` draws a team's dome (W-148, team boundary planes in every level; in City Sphere each
+ * team's area is a dome over its pylon) over what is behind it (`behind`, read back by programmable blending): its glow
+ * in its team's colour, as opaque as the map says where it meets the glass level and fading a little up the dome
+ * (`get_boundary_profile` over `in.uv.x`, several dome radii, so its top still shows), thicker the more its surface is
+ * seen edge-on (up to `BOUNDARY_MAX_SLANT` times), which rims the dome like a bubble. It shows from outside and, at
+ * `DOME_FROM_INSIDE_FRAC` of that opacity, from inside, so a team in its own dome still sees out clearly.
  * @par Example
  * @code
  * drawn after the glass with the boundary pipeline (no blending, depth tested)
  * @endcode
  */
 fragment float4 boundary_fragment(Fragment in [[stage_in]], float4 behind [[color(0)]], constant CityUniforms& u [[buffer(1)]]) {
-    float3 view = u.camera_m.xyz - in.world;
-    if (dot(view, in.normal) < 0.0) discard_fragment();
-    float r_m = length(in.world);
-    float floor_m = r_m > u.glass.x ? u.ambient.w : u.glass.x;
-    float shown_frac = get_boundary_profile(max(floor_m - r_m, 0.0), in.uv.x);
-    float slant = min(1.0 / max(abs(normalize(view).x), BOUNDARY_MIN_FACE_COS), BOUNDARY_MAX_SLANT);
-    float alpha = 1.0 - pow(1.0 - in.color.a * shown_frac, slant);
+    float3 view = normalize(u.camera_m.xyz - in.world);
+    float above_m = max(u.glass.x - length(in.world), 0.0);
+    float shown_frac = get_boundary_profile(above_m, in.uv.x);
+    float facing = dot(view, normalize(in.normal));
+    float slant = min(1.0 / max(abs(facing), BOUNDARY_MIN_FACE_COS), BOUNDARY_MAX_SLANT);
+    float side_frac = facing < 0.0 ? DOME_FROM_INSIDE_FRAC : 1.0;
+    float alpha = 1.0 - pow(1.0 - in.color.a * shown_frac * side_frac, slant);
     float3 glow = encode_srgb(pow(get_boundary_color(int(in.layer + 0.5)), BOUNDARY_SRGB_GAMMA) * BOUNDARY_BRIGHTNESS);
     return float4(mix(behind.rgb, glow, alpha), behind.a);
 }
 
 /**
  * @brief `CityHaze` matches `render_city.rs`'s `CityHaze`: the inverse view and projection, the camera, the street's and
- * glass's radii with the shimmer's clock in `.w`, the render size and the target's texel size, each boundary plane's
- * (x, side, height, team) and their count.
+ * glass's radii with the shimmer's clock in `.w`, the render size and the target's texel size, each team dome's centre
+ * (xyz) and radius (w), and their count.
  */
 struct CityHaze {
     float4x4 world_from_clip;
     float4 camera_m;
     float4 radii;
     float4 size;
-    float4 planes[MAX_HAZE_PLANE_COUNT];
+    float4 domes[MAX_HAZE_DOME_COUNT];
     int4 counts;
 };
 
@@ -462,11 +465,32 @@ vertex HazeVertexOut haze_vertex(uint id [[vertex_id]]) {
 }
 
 /**
- * @brief `haze_fragment` makes the picture shimmer like heat haze where a team boundary plane covers the screen (W-149,
- * shimmer through boundary planes): it finds where the eye's ray through the pixel crosses a plane seen from its own
- * side, between the core and the street, and how much the plane shows there (`get_boundary_profile` above the floor
- * below it), then samples the frame's copy `drawn` moved by `get_boundary_haze_px` times that, in City Sphere's glassy
- * style (`CITY_HAZE_STYLE`: wide, slow wobbles). It is screen-space: what is in front of the plane shimmers too.
+ * @brief `get_dome_haze_weight` gives how much a team dome shows where the eye's ray meets its surface at `t_m` along
+ * the ray: 0 behind the eye or below the glass level (the dome is only above it), else the dome's glow profile there.
+ * @param[in] eye The eye.
+ * @param[in] dir The ray's unit direction.
+ * @param[in] t_m The distance along the ray.
+ * @param[in] glass_m The glass level's radius.
+ * @param[in] radius_m The dome's radius.
+ * @return The weight, 0 to 1.
+ * @par Example
+ * @code
+ * weight = max(weight, get_dome_haze_weight(eye, dir, t_m, haze.radii.y, dome.w));
+ * @endcode
+ */
+static float get_dome_haze_weight(float3 eye, float3 dir, float t_m, float glass_m, float radius_m) {
+    if (!(t_m > 0.0)) return 0.0;
+    float above_m = glass_m - length(eye + t_m * dir);
+    return get_boundary_profile(max(above_m, 0.0), radius_m * DOME_FADE_HEIGHTS) * smoothstep(-HAZE_FOOT_M, 0.0, above_m);
+}
+
+/**
+ * @brief `haze_fragment` makes the picture shimmer like heat haze where a team dome covers the screen (W-149, shimmer
+ * through boundary planes): it finds where the eye's ray through the pixel crosses a dome's surface above the glass
+ * level, going in or coming out (so a player inside a dome sees the world outside shimmer, and one outside sees the
+ * dome's inside shimmer), and how much the dome shows there, then samples the frame's copy `drawn` moved by
+ * `get_boundary_haze_px` times that, in City Sphere's glassy style (`CITY_HAZE_STYLE`: wide, slow wobbles). It is
+ * screen-space: what is in front of the dome shimmers too.
  * @par Example
  * @code
  * a render pass over the resolved frame, with the frame's copy at texture 0 and `CityHaze` at fragment buffer 0
@@ -482,13 +506,14 @@ fragment float4 haze_fragment(HazeVertexOut in [[stage_in]], texture2d<float> dr
     float3 dir = normalize(far_point.xyz / far_point.w - eye);
     float weight = 0.0;
     for (int i = 0; i < haze.counts.x; i++) {
-        float4 plane = haze.planes[i];
-        float t_m = (plane.x - eye.x) / dir.x;
-        if ((eye.x - plane.x) * plane.y <= 0.0 || !(t_m > 0.0)) continue;
-        float r_m = length(eye + t_m * dir);
-        float floor_m = r_m > haze.radii.y ? haze.radii.x : haze.radii.y;
-        float above_m = floor_m - r_m;
-        weight = max(weight, get_boundary_profile(max(above_m, 0.0), plane.z) * smoothstep(-HAZE_FOOT_M, 0.0, above_m));
+        float4 dome = haze.domes[i];
+        float3 from_centre = eye - dome.xyz;
+        float along_m = dot(from_centre, dir);
+        float inside = along_m * along_m - dot(from_centre, from_centre) + dome.w * dome.w;
+        if (inside <= 0.0) continue;
+        float half_m = sqrt(inside);
+        weight = max(weight, get_dome_haze_weight(eye, dir, -along_m - half_m, haze.radii.y, dome.w));
+        weight = max(weight, get_dome_haze_weight(eye, dir, -along_m + half_m, haze.radii.y, dome.w));
     }
     if (weight <= 0.0) return drawn.sample(edge, pixel * haze.size.zw);
     float2 move_px = get_boundary_haze_px(pixel, haze.size.y, haze.radii.w, CITY_HAZE_STYLE) * weight;

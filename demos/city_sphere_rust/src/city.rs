@@ -1141,7 +1141,7 @@ impl CitySession {
             weapons.switch_gun(Gun::Laser);
         }
         Ok(CitySession {
-            scene: Arc::new(build_scene(&world)),
+            scene: Arc::new(build_scene(&world, settings.team_domes.circumference_frac)),
             body: AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?,
             brain: match (arguments.play_route, arguments.route) {
                 (false, _) => None,
@@ -1459,6 +1459,12 @@ impl CitySession {
         if let Some(settings) = &self.client.settings
             && *settings != self.settings
         {
+            if settings.team_domes != self.settings.team_domes {
+                self.scene = Arc::new(build_scene(
+                    &self.world,
+                    settings.team_domes.circumference_frac,
+                ));
+            }
             self.settings = settings.clone();
         }
         step_respawn(&mut self.client, &mut self.respawn_in_s, dt_s)?;
@@ -2872,7 +2878,10 @@ fn render_map_picture(arguments: &Arguments, renderer: &mut dyn Renderer) -> Res
     world
         .shells
         .retain(|shell| shell.is_walkable_inside || shell.is_reflective_inside);
-    let scene: Arc<CityScene> = Arc::new(build_scene(&world));
+    let scene: Arc<CityScene> = Arc::new(build_scene(
+        &world,
+        ServerSettings::Builtin().team_domes.circumference_frac,
+    ));
     let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
     let face_px: usize = MAP_PICTURE_FACE_PX;
     let faces: [(DVec3, DVec3); 6] = [
@@ -3375,7 +3384,10 @@ fn bench_views(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()>
         None => warped_shared::visuals::GpuPlayerVisuals::IDENTITY,
     };
     let world: CityWorld = CityWorld::Builtin()?;
-    let scene: Arc<CityScene> = Arc::new(build_scene(&world));
+    let scene: Arc<CityScene> = Arc::new(build_scene(
+        &world,
+        ServerSettings::Builtin().team_domes.circumference_frac,
+    ));
     let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
     let size: (u32, u32) = (arguments.width_px, arguments.height_px);
@@ -3644,7 +3656,10 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
 /// saves it as a PNG under .artifacts/photos/.
 fn render_photos(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()> {
     let world: CityWorld = CityWorld::Builtin()?;
-    let scene: Arc<CityScene> = Arc::new(build_scene(&world));
+    let scene: Arc<CityScene> = Arc::new(build_scene(
+        &world,
+        ServerSettings::Builtin().team_domes.circumference_frac,
+    ));
     let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
     let folder: PathBuf = make_run_folder("photos", arguments.label.as_deref())?;
     let size: (u32, u32) = (arguments.width_px, arguments.height_px);
