@@ -106,10 +106,7 @@ flashlight:  # It shines while the right button is held, lighting the scene in a
   range_m: 25.0  # Distance at which its light has fallen to half.
   brightness_frac: 2.0  # How bright it is, as a fraction of full sunlight.
 
-gravity:  # How black holes and wormhole mouths pull walkers along the ground (W-144): the built-in values every level shares.
-  max_pull_per_walk_speed: 0.75  # The strongest pull, as a share of walking speed added toward a warp or taken from walking away (below 1; 0 for none).
-  full_pull_m: 3.0  # How far out from a horizon or throat the pull stays that strong.
-  reach_m: 24.0  # How far out the pull reaches, falling off beyond full_pull_m (above it).
+gravity:  # How black holes and wormhole mouths pull players (W-202): the built-in values every level shares.
   radius_m: 5.0  # W-202: how far from a warp's centre its pull reaches (2.5 bodies of 2 m).
   acceleration_m_per_s_per_s: 11.9  # W-202: how hard a warp pulls inside that radius (0 for none); a fall from the radius reaches a thrown mouth's throat at 9 m/s.
   profile: constant  # W-202: how the pull varies from the throat out to the radius: constant, stronger_near_mouth or harmonic.

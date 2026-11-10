@@ -48,7 +48,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 29] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 28] = [
     "gravity.black_hole_acceleration_frac",
     "gravity.black_hole_min_radius_m",
     "gravity.black_hole_darkness_frac",
@@ -77,7 +77,6 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 29] = [
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
-    "gravity.max_pull_per_walk_speed",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
 #[cfg(target_os = "macos")]
@@ -744,23 +743,26 @@ mod tests {
         let with_gravity = |section: &str| -> Result<ServerSettings> {
             ServerSettings::FromYaml(&format!("{without_gravity}\ngravity: {section}\n"), "test")
         };
-        let one_key: ServerSettings = with_gravity("{reach_m: 12.0}").expect("one key");
+        let one_key: ServerSettings = with_gravity("{radius_m: 12.0}").expect("one key");
         assert_eq!(
             one_key.gravity,
             GravitySettings {
-                reach_m: 12.0,
+                radius_m: 12.0,
                 ..GravitySettings::default()
             }
         );
-        assert!(with_gravity("{max_pull_per_walk_speed: 0.0}").is_ok());
+        assert!(with_gravity("{acceleration_m_per_s_per_s: 0.0}").is_ok());
         for bad in [
-            "{max_pull_per_walk_speed: 1.0}",
-            "{full_pull_m: 30.0}",
-            "{reach_mm: 12.0}",
+            "{radius_m: 0.0}",
+            "{black_hole_speed_frac: 1.5}",
+            "{radius_mm: 12.0}",
+            "{reach_m: 24.0}",
         ] {
             let error: String = with_gravity(bad).expect_err(bad).to_string();
             assert!(
-                error.contains("gravity") || error.contains("reach_mm"),
+                error.contains("gravity")
+                    || error.contains("radius_mm")
+                    || error.contains("reach_m"),
                 "{error}"
             );
         }

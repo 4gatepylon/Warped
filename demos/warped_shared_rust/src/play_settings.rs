@@ -362,12 +362,6 @@ pub struct BlackHoleSettings {
     pub min_time_rate_frac: f64,
 }
 
-/// `MAX_PULL_PER_WALK_SPEED_EXCL` bounds `GravitySettings::max_pull_per_walk_speed`: below 1, a
-/// warp's pull never stops a player walking away from it.
-pub const MAX_PULL_PER_WALK_SPEED_EXCL: f64 = 1.0;
-const BUILTIN_MAX_PULL_PER_WALK_SPEED: f64 = 0.75;
-const BUILTIN_FULL_PULL_M: f64 = 3.0;
-const BUILTIN_PULL_REACH_M: f64 = 24.0;
 /// `BUILTIN_PULL_RADIUS_M`, `BUILTIN_PULL_M_PER_S_PER_S` and `BUILTIN_DRIFT_BRAKE_M_PER_S_PER_S` are
 /// the proposal of `demos/warp_pull_js/EQUATIONS.md`: 2.5 bodies of 2 m, and a pull that gives 9 m/s
 /// by a thrown mouth's throat.
@@ -380,22 +374,15 @@ const BUILTIN_BLACK_HOLE_SPEED_FRAC: f64 = 0.75;
 const BUILTIN_BLACK_HOLE_MIN_RADIUS_M: f64 = 3.0;
 const BUILTIN_BLACK_HOLE_DARKNESS_FRAC: f64 = 0.85;
 
-/// `GravitySettings` is how black holes and wormhole mouths pull a player along the ground
-/// (W-144, `gravity.rs`): the strongest pull, as a share of walking speed that it adds toward the
-/// warp or takes away from walking away (all warps' pulls together are capped at it); how far
-/// out from a warp's horizon or throat the pull stays that strong; and how far out it reaches,
-/// falling off in between. A missing section or key takes the built-in value, the same in every
+/// `GravitySettings` is how black holes and wormhole mouths pull a player (W-202, pull toward
+/// wormholes and black holes in the game settings; `pull_dynamics.rs`): how far from a warp's
+/// centre the pull reaches, how strong it is, how it varies between the throat and the radius,
+/// and how fast the drift it gave a player is braked outside every radius; then how a black
+/// hole's pull differs. A missing section or key takes the built-in value, the same in every
 /// level (`Default`), so a level's `server_settings.yaml` overrides only what differs.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(default, deny_unknown_fields)]
 pub struct GravitySettings {
-    pub max_pull_per_walk_speed: f64,
-    pub full_pull_m: f64,
-    pub reach_m: f64,
-    /// `radius_m`, `acceleration_m_per_s_per_s`, `profile` and `brake_m_per_s_per_s` are the pull
-    /// as an acceleration (W-202, `pull_dynamics.rs`): how far from a warp's centre it reaches,
-    /// how strong it is, how it varies between the throat and the radius, and how fast the drift
-    /// it gave a player is braked outside every radius.
     pub radius_m: f64,
     pub acceleration_m_per_s_per_s: f64,
     pub profile: PullProfile,
@@ -440,15 +427,13 @@ impl PullProfile {
 }
 
 impl Default for GravitySettings {
-    /// `default` is the built-in pull: at most 0.75 of walking speed (more than crouching's 0.5,
-    /// less than walking's 1), full within 3 m of a horizon or throat, gone 24 m out.
+    /// `default` is the built-in pull the user approved: 5 m, 11.9 m/s², the same everywhere
+    /// inside the radius, braked at 15 m/s² outside; a black hole's over twice the radius with
+    /// half the strength, the legs at 0.75, a 3 m minimum radius and 0.85 dark there.
     ///
     /// Example: `let gravity: GravitySettings = GravitySettings::default();`
     fn default() -> GravitySettings {
         GravitySettings {
-            max_pull_per_walk_speed: BUILTIN_MAX_PULL_PER_WALK_SPEED,
-            full_pull_m: BUILTIN_FULL_PULL_M,
-            reach_m: BUILTIN_PULL_REACH_M,
             radius_m: BUILTIN_PULL_RADIUS_M,
             acceleration_m_per_s_per_s: BUILTIN_PULL_M_PER_S_PER_S,
             profile: PullProfile::Constant,
@@ -463,21 +448,11 @@ impl Default for GravitySettings {
 }
 
 impl GravitySettings {
-    /// `check` fails, naming the keys, unless `max_pull_per_walk_speed` is from 0 (no pull) up
-    /// to but not including `MAX_PULL_PER_WALK_SPEED_EXCL`, and `full_pull_m` is above 0 and
-    /// below `reach_m`.
+    /// `check` fails, naming the keys, unless the radius is above 0, the strength and the
+    /// braking are at least 0, and the black hole's numbers are in their ranges.
     ///
     /// Example: `settings.gravity.check()?;`
     pub fn check(&self) -> Result<(), String> {
-        let is_max_in_range: bool =
-            (0.0..MAX_PULL_PER_WALK_SPEED_EXCL).contains(&self.max_pull_per_walk_speed);
-        if !is_max_in_range || !(self.full_pull_m > 0.0 && self.full_pull_m < self.reach_m) {
-            return Err(format!(
-                "gravity needs 0 <= max_pull_per_walk_speed < {MAX_PULL_PER_WALK_SPEED_EXCL} and \
-                 0 < full_pull_m < reach_m, not {}, {} and {}",
-                self.max_pull_per_walk_speed, self.full_pull_m, self.reach_m
-            ));
-        }
         let is_black_hole_valid: bool = self.black_hole_radius_per_radius > 0.0
             && self.black_hole_acceleration_frac >= 0.0
             && self.black_hole_speed_frac > 0.0

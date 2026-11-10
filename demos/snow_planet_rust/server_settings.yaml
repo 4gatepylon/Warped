@@ -12,7 +12,7 @@
 #     unit: `_m` meters, `_s` seconds, `_rad` radians, `_per_s` per second.
 #     The `gravity` section (W-144: how black holes and wormhole mouths pull walkers) may be left
 #     out or give only some of its keys; the rest take the values every level shares, from
-#     `warped_shared`'s `GravitySettings`: `max_pull_per_walk_speed`, `full_pull_m`, `reach_m`.
+#     `warped_shared`'s `GravitySettings`.
 #
 # Example:
 #     cp server_settings.yaml fast.yaml  # edit fast.yaml, then:
@@ -128,10 +128,7 @@ black_hole:  # On Lunar Surface, each console turned off grows the black hole, a
   time_dilation_per_general_relativity: 15.0  # How many times stronger than in general relativity time slows near it (1 for real, 0 for none).
   min_time_rate_frac: 0.1  # The slowest a player's time runs near it, as a share of time far away (above 0, so nobody freezes).
 
-gravity:  # How black holes and wormhole mouths pull walkers along the ground (W-144): the built-in values every level shares.
-  max_pull_per_walk_speed: 0.75  # The strongest pull, as a share of walking speed added toward a warp or taken from walking away (below 1; 0 for none).
-  full_pull_m: 3.0  # How far out from a horizon or throat the pull stays that strong.
-  reach_m: 24.0  # How far out the pull reaches, falling off beyond full_pull_m (above it).
+gravity:  # How black holes and wormhole mouths pull players (W-202): the built-in values every level shares.
   radius_m: 5.0  # W-202: how far from a warp's centre its pull reaches (2.5 bodies of 2 m).
   acceleration_m_per_s_per_s: 11.9  # W-202: how hard a warp pulls inside that radius (0 for none); a fall from the radius reaches a thrown mouth's throat at 9 m/s.
   profile: constant  # W-202: how the pull varies from the throat out to the radius: constant, stronger_near_mouth or harmonic.

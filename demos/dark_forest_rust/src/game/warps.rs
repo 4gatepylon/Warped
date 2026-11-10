@@ -10,14 +10,15 @@
 //! Example: `let warps: Warps = Warps::from_map(&map.warps);`
 
 use glam::{DVec3, Mat3, Vec3};
-use warped_shared::gravity::{FlatWarp, get_flat_pull_m_per_s};
+use warped_shared::gravity::FlatWarp;
 use warped_shared::laser_drop::{DROP_PIECE_M, turn_flat};
+use warped_shared::pull_dynamics::{WarpPulls, get_flat_warp_pulls, step_drift};
 
+use crate::game::bots::BODY_CENTRE_HEIGHT_M;
+use crate::game::player::Player;
 use crate::map::{self, Warp};
 use crate::settings::GravitySettings;
 
-/// `HORIZON_PULL_M_PER_S2` is a black hole's pull at its horizon, before the taper to its reach.
-const HORIZON_PULL_M_PER_S2: f32 = 30.0;
 /// `THROAT_RADIUS_PER_SCHWARZSCHILD_RADIUS_FRAC` is how big a mouth's walk-in throat is.
 const THROAT_RADIUS_PER_SCHWARZSCHILD_RADIUS_FRAC: f32 = 0.5;
 /// `EXIT_MARGIN_M` is how far outside the partner's throat a traveller steps out.
@@ -196,40 +197,13 @@ impl Warps {
         result
     }
 
-    /// `get_pull_m_per_s2` is the black holes' pull at `x`: inverse square from the horizon,
-    /// tapering to nothing at each hole's reach.
+    /// `get_walk_pulls` gives what every black hole and mouth, the map's and the linked thrown
+    /// ones, does to a body whose middle is at `body_centre_m` (W-202, pull toward wormholes and
+    /// black holes in the game settings; `warped_shared::pull_dynamics`), as in every level: a
+    /// horizon or a walk-in throat is each warp's radius.
     ///
-    /// Example: `velocity_m_s += warps.get_pull_m_per_s2(x) * dt_s;`
-    pub fn get_pull_m_per_s2(&self, x: Vec3) -> Vec3 {
-        self.black_holes
-            .iter()
-            .map(|hole| {
-                let offset_m: Vec3 = hole.centre_m - x;
-                let r_m: f32 = offset_m.length();
-                if r_m >= hole.reach_m || r_m < hole.horizon_radius_m * 0.1 {
-                    return Vec3::ZERO;
-                }
-                let taper_frac: f32 = 1.0 - r_m / hole.reach_m;
-                offset_m / r_m
-                    * HORIZON_PULL_M_PER_S2
-                    * (hole.horizon_radius_m / r_m).powi(2)
-                    * taper_frac
-            })
-            .sum()
-    }
-
-    /// `get_walk_pull_m_per_s` gives the pull along the ground (W-144, gravity toward black holes
-    /// and wormholes; `warped_shared::gravity`) of every black hole and mouth, the map's and the
-    /// linked thrown ones, on a body whose middle is at `body_centre_m`, on a level whose walking
-    /// speed is `walk_m_per_s`: a horizon or a walk-in throat is each warp's radius.
-    ///
-    /// Example: `player.pull_m_per_s = warps.get_walk_pull_m_per_s(&settings.gravity, 8.0, centre_m);`
-    pub fn get_walk_pull_m_per_s(
-        &self,
-        gravity: &GravitySettings,
-        walk_m_per_s: f32,
-        body_centre_m: Vec3,
-    ) -> Vec3 {
+    /// Example: `let pulls: WarpPulls = warps.get_walk_pulls(&settings.gravity, centre_m);`
+    pub fn get_walk_pulls(&self, gravity: &GravitySettings, body_centre_m: Vec3) -> WarpPulls {
         let holes = self.black_holes.iter().map(|hole| FlatWarp {
             centre_m: hole.centre_m.as_dvec3(),
             radius_m: f64::from(hole.horizon_radius_m),
@@ -241,14 +215,36 @@ impl Warps {
             is_mouth: true,
         });
         let warps: Vec<FlatWarp> = holes.chain(mouths).collect();
-        let pull_m_per_s: DVec3 = get_flat_pull_m_per_s(
-            gravity,
-            f64::from(walk_m_per_s),
-            body_centre_m.as_dvec3(),
-            DVec3::Y,
-            &warps,
-        );
-        pull_m_per_s.as_vec3()
+        get_flat_warp_pulls(gravity, body_centre_m.as_dvec3(), DVec3::Y, &warps)
+    }
+
+    /// `pull_player` moves `player`'s drift, lift and slowing on by `dt_s` under the warps' pull,
+    /// as every level does (W-202): the pull along the ground builds the drift
+    /// (`Player::pull_m_per_s`), which is braked out of every warp's reach; a black hole also
+    /// lifts, slows the legs (`Player::legs_speed_frac`), holds the player out of its minimum
+    /// radius, and darkens the view by how deep the player is (`Player::black_hole_depth_frac`).
+    /// The owner calls it before each `Player::update`.
+    ///
+    /// Example: `warps.pull_player(&settings.gravity, &mut player, 1.0 / 60.0);`
+    pub fn pull_player(&self, gravity: &GravitySettings, player: &mut Player, dt_s: f32) {
+        let centre_m: Vec3 = player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
+        let pulls: WarpPulls = self.get_walk_pulls(gravity, centre_m);
+        let along_ground: Option<DVec3> = pulls
+            .pull_m_per_s_per_s
+            .map(|pull| DVec3::new(pull.x, 0.0, pull.z));
+        let drift: DVec3 = pulls.hold_out(step_drift(
+            player.pull_m_per_s.as_dvec3(),
+            along_ground,
+            gravity.brake_m_per_s_per_s,
+            f64::from(dt_s),
+        ));
+        player.pull_m_per_s = Vec3::new(drift.x as f32, 0.0, drift.z as f32);
+        player.legs_speed_frac = pulls.legs_speed_frac as f32;
+        player.black_hole_depth_frac = pulls.black_hole_depth_frac as f32;
+        let lift_m_per_s_per_s: f64 = pulls.pull_m_per_s_per_s.map_or(0.0, |pull| pull.y);
+        let vertical_m_per_s: f64 =
+            f64::from(player.velocity_m_s.y) + lift_m_per_s_per_s * f64::from(dt_s);
+        player.velocity_m_s.y = pulls.hold_out(DVec3::Y * vertical_m_per_s).y as f32;
     }
 
     /// `is_inside_horizon` tells whether `x` has fallen into a black hole.
@@ -443,17 +439,30 @@ mod tests {
         }
     }
 
-    /// `test_black_hole_pulls_within_reach_and_kills_inside` checks the pull points at the hole,
-    /// is zero beyond reach, and the horizon kills.
+    /// `test_black_hole_pulls_within_reach_and_kills_inside` checks the pull points at the hole
+    /// with half the mouths' strength, is none beyond twice the pull's radius, holds a player out
+    /// of the minimum radius, and the horizon kills.
     #[test]
     fn test_black_hole_pulls_within_reach_and_kills_inside() {
         let warps: Warps = warps();
-        let pull: Vec3 = warps.get_pull_m_per_s2(Vec3::new(4.0, 10.0, 0.0));
-        assert!(pull.x < -1.0 && pull.y.abs() < 1e-4, "{pull:?}");
-        assert_eq!(
-            warps.get_pull_m_per_s2(Vec3::new(9.0, 10.0, 0.0)),
-            Vec3::ZERO
+        let gravity: GravitySettings = GravitySettings::default();
+        let pulls: WarpPulls = warps.get_walk_pulls(&gravity, Vec3::new(6.0, 10.0, 0.0));
+        let pull: DVec3 = pulls.pull_m_per_s_per_s.expect("in reach");
+        let expected: f64 = -0.5 * gravity.acceleration_m_per_s_per_s;
+        assert!(
+            (pull.x - expected).abs() < 1e-6 && pull.y.abs() < 1e-6,
+            "{pull:?}"
         );
+        assert_eq!(pulls.legs_speed_frac, gravity.black_hole_speed_frac);
+        assert_eq!(
+            warps.get_walk_pulls(&gravity, Vec3::new(11.0, 10.0, 0.0)),
+            WarpPulls::NONE
+        );
+        let mut player: Player = Player::new(Vec3::new(2.0, 10.0 - BODY_CENTRE_HEIGHT_M, 0.0), 0.0);
+        player.pull_m_per_s = Vec3::new(-4.0, 0.0, 0.0);
+        warps.pull_player(&gravity, &mut player, 1.0 / 60.0);
+        assert_eq!(player.pull_m_per_s, Vec3::ZERO);
+        assert_eq!(player.black_hole_depth_frac, 1.0);
         assert!(warps.is_inside_horizon(Vec3::new(1.0, 10.0, 0.0)));
         assert!(!warps.is_inside_horizon(Vec3::new(3.0, 10.0, 0.0)));
     }
