@@ -50,7 +50,7 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | `1` / `2` / wheel | take the sniper / take the rifle / swap guns |
 | `Q` | throw a wormhole mouth: purple first, then green; once both are down they link (Lunar Surface's thrown wormholes) |
 | `E` (hold) | turn off an enemy console: look at it from within 3 m and hold 10 s |
-| `Esc` | menu (scores, settings, map, credits, quit), which frees the mouse; `Esc` again closes it; its QUIT page leaves with `Return`/`Y` |
+| `Esc` | menu (scores, settings, map, credits, quit), which frees the mouse; the left and right arrows, `Q`/`E` or a click on a page's name turn its pages, and the `?` at its top right shows its keys while the mouse is over it; `Esc` again closes it; its QUIT page leaves with `Return`/`Y` |
 | `Tab` (hold) | the whole map over the game, which goes on while you look; let go to hide it |
 | `F1`-`F8`, `[` / `]` | effects and render scale, as in `../fps_demo/` |
 | `F9` | sharp centre on or off (foveation: full resolution around the crosshair, softer toward the edges; on by default) |

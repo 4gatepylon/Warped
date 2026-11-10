@@ -50,7 +50,7 @@ walking crouched), `Space` jump (Lunar's 1.25 m in 0.58 s; hold it on a lift pad
 ride up; walk off at the top), walk up the stairs in front of your spawn to the glass level, left click shoots, right
 click eases into the gun's zoom, `1` the laser, `2` the rifle (heats up; overheats; a window starts on it), wheel
 switches gun, hold `E` aiming at the other team's console within reach to turn it off (10 s, Lunar's bar below the
-middle), `Esc` opens the menu and frees the mouse (`Q`/`E` change page: scores, settings, map, credits, quit; `Esc` again
+middle), `Esc` opens the menu and frees the mouse (the left and right arrows, `Q`/`E` or a click on a page's name change page: scores, settings, map, credits, quit; `Esc` again
 closes it), holding `Tab` shows the whole map over the game while you keep playing, `-` and `=` lower and raise the render resolution. The HUD has Lunar's health,
 ammo and energy bars with their pulses, and Lunar's hit effects (red, blur and shake from the edges) whenever health
 drops; an eliminated player sees "YOU DIED", a countdown and a bar filling over the wait, and comes back at a spawn

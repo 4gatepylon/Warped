@@ -33,11 +33,14 @@ make join-game SERVER=127.0.0.1
   choices (mouse speed, head bob, motion blur, how a hit looks, and `visuals`: the picture's brightness, contrast,
   saturation and gamma, each 1 for none, applied to the finished picture only, W-51, basic visuals); a copy is
   passed with `PLAYER_SETTINGS=mine.yaml` (`--player-settings`) to `make join-game`.
-- `Esc` opens the menu on its SCORES page (below); `E` turns to the settings page, of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
+- `Esc` opens the menu on its SCORES page (below); `E` or the right arrow turns to the settings page, of those choices: `Down` goes into its rows and `Up`/`Down` pick one (past the first or last row, back to the pages' names), `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
   (or the `--player-settings` file), which later games load by themselves. `Esc` closes it. Your player
   stands still while it is open, but the game goes on.
-- `Q` and `E` turn the menu's pages: SCORES, SETTINGS (above), MAP, CREDITS and QUIT (`Return` or `Y` leaves the
+- The menu's name is on its first line, with a `?` at the right whose help (the menu's keys) shows while the mouse
+  is over it, and the pages' names are on the line under it, the open one in brackets. The left and right arrows
+  (while no row of the settings page is chosen), `Q` and `E`, or a click on a page's name turn the menu's pages:
+  SCORES, SETTINGS (above), MAP, CREDITS and QUIT (`Return` or `Y` leaves the
   game; in the one-window app, back to its game menu). MAP is the whole map from above with you on it as a disk in
   your team's colour pointing the way you face: the ground's relief, structures brighter the higher they are,
   consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
