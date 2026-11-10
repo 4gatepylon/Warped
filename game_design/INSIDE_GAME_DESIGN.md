@@ -131,7 +131,8 @@ For example:
   shot eliminates a teammate as it would an enemy, but only an enemy counts as a kill; when off, a shot doesn't
   hurt teammates. A bot never hurts a teammate, whatever the setting: a bot whose laser meets a teammate holds its
   fire and steps aside (W-155 (play against bots)).
-- The game counts each player's kills and deaths, shown on the scoreboard (see [Screen](#screen)).
+- The game counts each player's kills and deaths, shown on the scoreboard (the menu's SCORES page, in
+  [`WINDOW_DESIGN.md`](WINDOW_DESIGN.md#the-menu)).
 
 ### Respawning
 
@@ -412,37 +413,21 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | `Q` | Throw your purple wormhole mouth, the next press your green one, then purple again, and so on (see [Thrown wormholes](#thrown-wormholes)) |
 | `1`, `2` (in the lobby) | Join the blue or the red team |
 | `Tab` (held) | Show the whole level's map (the menu's MAP page) over the game while held; the game goes on and the player can still move and look. Letting go hides it. |
-| `Esc` | Open or close the menu (see [Screen](#screen)), which frees the mouse while it is open; its QUIT page leaves the game. The player stands still while it is open, but the game goes on. |
+| `Esc` | Open or close the menu (see [`WINDOW_DESIGN.md`](WINDOW_DESIGN.md#the-menu)), which frees the mouse while it is open; its QUIT page leaves the game. The player stands still while it is open, but the game goes on. |
 | `Q`, `E` (in the menu) | Turn to the menu's previous or next page |
 | `Up`, `Down`, `Return`, `Left`, `Right` (in the menu) | Pick a setting, rebind a key (`Return`, then the new key), change a number |
 | `-`, `=` | Lower or raise the render resolution |
 
 ## Screen
 
-The screens a player meets, in order:
+The windows around a match (the title screen, the lobby, the menu and its pages) are in
+[`WINDOW_DESIGN.md`](WINDOW_DESIGN.md). In a match, a player meets:
 
-- **Title** (the Mac app, opened without flags): a list of the online games on the server the app was built for,
-  joining a server by the address the player types (its IP and port, remembered for next time), joining a game on
-  this Wi-Fi, and Quit, each game on either map. A game on a server asks once for its password (empty for a
-  server without one) and keeps it; a server that refuses it, or runs another version, stops the window with a
-  pop-up saying why, and the title screen comes back.
-- **Loading:** before the first frame, a black screen titled LOADING names what is loading (the surface textures,
-  the shaders, each gun) over a bar like the console bar, filling as it goes.
-- **Lobby** (the team screen): it says CONNECTING until the server answers, then CONNECTED with how many players
-  each team has. `1` joins blue and `2` joins red; it then says JOINING THE GAME until the server lets the player
-  in. A player can't shoot from the lobby.
-- **Connection banners:** when a window can't play on its server, a banner says why, and the terminal says what to
-  do:
-  - NO ANSWER FROM THE SERVER: nothing came back for 2 s;
-  - SERVER RUNS ANOTHER VERSION: the server's messages don't fit this build, so rebuild both from the same commit;
-  - THE GAME IS FULL: the server already has 12 players.
 - **In play:** the crosshair, bars and minimap below, and the other players as figures in their team's colour.
 - **Death:** the view darkens and says YOU DIED with a countdown until the player respawns (see
   [Respawning](#respawning)).
 - **Win:** when a team has won, every player sees `<TEAM> TEAM WINS`, and a new game starts when the server's
   operator presses `Enter` in its terminal, or, on a server in the cloud, 10 s after the win.
-- **Exit:** `Esc` opens the menu; on its QUIT page (`Q` from SCORES, where it opens) "Do you want to leave the
-  game?" leaves with `Return` or `Y`, and `Esc` goes back to the game.
 
 What a player sees while playing:
 
@@ -460,38 +445,8 @@ What a player sees while playing:
   `player_settings.yaml` (`minimap`).
 - **Console bar:** while a player holds `E` on a console, a bar below the crosshair fills over the
   10 s it takes, and they can't shoot (see [Winning a level](#winning-a-level)).
-- **Map while `Tab` is held:** the MAP page's picture and legend over the dimmed game, which goes on taking the
-  player's input, until `Tab` is let go.
-- **Menu** (`Esc`, which frees the mouse; `Esc` again closes it and captures the mouse): its name on the first line,
-  the names of its five pages on the line under it (the open one in brackets), then the page. It opens on SCORES.
-  The left and right arrows, `Q` and `E`, or a click on a page's name turn the pages. On SETTINGS, `Down` or `Up`
-  goes from the pages' names into the rows, where the left and right arrows change the chosen number instead, and
-  past the first or last row comes back to the names. A `?` at the right of the first line shows the menu's keys
-  while the mouse is over it; the keys aren't shown otherwise. Inside the one-window app a sixth page, MATCH, comes
-  first, with the match's status (the current level, the round, which team attacks and the scores), and the menu
-  opens on it. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
-  bindings say, so a bad binding can always be fixed. The player stands still while it is open,
-  but the game goes on.
-  - SCORES: the player count, and each player's team, kills and deaths in this game, sorted by
-    team and then kills, with the player's own line marked and each team's totals. Before a game
-    on a server it says there is none, and before the server's first scores it says to join a team.
-  - SETTINGS: the player's own settings, one row each: every key binding (`Return`, then the new
-    key, button or wheel; `Esc` cancels), then numbers changed with `Left` and `Right` (mouse look
-    speed, motion blur, head bob walking and sprinting, how red, shaky and blurred a hit looks,
-    the wormhole colour's strength, the Milky Way's brightness, and the picture's brightness,
-    contrast, saturation and gamma, which change only how the finished picture looks on that
-    player's screen, W-51, basic visuals), then a row that saves them to
-    `~/.config/warped/player_settings.yaml` (or the `--player-settings` file), which later games
-    load. A line below says what changed or went wrong.
-  - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole
-    mouths, the black hole, the spawns, the zones' edges and the map edge, the player as a disk
-    pointing the way they face, a circle of the minimap's reach around them (the rest darker and
-    blurred), and every other player in the game, near or far, as a dot in their team's colour.
-    A legend line names the marks.
-  - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
-    and the libraries the game is built on.
-  - QUIT: "Do you want to leave the game?"; `Return` or `Y` leaves it (a level run alone quits; the one-window app
-    goes back to its game menu), and `Esc` goes back to the game.
+- **Map while `Tab` is held:** the menu's MAP page's picture and legend over the dimmed game, which goes on taking
+  the player's input, until `Tab` is let go.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the
   screen shakes (each player's own setting).
 - **Motion blur:** a slight one (each player's own setting).

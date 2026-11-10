@@ -3,8 +3,8 @@
 This document designs everything a player meets outside a match: accounts, paying, the kinds of game, custom
 games, matchmaking, rating, fair play and friends. [`INSIDE_GAME_DESIGN.md`](INSIDE_GAME_DESIGN.md) designs the match
 itself (rules, levels, movement, weapons, the screen), and this document uses its terms: team, match, map, level,
-round. How the cloud builds these rules (services, databases, APIs) is the system design, which comes after this
-document is agreed.
+round. [`WINDOW_DESIGN.md`](WINDOW_DESIGN.md) describes the windows that carry these rules out. How the cloud builds
+them (services, databases, APIs) is the system design, which comes after this document is agreed.
 
 - **≈** marks a first guess. Every such number is a setting that superadmins change without a new release.
 - **TBD** marks something not designed yet.

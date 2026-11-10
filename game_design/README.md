@@ -6,6 +6,8 @@ Designing the game.
 - [`OUTSIDE_GAME_DESIGN.md`](OUTSIDE_GAME_DESIGN.md): whatever manages how and when matches are played: accounts,
   paying, the kinds of game, starting games, matchmaking, rating, fair play and friends. Most of it is designed
   but not built yet.
+- [`WINDOW_DESIGN.md`](WINDOW_DESIGN.md): how the app's windows work: which windows there are, how a player gets
+  from one to the next, what each shows, which settings it has and who may change them.
 - [`FOUR_MAPS_HANDOFF.md`](FOUR_MAPS_HANDOFF.md): the state of the four level demos and the match on 2026-11-08, for
   whoever continues that work.
 - [`slides/`](slides/README.md): the official slide deck of the game as it is now, with pictures of the game.
