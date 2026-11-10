@@ -364,8 +364,8 @@ impl Session {
             &solids,
             &arena.ladders,
             &arena.warps,
-            arena.bounds_min_m,
-            arena.bounds_max_m,
+            arena.playable_min_m,
+            arena.playable_max_m,
         );
         let (spawn_m, yaw_rad) = arena.team_spawns[1]
             .first()
@@ -1326,6 +1326,7 @@ impl Session {
             &self.movement,
             &scene.solids,
             &self.arena.ladders,
+            self.arena.soft_edge.as_ref(),
             dt_s,
         );
         self.shot_eye = self.aim_at_crosshair(scene);

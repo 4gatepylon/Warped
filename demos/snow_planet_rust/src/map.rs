@@ -245,13 +245,16 @@ pub struct Zone {
     pub u_max_m: Option<f64>,
 }
 
-/// `Boundary` is the playable area's edge.
+/// `Boundary` is the playable area's edge: an ellipse or a rectangle (`kind`) with half sizes
+/// `u_m` and `v_m`, and the width of the band past it where players slow without end
+/// (`soft_edge_m`, W-145 (no walls at map edges)), if it has one.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Boundary {
     pub kind: String,
     pub u_m: f64,
     pub v_m: f64,
+    pub soft_edge_m: Option<f64>,
 }
 
 /// `ZoneWalls` is how the walls along the team zones' edges look: their height above the ground,

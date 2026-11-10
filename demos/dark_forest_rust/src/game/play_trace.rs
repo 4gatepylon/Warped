@@ -138,7 +138,7 @@ fn record_play_trace() {
             } else {
                 0.0
             };
-            player.update(&input, &movement, &solids, &[], STEP_S);
+            player.update(&input, &movement, &solids, &[], None, STEP_S);
             let facing: Vec3 = Quat::from_rotation_y(player.yaw_rad) * Vec3::NEG_Z;
             let moves = player.moves;
             writeln!(

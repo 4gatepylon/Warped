@@ -1,7 +1,7 @@
 """`make_map.py` writes Snow Planet's map, `common/maps/snow_planet/map.json`, from the layout below.
 
-The map is Euclidean (E³, x right, y up, z back) with the ground's two axes periodic (`space.torus_periods_m`). It is
-drawn in Fermi coordinates: u runs along -z (the teams' axis: blue at u < 0, red at u > 0) and v along +x. The red
+The map is plain Euclidean (E³, x right, y up, z back), without a torus (W-145, no walls at map edges): past the
+boundary ellipse a band `SOFT_EDGE_M` wide slows players without end instead of a wall. It is drawn in Fermi coordinates: u runs along -z (the teams' axis: blue at u < 0, red at u > 0) and v along +x. The red
 half is the blue half turned half a turn about the vertical through the origin, so the teams' sides match.
 
 Example: `python3 tools/make_map.py` (or `make map`) from the demo's folder.
@@ -13,8 +13,6 @@ import random
 from pathlib import Path
 
 MAP_PATH: Path = Path(__file__).resolve().parents[3] / "common" / "maps" / "snow_planet" / "map.json"
-PERIOD_U_M: float = 112.0
-PERIOD_V_M: float = 72.0
 EYE_HEIGHT_M: float = 1.6
 PYLON_HEIGHT_M: float = 12.0
 PYLON_RADIUS_M: float = 1.35
@@ -97,6 +95,7 @@ MIN_HOLE_TO_MOUTH_M: float = 20.0
 MIN_HOLE_TO_CENTRE_M: float = 21.0
 BOUNDARY_U_M: float = 60.0
 BOUNDARY_V_M: float = 40.0
+SOFT_EDGE_M: float = 12.0
 PYLON_SPOTS: list[tuple[float, float]] = [(-34.0, 16.0), (-34.0, -16.0), (34.0, 16.0), (34.0, -16.0)]
 # Mouth A stands by blue's south pylon, well inside the boundary ellipse (a mouth on its edge trapped walkers, W-126),
 # moved up to MOUTH_JITTER_M by MOUTH_SEED; mouth B is A turned half a turn about the middle.
@@ -250,11 +249,11 @@ def make_map() -> dict:
         "format": "warped-map",
         "version": 1,
         "name": "snow_planet",
-        "description": "A snow field on a torus (T² × ℝ): two pylons a team, five black holes, a wormhole pair, "
+        "description": "A snow field in flat space, slowing players without end past its edge: two pylons a team, five black holes, a wormhole pair, "
         "open snow with six rounded mounds, light snowfall and fog, and one tall blizzard.",
         "source": f"demos/snow_planet_rust/tools/make_map.py, scatter seed {SCATTER_SEED} "
                   "(after demos/levels/snow_planet/index.html)",
-        "space": {"kind": "euclidean", "torus_periods_m": [PERIOD_U_M, PERIOD_V_M]},
+        "space": {"kind": "euclidean"},
         "gravity_m_per_s2": 9.81,
         "player": {"eye_height_m": EYE_HEIGHT_M, "walk_m_per_s": 5.0, "sprint_m_per_s": 9.0, "jump_m_per_s": 5.2,
                    "fly_m_per_s": 14.0},
@@ -272,7 +271,8 @@ def make_map() -> dict:
             "zones": [{"team": "blue", "u_min_m": None, "u_max_m": -20.0},
                       {"team": "middle", "u_min_m": -20.0, "u_max_m": 20.0},
                       {"team": "red", "u_min_m": 20.0, "u_max_m": None}],
-            "boundary": {"kind": "fermi_ellipse", "u_m": BOUNDARY_U_M, "v_m": BOUNDARY_V_M},
+            "boundary": {"kind": "fermi_ellipse", "u_m": BOUNDARY_U_M, "v_m": BOUNDARY_V_M,
+                         "soft_edge_m": SOFT_EDGE_M},
             "zone_walls": {"height_m": 6.0, "thickness_m": 0.6, "opacity_frac": 0.25},
             "blizzards": [{**blizzard, **BLIZZARD_NUMBERS} for blizzard in BLIZZARDS],
         },
