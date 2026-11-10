@@ -38,9 +38,11 @@ their common crates build once. The app is signed ad hoc (not by Apple).
 **Install** (also in the zip's `How to open Warped.txt`):
 
 1. Unzip, and drag `Warped.app` into Applications.
-2. Double-click it. The app isn't signed by Apple, so the first time macOS refuses: right-click
-   (Control-click) `Warped.app`, choose Open, then Open again; or System Settings, Privacy &
-   Security, Open Anyway; or in Terminal `xattr -dr com.apple.quarantine /Applications/Warped.app`.
+2. Double-click it. The app isn't signed by Apple, so the first time macOS refuses; click Done,
+   then, once: System Settings, Privacy & Security, Open Anyway (and confirm), then open it again;
+   or, on macOS 13 or 14 only, right-click (Control-click) `Warped.app`, choose Open, then Open
+   again (macOS 15 and later no longer offer this); or in Terminal
+   `xattr -dr com.apple.quarantine /Applications/Warped.app`.
 3. Allow Local Network access when asked, so games on the Wi-Fi can be found.
 
 **Without the checkout**: every level finds its files inside the app (`warped_shared`'s
@@ -156,7 +158,11 @@ permission; without it the app finds and hosts games on the local network.
 
 `cargo` writes to `.build/` (`make clean`). `.artifacts/warped/<run_id>/` holds the logs of the
 games this app hosts (`match_server.log`, `bot_<n>_<team>.log`; in `Warped.app`,
-`~/Library/Logs/Warped/<run_id>/`), and `.artifacts/screen_pictures/<run_id>/` the screen pictures;
+`~/Library/Logs/Warped/<run_id>/`), `.artifacts/screen_pictures/<run_id>/` the screen pictures, and
+`.artifacts/play_frame_times/<run_id>/frame_times.md` the frame times of each level a person
+played in one run of the app (`src/play_log.rs`; frames, median, 99th percentile, slowest, and
+whether the 99th percentile is inside 60 fps; in `Warped.app`,
+`~/Library/Logs/Warped/play_frame_times/<run_id>/`);
 `make reset-artifacts YES_TO_RESET_ARTIFACTS=1` deletes them.
 
 Decisions are in [`DECISIONS.md`](DECISIONS.md).

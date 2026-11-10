@@ -105,6 +105,10 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   once over a tenth of the last 30 frames were shown late, one fewer once the GPU's 90th percentile fits in 75% of
   that, from Metal's presented times; and the game steps exactly that long (`render::frame_clock`). **Weigh in:** where the GPU can't hold
   100 fps this shows a steady 50 fps rather than an uneven 60-80; 60 fps isn't a whole number of refreshes at 100 Hz.
+  **The user weighed in, 2026-11-10:** a few late frames at a level's start can hold a round at 50 fps while the GPU
+  takes 7.5-10 ms (in the one-window app the same build ran at 10 ms a frame in some runs and 20 ms in others);
+  asked whether to stop the cadence slowing below 60 fps, to add an automatic render scale as well, or to leave
+  it, the user chose "Leave it".
 - **D24. The forest is drawn in 8 m tiles.** The arena's surfaces were one mesh each (2.5 million triangles), drawn
   whole in all six passes. Cut into 8 m tiles, each pass culls them against its view: the same triangles, fewer
   drawn. Pixels where two canopy pieces are at exactly the same depth may now resolve the other way (1-2/255 of
