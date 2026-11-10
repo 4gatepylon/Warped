@@ -49,8 +49,10 @@ The PR's base is `staging/user-<username>` for a feature branch and `staging/glo
    - for a game, one short window run joined to your own server.
 5. **Tell the user about the game design.** Before merging, tell the user:
    - whether the PR changes the game's design (rules, controls, screens, menus, weapons, levels, maps);
-   - whether `game_design/INSIDE_GAME_DESIGN.md` describes the change once the PR is in;
-   - anything else you know the design doc gets wrong.
+   - whether the design docs describe the change once the PR is in: `game_design/INSIDE_GAME_DESIGN.md` for what
+     happens inside a match, `game_design/OUTSIDE_GAME_DESIGN.md` for whatever manages how and when matches are
+     played (accounts, matchmaking, rating);
+   - anything else you know the design docs get wrong.
 
    If the PR changes the design but not the doc, update the doc in the same PR, or ask the user before merging
    without it.
