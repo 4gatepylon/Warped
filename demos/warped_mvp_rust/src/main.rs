@@ -19,8 +19,9 @@
 //! - `--print-level-programs`: print the levels `make package-mac-app` puts in the app, and exit.
 //! - `--loopback-only`: keep the app and the games it hosts on 127.0.0.1 (checks; nothing open to
 //!   the network); `WARPED_LOOPBACK_ONLY=1` does the same.
-//! - `--tour-levels`: play alone, visit every level in turn (timing its frames, showing its map
-//!   and menu, leaving), write the frame times to `.artifacts/tour_levels/<run_id>/` and quit.
+//! - `--tour-levels`: play alone, visit every level in turn (timing its frames, opening its
+//!   menu, leaving), write the frame times to `.artifacts/tour_levels/<run_id>/` and quit.
+//! - `--tour-level <name>`: with `--tour-levels`, visit only that level (repeatable).
 //!
 //! Example: `warped --width-px 2560 --height-px 1440`
 //!
@@ -136,10 +137,14 @@ struct Arguments {
     #[arg(long)]
     loopback_only: bool,
     /// Play alone and visit every level of the manifest in turn in this window: settle, time its
-    /// frames, show the map, open the menu, leave; then write the frame times to
+    /// frames, open the menu, leave; then write the frame times to
     /// .artifacts/tour_levels/<run_id>/ and quit (a check of the levels inside the app).
     #[arg(long)]
     tour_levels: bool,
+    /// With --tour-levels, visit only this level, named as in the manifest or by its slug
+    /// (e.g. "Dark Forest" or dark_forest); repeat for several.
+    #[arg(long, requires = "tour_levels")]
+    tour_level: Vec<String>,
 }
 
 /// `print_level_programs` prints the levels `make package-mac-app` builds and puts in the app (see
@@ -190,6 +195,36 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         .into());
     }
     Ok(())
+}
+
+/// `get_tour_level_indices` gives the indices in `levels` of the levels `--tour-levels` visits:
+/// those named in `names` (a level's name or its slug), in that order, or every level for none.
+/// It fails on a name no level has.
+///
+/// Example: `let indices = get_tour_level_indices(&levels, &["dust".to_string()])?;`
+fn get_tour_level_indices(levels: &[LevelEntry], names: &[String]) -> Result<Vec<usize>> {
+    if names.is_empty() {
+        return Ok((0..levels.len()).collect());
+    }
+    names
+        .iter()
+        .map(|name| {
+            levels
+                .iter()
+                .position(|level| level.name == *name || get_level_slug(&level.name) == *name)
+                .ok_or_else(|| {
+                    let known: Vec<String> = levels
+                        .iter()
+                        .map(|level| get_level_slug(&level.name))
+                        .collect();
+                    format!(
+                        "--tour-level {name:?} is no level of the manifest; the levels are {}",
+                        known.join(", ")
+                    )
+                    .into()
+                })
+        })
+        .collect()
 }
 
 /// `load_player_settings` reads the player's settings from `path`, or the built-in ones when the
@@ -250,10 +285,10 @@ fn get_menu_input(event: &Event, is_rebinding: bool) -> Option<MenuInput> {
 
 /// `run_window` opens the app's window and runs it until the player quits: the menus, and each
 /// round's level played in the same window through its library (`level_library`). With
-/// `--tour-levels` it tours the manifest's `level_count` levels and quits.
+/// `--tour-levels` it tours the manifest's levels `tour_level_indices` and quits.
 ///
-/// Example: `run_window(&arguments, app, 5)?;`
-fn run_window(arguments: &Arguments, mut app: App, level_count: usize) -> Result<()> {
+/// Example: `run_window(&arguments, app, vec![0, 1, 2, 3, 4])?;`
+fn run_window(arguments: &Arguments, mut app: App, tour_level_indices: Vec<usize>) -> Result<()> {
     let mut window: MetalWindow = MetalWindow::Open(
         WINDOW_TITLE,
         (arguments.width_px, arguments.height_px),
@@ -264,7 +299,7 @@ fn run_window(arguments: &Arguments, mut app: App, level_count: usize) -> Result
     let mut tour_run: Option<TourRun> = match arguments.tour_levels {
         true => Some(TourRun::Start(
             &mut app,
-            level_count,
+            tour_level_indices,
             window.get_window().size_in_pixels(),
         )?),
         false => None,
@@ -320,7 +355,7 @@ fn run_window(arguments: &Arguments, mut app: App, level_count: usize) -> Result
             if let (Some(tour_run), Some(tour)) = (&mut tour_run, &tour) {
                 tour_run.after_level(&app, &join.level.name, tour)?;
                 if tour_run.is_done() {
-                    tour_run.finish()?;
+                    tour_run.finish(&mut app)?;
                     return Ok(());
                 }
             }
@@ -507,7 +542,7 @@ fn main() -> Result<()> {
         discovery_port: arguments.discovery_port,
         is_loopback_only: arguments.loopback_only || network_scope::is_loopback_only(),
     };
-    let level_count: usize = levels.len();
+    let tour_level_indices: Vec<usize> = get_tour_level_indices(&levels, &arguments.tour_level)?;
     let app: App = App::New(
         levels,
         &manifest,
@@ -516,7 +551,7 @@ fn main() -> Result<()> {
         &player_settings_path,
         ports,
     );
-    run_window(&arguments, app, level_count)
+    run_window(&arguments, app, tour_level_indices)
 }
 
 #[cfg(test)]
@@ -528,9 +563,27 @@ mod tests {
     //! | Arguments | the defaults, a size of 0, a bad label | `arguments_are_checked` |
     //! | Keys in menus | arrows, Return, Escape, digits (top row, keypad), a key that does nothing, rebinding (a key, Escape) | `keys_map_to_menu_inputs` |
     //! | Sample match | round 4 of the shipped levels on the attacker's wavefront | `the_sample_match_is_mid_way` |
+    //! | Toured levels | none named (all), a name, a slug, a name no level has | `toured_levels_are_picked_by_name` |
     //! | Shipped settings files | every level's file on the game master's page: shared respawn, shooting switches and gravity, each level's own setting, Dark Forest's none | `the_shipped_settings_all_show` |
 
     use super::*;
+
+    #[test]
+    fn toured_levels_are_picked_by_name() {
+        let levels: Vec<LevelEntry> = load_levels(&get_levels_manifest_path()).unwrap();
+        let all: Vec<usize> = get_tour_level_indices(&levels, &[]).unwrap();
+        assert_eq!(all, (0..levels.len()).collect::<Vec<usize>>());
+        let last: usize = levels.len() - 1;
+        let names: [String; 2] = [
+            levels[last].name.clone(),
+            get_level_slug(&levels[0].name),
+        ];
+        assert_eq!(get_tour_level_indices(&levels, &names).unwrap(), [last, 0]);
+        let error: String = get_tour_level_indices(&levels, &["no such level".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no such level"), "{error}");
+    }
 
     #[test]
     fn the_shipped_settings_all_show() {

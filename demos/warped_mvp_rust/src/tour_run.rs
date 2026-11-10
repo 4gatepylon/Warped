@@ -1,12 +1,12 @@
 //! `tour_run.rs` drives `warped --tour-levels`: it plays alone and asks the match server for each
-//! level of the manifest in turn (free play), lets each run its `Tour` in the app's window (settle,
-//! time its frames, show the map, open the menu, leave), saves the game menu after each level, and
-//! writes every level's frame times to its run folder before quitting.
+//! toured level in turn (free play), lets each run its `Tour` in the app's window (settle, time
+//! its frames, open the menu, leave), saves the game menu after each level, and writes every
+//! level's frame times to its run folder before quitting.
 //!
 //! Interface: `TourRun` (`Start`, `before_frame`, `make_level_tour`, `after_level`, `is_done`,
 //! `finish`).
 //!
-//! Example: `let mut tour_run = TourRun::Start(&mut app, levels.len(), size_px)?;`
+//! Example: `let mut tour_run = TourRun::Start(&mut app, vec![0, 1, 2], size_px)?;`
 
 use std::error::Error;
 use std::fmt::Write as _;
@@ -23,34 +23,35 @@ use crate::painter::{PixelOrder, render_page};
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const SETTLE_S: f64 = 12.0;
-const TIME_S: f64 = 12.0;
-const STEP_S: f64 = 1.5;
+const SETTLE_S: f64 = 10.0;
+const TIME_S: f64 = 8.0;
+const STEP_S: f64 = 1.2;
 const TARGET_FRAME_MS: f64 = 1000.0 / 60.0;
 
-/// `TourRun` is a tour of every level: how many there are, the next to ask for, the frame
+/// `TourRun` is a tour of levels: their indices in the manifest, how many are done, the frame
 /// summaries so far (level name, summary), the window's size in pixels, and the run folder.
 pub struct TourRun {
-    level_count: usize,
-    next_level: usize,
+    level_indices: Vec<usize>,
+    done_count: usize,
     summaries: Vec<(String, Option<FrameSummary>)>,
     size_px: (u32, u32),
-    pub folder: PathBuf,
+    folder: PathBuf,
 }
 
 impl TourRun {
-    /// `Start` hosts a game alone on the first level, for a tour of `level_count` levels in a
-    /// window of `size_px`.
+    /// `Start` hosts a game alone on the first toured level, for a tour of the manifest's levels
+    /// `level_indices` (at least one) in a window of `size_px`.
     ///
-    /// Example: `let tour_run = TourRun::Start(&mut app, 5, (2560, 1440))?;`
+    /// Example: `let tour_run = TourRun::Start(&mut app, vec![0, 3], (2560, 1440))?;`
     #[allow(non_snake_case)]
-    pub fn Start(app: &mut App, level_count: usize, size_px: (u32, u32)) -> Result<TourRun> {
+    pub fn Start(app: &mut App, level_indices: Vec<usize>, size_px: (u32, u32)) -> Result<TourRun> {
+        let first_level: usize = *level_indices.first().ok_or("a tour needs a level")?;
         let folder: PathBuf = make_run_folder("tour_levels", &format_utc_now())?;
-        app.start_game(GameKind::Alone, Some(0))?;
+        app.start_game(GameKind::Alone, Some(first_level))?;
         println!("tour: run folder {}", folder.display());
         Ok(TourRun {
-            level_count,
-            next_level: 0,
+            level_indices,
+            done_count: 0,
             summaries: Vec::new(),
             size_px,
             folder,
@@ -62,7 +63,7 @@ impl TourRun {
     /// Example: `tour_run.before_frame(&mut app);`
     pub fn before_frame(&self, app: &mut App) {
         if app.is_in_game_menu() && !self.is_done() {
-            app.request_play(Some(self.next_level));
+            app.request_play(Some(self.level_indices[self.done_count]));
         }
     }
 
@@ -94,21 +95,22 @@ impl TourRun {
             self.size_px.1,
             image::ExtendedColorType::Rgba8,
         )?;
-        self.next_level += 1;
+        self.done_count += 1;
         Ok(())
     }
 
-    /// `is_done` says whether every level has been visited.
+    /// `is_done` says whether every toured level has been visited.
     ///
     /// Example: `if tour_run.is_done() { ... }`
     pub fn is_done(&self) -> bool {
-        self.next_level >= self.level_count
+        self.done_count >= self.level_indices.len()
     }
 
-    /// `finish` writes `frame_times.md`, a table of each level's frame times, and prints it.
+    /// `finish` writes `frame_times.md`, a table of each level's frame times, prints it, and
+    /// stops the game `app` hosts; it fails if a process the game started is still alive then.
     ///
-    /// Example: `tour_run.finish()?;`
-    pub fn finish(&self) -> Result<()> {
+    /// Example: `tour_run.finish(&mut app)?;`
+    pub fn finish(&self, app: &mut App) -> Result<()> {
         let mut table: String = format!(
             "Frame times inside the app at {}x{} px (wall clock, from one frame's start to the next's)\n\n| Level | Frames | Median ms | p99 ms | Max ms | p99 under 16.7 ms |\n| --- | --- | --- | --- | --- | --- |\n",
             self.size_px.0, self.size_px.1
@@ -129,6 +131,8 @@ impl TourRun {
         }
         fs::write(self.folder.join("frame_times.md"), &table)?;
         println!("{table}");
+        app.stop_hosting()?;
+        println!("tour: every process the game started has stopped");
         Ok(())
     }
 }

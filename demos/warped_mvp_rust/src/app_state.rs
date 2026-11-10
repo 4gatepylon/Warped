@@ -264,6 +264,17 @@ impl App {
         self.navigator.leave_game();
     }
 
+    /// `stop_hosting` stops the game this app hosts, if any; it fails if one of the game's
+    /// processes is still alive afterwards.
+    ///
+    /// Example: `app.stop_hosting()?;`
+    pub fn stop_hosting(&mut self) -> Result<()> {
+        match self.hosted.take() {
+            Some(mut hosted) => hosted.stop(),
+            None => Ok(()),
+        }
+    }
+
     /// `request_play` asks the match server, as the game master, to play `choice` (a level's
     /// index freely, or the match with `None`), sending it until the server's view shows it.
     ///
@@ -479,10 +490,7 @@ impl App {
                     let server: SocketAddr = self.hosted.as_ref().expect("a hosted game").server;
                     self.join(server, self.hosted_team)
                 }
-                MainAction::StopHosting => {
-                    self.hosted = None;
-                    Ok(())
-                }
+                MainAction::StopHosting => self.stop_hosting(),
                 MainAction::OpenPlayerSettings => {
                     self.open_player_settings();
                     Ok(())

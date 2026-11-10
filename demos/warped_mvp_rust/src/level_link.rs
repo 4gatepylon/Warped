@@ -12,10 +12,7 @@
 use std::time::Instant;
 
 use sdl3::keyboard::Scancode;
-use sdl3::sys::events::{
-    SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP, SDL_Event, SDL_EventType, SDL_KeyboardEvent,
-    SDL_PushEvent,
-};
+use sdl3::sys::events::{SDL_EVENT_KEY_DOWN, SDL_Event, SDL_KeyboardEvent, SDL_PushEvent};
 use warped_shared::app::MatchLink;
 use warped_shared::match_protocol::MatchView;
 
@@ -26,12 +23,12 @@ const PERCENT: f64 = 100.0;
 const P99_PCT: f64 = 99.0;
 
 /// `TourStep` is what a toured level does next, after how long in the level: wait while it loads
-/// and settles, time its frames, hold the map key, open the menu, then leave by its QUIT page.
+/// and settles, time its frames, open the menu, then leave by its QUIT page. (It can't hold the
+/// map key: a level reads that from the keyboard's state, which a queued key event doesn't change.)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TourStep {
     Settle,
     Time,
-    ShowMap,
     OpenMenu,
     Leave,
     Done,
@@ -90,16 +87,15 @@ impl Tour {
         match elapsed_s {
             s if s < self.settle_s => TourStep::Settle,
             s if s < time_end_s => TourStep::Time,
-            s if s < time_end_s + self.step_s => TourStep::ShowMap,
-            s if s < time_end_s + 2.0 * self.step_s => TourStep::OpenMenu,
-            s if s < time_end_s + 3.0 * self.step_s => TourStep::Leave,
+            s if s < time_end_s + self.step_s => TourStep::OpenMenu,
+            s if s < time_end_s + 2.0 * self.step_s => TourStep::Leave,
             _ => TourStep::Done,
         }
     }
 
     /// `on_frame` counts a frame at `now`: it records its time in the `Time` step and, on entering
-    /// a key step, presses that step's keys (Tab down for the map; Tab up and Escape for the menu;
-    /// Q and Y on the menu's QUIT page to leave). It gives the step entered, if one began.
+    /// a key step, presses that step's keys (Escape for the menu; Q and Y on the menu's QUIT page
+    /// to leave). It gives the step entered, if one began.
     ///
     /// Example: `if let Some(step) = tour.on_frame(Instant::now()) { ... }`
     pub fn on_frame(&mut self, now: Instant) -> Option<TourStep> {
@@ -117,14 +113,10 @@ impl Tour {
         }
         self.step = step;
         match step {
-            TourStep::ShowMap => push_key(Scancode::Tab, SDL_EVENT_KEY_DOWN),
-            TourStep::OpenMenu => {
-                push_key(Scancode::Tab, SDL_EVENT_KEY_UP);
-                push_key(Scancode::Escape, SDL_EVENT_KEY_DOWN);
-            }
+            TourStep::OpenMenu => push_key_down(Scancode::Escape),
             TourStep::Leave => {
-                push_key(Scancode::Q, SDL_EVENT_KEY_DOWN);
-                push_key(Scancode::Y, SDL_EVENT_KEY_DOWN);
+                push_key_down(Scancode::Q);
+                push_key_down(Scancode::Y);
             }
             TourStep::Settle | TourStep::Time | TourStep::Done => {}
         }
@@ -132,15 +124,15 @@ impl Tour {
     }
 }
 
-/// `push_key` queues `scancode` going down or up (`kind`), as the keyboard would, through SDL's
-/// own `SDL_PushEvent`.
+/// `push_key_down` queues `scancode` going down, as the keyboard would, through SDL's own
+/// `SDL_PushEvent`.
 ///
-/// Example: `push_key(Scancode::Escape, SDL_EVENT_KEY_DOWN);`
-fn push_key(scancode: Scancode, kind: SDL_EventType) {
+/// Example: `push_key_down(Scancode::Escape);`
+fn push_key_down(scancode: Scancode) {
     let key: SDL_KeyboardEvent = SDL_KeyboardEvent {
-        r#type: kind,
+        r#type: SDL_EVENT_KEY_DOWN,
         scancode: scancode.into(),
-        down: kind == SDL_EVENT_KEY_DOWN,
+        down: true,
         repeat: false,
         ..Default::default()
     };
@@ -244,10 +236,9 @@ mod tests {
         for (elapsed_s, step) in [
             (0.0, TourStep::Settle),
             (2.5, TourStep::Time),
-            (5.5, TourStep::ShowMap),
-            (6.5, TourStep::OpenMenu),
-            (7.5, TourStep::Leave),
-            (8.5, TourStep::Done),
+            (5.5, TourStep::OpenMenu),
+            (6.5, TourStep::Leave),
+            (7.5, TourStep::Done),
         ] {
             assert_eq!(tour.get_step_at(elapsed_s), step, "{elapsed_s}");
         }

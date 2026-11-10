@@ -77,8 +77,9 @@ through `warped_shared::app_bundle` first; the levels-as-libraries and level-def
   the game menu, which shows the match's progress; leaving keeps you out of that round until
   Rejoin; closing the window quits. A level without a library would show a stand-in screen.
 - **`warped --tour-levels`** checks the levels inside the app: it plays alone, asks for each level
-  in turn, and in each one settles, times its frames, holds Tab, opens the menu and leaves; it
-  writes `frame_times.md` and the game menu after each level to `.artifacts/tour_levels/<run_id>/`.
+  in turn, and in each one settles, times its frames, opens the menu and leaves; it writes
+  `frame_times.md` and the game menu after each level to `.artifacts/tour_levels/<run_id>/`.
+  `--tour-level <name>` (repeatable) visits only the levels named.
   Run it with `WARPED_LOOPBACK_ONLY=1` and your own ports (`--match-port`, `--level-port`,
   `--discovery-port`).
 - **Player settings**, from every menu: every key binding and the in-level menu's numbers, saved to
