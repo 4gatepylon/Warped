@@ -270,6 +270,23 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   goes on; `Esc` opens the menu and frees the mouse, and `Esc` again closes it. The menu's last page, QUIT, leaves with
   `Return` or `Y` (`MenuOutcome::LeaveLevel`), replacing the settings page's Quit row and D28's exit prompt
   (`exit_prompt.rs` removed); the state is the shared `warped_shared::menu_and_map`, as in every level.
+- **D45. A library the one-window app plays in its own window** (W-141, one window for the whole game). `lib.rs`
+  exposes `play_level`, a `warped_shared::app::play_level_fn_t`; `main.rs` opens its own window and plays through the
+  same `level::Level` (`Load`, `run_title_screen`, `play`), so the program run alone plays as before. Choices:
+  - **The app's join is a command line.** `play_level` plays `dark-forest --join <server> --team <team> --no-title`
+    plus the manifest entry's `--map` and client flags, parsed by the same `Args`, so the forest can't play
+    differently in the app; a client flag that ends the game on its own (`--exit-after-s`) is an error there.
+  - **One loop, split where it had to be.** The main loop stays one function (`Level::play`), with its events moved
+    to `handle_event` (tested without a window) and its flags to `args.rs`; the frame clock (D39) and the sharp centre
+    (D40) need only the window's size and its display's refresh rate, so they are unchanged.
+  - **The lent layer goes back as found.** The renderer takes the window's device (the program run alone makes the
+    system's, as before) and, when dropped, sets the layer's device, pixel format, framebuffer-only, drawable count,
+    display sync and drawable size back, since the app's layer is not framebuffer-only. In the app the forest leaves
+    the window's title alone and releases the mouse when it returns.
+  - **Not yet:** the forest doesn't read `LevelJoin::player_settings_path` (its keys and look speed are still its own
+    constants, Lunar Surface's defaults), and `main.rs` still opens its window with `platform.rs` until the shared
+    `warped_shared::metal_window` lands. **Gives up:** nothing in play; the wormhole lens atlas is drawn again each
+    time the level starts (about 0.8 s).
 
 ## Follow-ups for the next agent
 
