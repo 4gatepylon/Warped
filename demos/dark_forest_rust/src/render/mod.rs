@@ -205,6 +205,7 @@ pub enum ParticleKind {
     Smoke = 1,
     MuzzleFlash = 2,
     Tracer = 3,
+    GlowBall = 4,
 }
 
 /// `Particle` is a camera-facing sprite, stretched along `stretch_m` (for sparks and tracers).
