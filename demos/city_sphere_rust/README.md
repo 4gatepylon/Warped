@@ -53,7 +53,9 @@ switches gun, hold `E` aiming at the other team's console within reach to turn i
 middle), `Esc` opens the menu and frees the mouse (`Q`/`E` change page: scores, settings, map, credits, quit; `Esc` again
 closes it), holding `Tab` shows the whole map over the game while you keep playing, `-` and `=` lower and raise the render resolution. The HUD has Lunar's health,
 ammo and energy bars with their pulses, and Lunar's hit effects (red, blur and shake from the edges) whenever health
-drops; an eliminated player sees "YOU DIED" and a countdown and comes back at a spawn after `respawn.delay_s` (3 s).
+drops; an eliminated player sees "YOU DIED", a countdown and a bar filling over the wait, and comes back at a spawn
+after the server's growing respawn wait (`respawn`: 20 s, 10 s more every 5 minutes into the level; W-142 (growing
+respawn time)).
 The minimap (top right, placed by the player settings' `minimap`) shows the sphere seen from its centre around you, the
 way you face up, with straight Cartesian grid lines every 5 m: buildings, covers, each team's stairs in its colour,
 lifts and holes, consoles in team colours (grey when off), other players and shots in team colours, and you as the

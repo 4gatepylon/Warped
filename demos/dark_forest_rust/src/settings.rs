@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 pub use warped_shared::play_settings::{
     AimSettings, BeamSpeckleSettings, ConsoleSettings, FlashlightSettings, GravitySettings,
     HeadBobSettings, HitEffectSettings, MovementSettings, RespawnSettings, RifleSettings,
-    SniperSettings, SprintEnergySettings, WhenHitSettings,
+    ShootingSettings, SniperSettings, SprintEnergySettings, WhenHitSettings,
 };
 
 /// `WormholeSettings` is how players throw their wormhole mouths (`Q`, `thrown_wormholes.rs`) and
@@ -72,6 +72,8 @@ pub const HEAD_BOB: HeadBobSettings = HeadBobSettings {
 pub struct ServerSettings {
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub wormholes: WormholeSettings,
     pub sniper: SniperSettings,
     pub rifle: RifleSettings,
@@ -96,7 +98,12 @@ impl ServerSettings {
                 hold_to_disable_s: 10.0,
                 reach_m: 3.0,
             },
-            respawn: RespawnSettings { delay_s: 3.0 },
+            respawn: RespawnSettings {
+                start_s: 20.0,
+                step_s: 10.0,
+                period_s: 300.0,
+            },
+            shooting: ShootingSettings::default(),
             wormholes: WormholeSettings {
                 throw_speed_m_per_s: 16.0,
                 throw_up_rad: 0.3,
@@ -353,7 +360,7 @@ mod tests {
     }
 
     /// `test_consoles_and_respawn_are_lunar_surface` checks the consoles' hold and reach and the
-    /// respawn delay are Lunar Surface's.
+    /// growing respawn wait are Lunar Surface's.
     #[test]
     fn test_consoles_and_respawn_are_lunar_surface() {
         let settings: ServerSettings = ServerSettings::Builtin();
@@ -365,7 +372,9 @@ mod tests {
             lunar("consoles", "hold_to_disable_s")
         );
         assert_eq!(settings.consoles.reach_m, lunar("consoles", "reach_m"));
-        assert_eq!(settings.respawn.delay_s, lunar("respawn", "delay_s"));
+        assert_eq!(settings.respawn.start_s, lunar("respawn", "start_s"));
+        assert_eq!(settings.respawn.step_s, lunar("respawn", "step_s"));
+        assert_eq!(settings.respawn.period_s, lunar("respawn", "period_s"));
     }
 
     /// `test_thrown_wormholes_are_lunar_surface` checks every thrown-wormhole setting is Lunar
