@@ -83,6 +83,18 @@ on 127.0.0.1 and sends its announcement there instead of broadcasting it, so mac
 permission and `--join auto` finds only servers on this computer. Every test run uses it (`cargo test` without
 it); leave it unset to play across computers.
 
+## In the one-window app
+
+W-141 (one window for the whole game): this crate is a library, `city_sphere_level` (`src/lib.rs`), and `src/main.rs` only runs
+it. The one-window app ([`../warped_mvp_rust/`](../warped_mvp_rust/)) calls `city_sphere_level::play_level`
+(`warped_shared::app::play_level_fn_t`) with its window and Metal device, the level server's address, the team
+(`--team`) and the player's settings file. City Sphere then plays in that window until the match's round ends
+(`RoundOver`), the player confirms the menu's QUIT page (`LeaveLevel`) or closes the window (`CloseWindow`), and frees
+its renderer's GPU resources before it returns. Run alone, the program plays through the same frame loop
+(`warped_shared::level_loop`) in a window of its own (`warped_shared::metal_window`), exactly as before.
+`RUN_GPU_TESTS=1 cargo test --release --test in_one_window` checks the entry point in an offscreen window (it uses the
+GPU).
+
 ## How it works
 
 - **Shared code**: the files every Rust level shares (geometry, the gun held in hand, the HUD's bars and overlay
