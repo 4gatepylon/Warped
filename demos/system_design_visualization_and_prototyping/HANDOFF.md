@@ -4,19 +4,36 @@ State on 2026-11-10, when the session that wrote the outside-game design, the wi
 prototype paused. Read this first if you continue the work. It is written for an agent that has only this
 repository: it repeats what was otherwise only in that session.
 
-## What the user asked for, in order
+## The goal
 
-1. **Design the mechanics outside a match first**, as documents the user approves or changes:
-   `game_design/OUTSIDE_GAME_DESIGN.md` and `game_design/WINDOW_DESIGN.md`. Done, awaiting the user's review.
-2. **A playable prototype** of those mechanics with a local backend, "the most realistic simulation of the actual
-   system design", with every component visible. Part 1 of 7 is done; parts 2 to 7 are below.
-3. **A full mock of the cloud stack, run locally,** after the prototype: the real Terraform and deploy code of the
-   design, with the cloud provider's APIs mocked out (the user's example was mocking `boto3`; with Google Cloud it
-   is that provider's client libraries or emulators), so the whole deployment can be exercised on one computer
-   without a cloud account. How to do it is yours to work out and propose to the user. Not started.
-4. **The system design** in `game_design/cloud/`, as static web pages: system diagrams, the database schema drawn,
-   the API with its schemas, the protocols. Not started, and **not to be started until the user has approved the
-   mechanics** (step 1).
+The user is working on something else and wants to come back to **a finished project of high quality that needs
+only small changes to be deployed for real**: the design tried out in a prototype, then all the real code written
+and running on one computer against mocks of the cloud, with no cloud account.
+
+**Work without waiting for the user.** They are not reviewing as you go. Where a decision would be theirs, choose
+the option that best fits `game_design/OUTSIDE_GAME_DESIGN.md` and what is written here, write the decision and
+its reason in the PR's Decisions section and in `DECISIONS.md` beside this file (create it, numbered, newest
+last), and go on. Stop only for something that can't be undone or that costs money.
+
+## The work, in order
+
+1. **The mechanics outside a match, as documents:** `game_design/OUTSIDE_GAME_DESIGN.md` and
+   `game_design/WINDOW_DESIGN.md`. Done. The user has not reviewed them yet; build on them as written.
+2. **Finish the interactive prototype** (this folder): parts 2 to 7 below. It is where the design is tried and
+   shown. When it contradicts the documents, fix whichever is wrong and say so.
+3. **Write the system design** in `game_design/cloud/` as static web pages: system diagrams, the database schema
+   drawn, the API with its schemas, the protocols. Take it from the documents and from what the prototype showed
+   to work.
+4. **Implement the real thing, against mocks.** All the code the online side needs, at production quality, not a
+   simulation: the backend services, the database schema with its migrations, the game server's and the app's
+   side of each protocol, the Terraform and deploy code for Google Cloud, and tests. It must run end to end on one
+   computer with the cloud provider's APIs mocked or emulated (the user's example was mocking `boto3`; with Google
+   Cloud it is that provider's client libraries or emulators), so that deploying for real means changing
+   configuration, not code. Build on what exists: `management_server/`, `game_server/`, `common/protocol/`,
+   `infra/` and the Rust game in `demos/`. Say in the README exactly what is mocked and what a real deploy must
+   change.
+
+Each step is a run of stacked PRs on top of the one before. Keep the whole stack open and unmerged for the user.
 
 ## The rule above all others
 
@@ -31,7 +48,8 @@ you make:
   point at a conversation they weren't in.
 - **Make feedback easy.** Say exactly what you want judged, give named options where there is a choice, and keep
   the feedback bar on every mocked window.
-- **Send screenshots of one common flow after each part,** before asking for anything more involved.
+- **Attach screenshots of one common flow to each part's PR,** so the user can check it at a glance when they
+  are back. Don't wait for an answer.
 
 ## Where everything is
 
@@ -69,11 +87,11 @@ you make:
   so `gh stack` needs `--remote origin`). If `gh stack` isn't available, ask the user before stacking by hand.
 - **Size:** the user chose one PR per part for this prototype, each over the 200-line limit. Say so in the PR's
   Size section with the line count.
-- **After each part,** send the user screenshots of one common flow before asking them to try it, and attach them
-  to the PR (`gh pr edit <n> --body-file body.md --attach <file>`).
+- **After each part,** take screenshots of one common flow and attach them to the PR
+  (`gh pr edit <n> --body-file body.md --attach <file>`).
 - **Each PR's Stack line** names the layers below and above. When you add a layer, update the line in every PR.
-- Never merge into `staging/global` or `main`. Merging into `staging/user-4gatepylon` waits for the user's review of
-  each PR here, because these are designs they want to approve.
+- Never merge into `staging/global` or `main`, and leave this stack unmerged too: the user wants to review it as a
+  whole when they are back. Rebase it when `staging/user-4gatepylon` moves.
 - `AGENTS.md` must stay under 16 KiB. It is within a few bytes of that, so don't add to it.
 
 ## How this prototype is built
@@ -153,10 +171,11 @@ Left out on purpose: the real game, voice chat, real Google sign-in, real Stripe
   redone for Google Cloud; working that out is part of the job.
 - The window mock-ups copy the look of the game's own menus. The user has not yet given feedback on the windows.
 
-## Open with the user
+## Open with the user (none of it blocks you)
 
 - Their review of PRs 558 to 565 (the mechanics) and of the mock-up windows. Each document ends with its open
-  questions, and each PR's Decisions section lists what was guessed.
+  questions, and each PR's Decisions section lists what was guessed. Settle the open questions yourself where the
+  work needs an answer, and record each as a decision.
 - `staging/user-4gatepylon` has moved since the stack was cut. Before any merge, rebase the stack
   (`gh stack rebase --remote origin`) and check that no new reference to `game_design/DESIGN.md` appeared
   (PR 557 renames it): `git grep -n -P '(?<![A-Za-z_])DESIGN\.md'` should find nothing.
