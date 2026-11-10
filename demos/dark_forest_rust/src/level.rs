@@ -20,7 +20,9 @@
 use warped_shared::app::{LevelEnd, LevelWindow};
 use warped_shared::hud::{get_death_lines, make_respawn_bar_rects};
 use warped_shared::match_state::Team;
-use warped_shared::menu_and_map::{Cover, MenuAndMap, MouseChange, PlayOutcome};
+use warped_shared::menu_and_map::{
+    Cover, MenuAndMap, MouseChange, PlayOutcome, TextCell, TextLayout,
+};
 use warped_shared::metal_window::set_window_title;
 use warped_shared::shot_noise;
 
@@ -740,6 +742,34 @@ fn handle_event(
     (PlayOutcome::Play, mouse_change)
 }
 
+/// `point_at_menu` tells the open `menu` where in its text the mouse of `event` is, and passes
+/// it a left click there (a click on a page's name opens that page); other events change
+/// nothing. `layout` is how the menu's text lies in `window`.
+///
+/// Example: `point_at_menu(open_menu, &event, window.window, menu_picture.get_layout(0.85));`
+fn point_at_menu(menu: &mut Menu, event: &Event, window: &sdl3::video::Window, layout: TextLayout) {
+    let (at_points, is_click) = match *event {
+        Event::MouseMotion { x, y, .. } => ((x, y), false),
+        Event::MouseButtonDown {
+            mouse_btn: MouseButton::Left,
+            x,
+            y,
+            ..
+        } => ((x, y), true),
+        _ => return,
+    };
+    let (size_points, size_px) = (window.size(), window.size_in_pixels());
+    let px_per_point: f32 = size_px.0 as f32 / size_points.0 as f32;
+    let cell: Option<TextCell> = layout.get_cell_at(
+        size_px,
+        (at_points.0 * px_per_point, at_points.1 * px_per_point),
+    );
+    menu.set_pointer(cell);
+    if let (true, Some(cell)) = (is_click, cell) {
+        menu.click(cell);
+    }
+}
+
 /// `get_team` gives the team of a team index of this level's game (0 blue, 1 red).
 ///
 /// Example: `assert_eq!(get_team(1), Team::Red);`
@@ -1011,6 +1041,10 @@ impl Level {
             }
             let mut events: FrameEvents = FrameEvents::default();
             for event in window.event_pump.poll_iter() {
+                if let Some(open_menu) = screen.menu_and_map.get_menu_mut() {
+                    let layout: TextLayout = menu_picture.get_layout(MENU_HEIGHT_FRAC);
+                    point_at_menu(open_menu, &event, window.window, layout);
+                }
                 let (outcome, mouse_change) =
                     handle_event(event, &mut screen, &mut settings, &mut events);
                 if let Some(change) = mouse_change {
@@ -1256,9 +1290,11 @@ impl Level {
                     &open_menu.get_lines(&screen.menu_settings, scoreboard),
                     false,
                 );
-                if let (menu::Page::Scores, Some((team, lines))) =
-                    (open_menu.get_page(), menu::get_own_team_lines(scoreboard))
-                {
+                if let (menu::Page::Scores, false, Some((team, lines))) = (
+                    open_menu.get_page(),
+                    open_menu.is_help_shown(),
+                    menu::get_own_team_lines(scoreboard),
+                ) {
                     menu_picture.draw_team_box(team, lines);
                 }
                 frame.hud_rects.push(HudRect {
@@ -1273,7 +1309,7 @@ impl Level {
                     window_height_px,
                     MENU_HEIGHT_FRAC,
                 ));
-                if open_menu.get_page() == menu::Page::Map {
+                if open_menu.get_page() == menu::Page::Map && !open_menu.is_help_shown() {
                     minimap.draw_map(session.player.feet_m, session.player.yaw_rad, &marks);
                     hud_images.push(minimap.get_map_image(window_width_px, window_height_px));
                 }

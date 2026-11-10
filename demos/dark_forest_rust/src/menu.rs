@@ -1,16 +1,20 @@
-//! `menu` is the in-game menu, in pages under a tab bar (ported from the hyperbolic demo's
-//! `menu.rs`): the scores page, with each player's team, kills and deaths from the server; the
+//! `menu` is the in-game menu (ported from the hyperbolic demo's `menu.rs`): its name with a `?`
+//! (help shows while the mouse is over it), the pages' names under it, and the page shown, turned
+//! with the arrows, `Q`/`E` or a click on a page's name (W-150, arrow keys and clicks for menu
+//! pages; W-151, menu layout and help tooltip): the scores page, with each player's team, kills and deaths from the server; the
 //! settings page, where a player changes the look speed, render scale, vsync, frame-time readout,
 //! the picture's brightness, contrast, saturation and gamma (W-51, basic visuals) and minimap for
 //! this run and sees the controls; the map page, whose picture the window draws
 //! (`minimap.rs`); the credits page (`credits.rs`); the quit page, which leaves the level; and,
 //! when the caller supplies its lines (the one-window app's match status, `set_match_lines`), a
 //! MATCH page first.
-//! It keeps no window state: the window feeds it keys and the scores, and draws its lines. `Esc`
+//! It keeps no window state: the window feeds it keys, clicks, the mouse's place in its text and
+//! the scores, and draws its lines. `Esc`
 //! opens and closes it, and the map page's lines also head the map shown while `Tab` is held
 //! (W-140, hold Tab for the map, Esc for the menu; `warped_shared::menu_and_map`).
 //!
-//! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`, `set_match_lines`), `MenuOutcome`,
+//! Interface: `Menu` (`New`, `handle`, `click`, `set_pointer`, `is_help_shown`, `get_lines`,
+//! `get_page`, `set_match_lines`), `MenuOutcome`,
 //! `MenuSettings`,
 //! `Page`, `Scoreboard`, `MENU_PICTURE_PX`, `get_held_map_lines`, `get_own_team_lines` (the
 //! scores page's box around this player's team).
@@ -19,12 +23,18 @@
 //!
 //! Must know:
 //! - The settings last only for this run: the level has no saved player settings yet.
+//! - On the settings page the left and right arrows turn the page only while the pages' names
+//!   are chosen (they are when the page opens); `Down` or `Up` goes into the rows, where the
+//!   arrows change the chosen row, and past the first or last row comes back to the names.
 
 use std::cmp::Reverse;
 
 use sdl3::keyboard::Scancode;
 use warped_shared::key_bindings::Control;
-use warped_shared::menu_and_map::{MATCH_PAGE_NAME, QUIT_LINES, format_tab_bar, is_leave_control};
+use warped_shared::menu_and_map::{
+    MATCH_PAGE_NAME, PageTurn, QUIT_LINES, TAB_BAR_LINE, TextCell, find_tab_at, format_tab_bar,
+    format_title_line, is_help_mark_at, is_leave_control, make_help_lines,
+};
 use warped_shared::visuals::{VisualsKnob, VisualsSettings, get_visuals_row};
 
 use crate::credits::CREDITS_LINES;
@@ -62,6 +72,13 @@ const CONTROLS_LINES: [&str; 6] = [
     "Hold Tab for the map; Esc opens and closes this menu",
 ];
 const MAP_LEGEND: &str = "You: white arrow  Robots: team colours  Squares: consoles";
+const SETTINGS_HELP_LINES: [&str; 5] = [
+    "",
+    "On the SETTINGS page:",
+    "Down/Up               choose a row (past the ends: the pages)",
+    "Left/Right            change the chosen row",
+    "Return                switch the chosen row",
+];
 const HELD_MAP_TITLE: &str = "MAP     let go of Tab to hide it";
 const WAITING_LINE: &str = "No scores from the server yet: join a team first.";
 const LOOK_STEP_RAD_PER_PT: f32 = 0.0002;
@@ -70,7 +87,7 @@ const RENDER_SCALE_STEP_FRAC: f32 = 0.05;
 const RENDER_SCALE_RANGE_FRAC: (f32, f32) = (0.5, 1.0);
 const MAX_SCORE_ROW_COUNT: usize = 14;
 /// `SCORE_ROWS_FIRST_LINE` is the line of the scores page's first player row in `Menu::get_lines`:
-/// under the tab bar, a blank line, the players' count, a blank line and the header.
+/// under the title, the tab bar, the players' count, a blank line and the header.
 const SCORE_ROWS_FIRST_LINE: usize = 5;
 const TEAM_WIDTH: usize = 6;
 const PLAYER_WIDTH: usize = 16;
@@ -147,10 +164,13 @@ pub fn get_held_map_lines() -> Vec<(String, bool)> {
     ]
 }
 
-/// `Menu` is the menu's open page (an index into `get_pages`), the settings row chosen on it, and
-/// the MATCH page's lines (`None`: no MATCH page).
+/// `Menu` is the menu's open page (an index into `get_pages`), whether the pages' names are
+/// chosen (else a row of the settings page is), where in its text the mouse is (`None`: off it),
+/// the settings row chosen, and the MATCH page's lines (`None`: no MATCH page).
 pub struct Menu {
     page_index: usize,
+    is_on_pages: bool,
+    pointer: Option<TextCell>,
     row_index: usize,
     match_lines: Option<Vec<(String, bool)>>,
 }
@@ -280,6 +300,8 @@ impl Menu {
     pub fn New() -> Menu {
         Menu {
             page_index: 0,
+            is_on_pages: true,
+            pointer: None,
             row_index: 0,
             match_lines: None,
         }
@@ -318,38 +340,83 @@ impl Menu {
         self.get_pages()[self.page_index].0
     }
 
-    /// `handle` acts on one pressed key: Escape closes the menu, Q and E turn the page, on the
-    /// quit page Return or Y leaves the level, and on the settings page Up and Down choose a row,
-    /// Left and Right change it and Return switches it.
+    /// `click` reacts to a left click on `cell` of the menu's text: on a page's name it turns to
+    /// that page.
+    ///
+    /// Example: `menu.click(TextCell { line: 1, column: 12 });`
+    pub fn click(&mut self, cell: TextCell) {
+        if cell.line != TAB_BAR_LINE {
+            return;
+        }
+        let page_names: Vec<&str> = self.get_pages().iter().map(|(_, name)| *name).collect();
+        if let Some(page_index) = find_tab_at(&page_names, cell.column) {
+            self.page_index = page_index;
+            self.is_on_pages = true;
+        }
+    }
+
+    /// `set_pointer` tells the menu where in its text the mouse is (`None`: off it).
+    ///
+    /// Example: `menu.set_pointer(Some(TextCell { line: 0, column: 62 }));`
+    pub fn set_pointer(&mut self, cell: Option<TextCell>) {
+        self.pointer = cell;
+    }
+
+    /// `is_help_shown` says whether the mouse is over the title's `?`, so the help covers the
+    /// page (and the window leaves out the page's picture).
+    ///
+    /// Example: `if menu.is_help_shown() { ... }`
+    pub fn is_help_shown(&self) -> bool {
+        self.pointer.is_some_and(is_help_mark_at)
+    }
+
+    /// `handle` acts on one pressed key: Escape closes the menu; Q and E, and the left and right
+    /// arrows unless a row of the settings page is chosen, turn the page; on the quit page Return
+    /// or Y leaves the level; and on the settings page Down and Up go from the pages' names
+    /// through the rows and back, Left and Right change the chosen row and Return switches it.
     ///
     /// Example: `let outcome = menu.handle(Scancode::E, &mut menu_settings);`
     pub fn handle(&mut self, key: Scancode, settings: &mut MenuSettings) -> MenuOutcome {
-        match key {
-            Scancode::Escape => return MenuOutcome::Close,
-            Scancode::Q => {
-                let page_count: usize = self.get_pages().len();
-                self.page_index = (self.page_index + page_count - 1) % page_count;
-                return MenuOutcome::Stay;
-            }
-            Scancode::E => {
-                self.page_index = (self.page_index + 1) % self.get_pages().len();
-                return MenuOutcome::Stay;
-            }
-            _ if self.get_page() == Page::Quit && is_leave_control(Control::Key(key)) => {
-                return MenuOutcome::LeaveLevel;
-            }
-            _ if self.get_page() != Page::Settings => return MenuOutcome::Stay,
-            _ => {}
+        if key == Scancode::Escape {
+            return MenuOutcome::Close;
         }
+        let is_on_rows: bool = self.get_page() == Page::Settings && !self.is_on_pages;
+        if let Some(turn) = PageTurn::FromControl(Control::Key(key), !is_on_rows) {
+            self.page_index = turn.apply(self.page_index, self.get_pages().len());
+            self.is_on_pages = true;
+            return MenuOutcome::Stay;
+        }
+        if self.get_page() == Page::Quit && is_leave_control(Control::Key(key)) {
+            return MenuOutcome::LeaveLevel;
+        }
+        if self.get_page() != Page::Settings {
+            return MenuOutcome::Stay;
+        }
+        let last_row: usize = ROWS.len() - 1;
         let direction: f32 = match key {
+            Scancode::Down if self.is_on_pages => {
+                (self.is_on_pages, self.row_index) = (false, 0);
+                return MenuOutcome::Stay;
+            }
+            Scancode::Up if self.is_on_pages => {
+                (self.is_on_pages, self.row_index) = (false, last_row);
+                return MenuOutcome::Stay;
+            }
+            _ if self.is_on_pages => return MenuOutcome::Stay,
             Scancode::Left => -1.0,
             Scancode::Right | Scancode::Return => 1.0,
             Scancode::Up => {
-                self.row_index = (self.row_index + ROWS.len() - 1) % ROWS.len();
+                match self.row_index {
+                    0 => self.is_on_pages = true,
+                    _ => self.row_index -= 1,
+                }
                 return MenuOutcome::Stay;
             }
             Scancode::Down => {
-                self.row_index = (self.row_index + 1) % ROWS.len();
+                match self.row_index == last_row {
+                    true => self.is_on_pages = true,
+                    false => self.row_index += 1,
+                }
                 return MenuOutcome::Stay;
             }
             _ => return MenuOutcome::Stay,
@@ -373,8 +440,9 @@ impl Menu {
         MenuOutcome::Stay
     }
 
-    /// `get_lines` gives the open page's lines, each with whether it is highlighted, under the
-    /// tab bar.
+    /// `get_lines` gives the menu's lines, each with whether it is highlighted: the title with
+    /// its `?`, the tab bar (highlighted unless a row of the settings page is chosen), then the
+    /// help while the mouse is over the `?`, else the open page's lines.
     ///
     /// Example: `picture.draw(&menu.get_lines(&menu_settings, Scoreboard::Waiting), false);`
     pub fn get_lines(
@@ -383,10 +451,16 @@ impl Menu {
         scoreboard: Scoreboard,
     ) -> Vec<(String, bool)> {
         let page_names: Vec<&str> = self.get_pages().iter().map(|(_, name)| *name).collect();
+        let is_on_rows: bool = self.get_page() == Page::Settings && !self.is_on_pages;
         let mut lines: Vec<(String, bool)> = vec![
-            (format_tab_bar(&page_names, self.page_index), true),
-            (String::new(), false),
+            (format_title_line(), true),
+            (format_tab_bar(&page_names, self.page_index), !is_on_rows),
         ];
+        if self.is_help_shown() {
+            lines.push((String::new(), false));
+            lines.extend(make_help_lines(&SETTINGS_HELP_LINES));
+            return lines;
+        }
         match self.get_page() {
             Page::Match => lines.extend(self.match_lines.iter().flatten().cloned()),
             Page::Scores => lines.extend(get_score_lines(scoreboard)),
@@ -396,10 +470,6 @@ impl Menu {
             }
             Page::Quit => lines.extend(QUIT_LINES.iter().map(|line| (line.to_string(), false))),
             Page::Settings => {
-                lines.push((
-                    "Up/Down choose, Left/Right change, Return switches".to_string(),
-                    false,
-                ));
                 lines.push((String::new(), false));
                 for (i, row) in ROWS.iter().enumerate() {
                     let text: String = match row {
@@ -432,7 +502,7 @@ impl Menu {
                             format_switch(settings.is_showing_minimap)
                         ),
                     };
-                    lines.push((text, i == self.row_index));
+                    lines.push((text, is_on_rows && i == self.row_index));
                 }
                 lines.push((String::new(), false));
                 lines.extend(CONTROLS_LINES.iter().map(|line| (line.to_string(), false)));
@@ -449,6 +519,10 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Page turning | forward past the last, back past the first; settings keys ignored off the settings page | `q_and_e_turn_pages` |
+    //! | Arrows (W-150, arrow keys and clicks for menu pages) | left and right on a page without rows, on the settings page with the pages' names chosen (turn), with a row chosen (change it, no turn); Down and Up into the rows, past the first and past the last row back to the names | `arrows_turn_pages_unless_a_row_is_chosen` |
+    //! | Click | on a page's name (that page), between two names, on another line | `a_click_on_a_name_opens_its_page` |
+    //! | Top lines (W-151, menu layout and help tooltip) | the title with its `?` first, the names under it (highlighted, or not with a row chosen), no page keys shown | `the_title_is_above_the_pages_names` |
+    //! | Mouse and the help | off the text, on the `?` (help replaces the page, on every page, at most 25 lines of 64 characters), moved away (the page again) | `help_shows_only_over_the_question_mark` |
     //! | Settings row | a number (stepped, clamped), a switch | `settings_rows_change` |
     //! | Visuals row (W-51, basic visuals) | stepped up to its highest, down to its lowest, back to 1 | `visuals_rows_step_within_their_ranges` |
     //! | Closing | Escape; not Tab (the held map's key) | `escape_closes_it_and_tab_does_not` |
@@ -496,6 +570,7 @@ mod tests {
         let (mut menu, mut settings) = (Menu::New(), SETTINGS);
         menu.handle(Scancode::E, &mut settings);
         menu.handle(Scancode::Down, &mut settings);
+        menu.handle(Scancode::Down, &mut settings);
         for _ in 0..20 {
             menu.handle(Scancode::Left, &mut settings);
         }
@@ -503,9 +578,9 @@ mod tests {
         menu.handle(Scancode::Down, &mut settings);
         menu.handle(Scancode::Return, &mut settings);
         assert!(!settings.is_vsync_enabled);
-        menu.handle(Scancode::Up, &mut settings);
-        menu.handle(Scancode::Up, &mut settings);
-        menu.handle(Scancode::Up, &mut settings);
+        for _ in 0..4 {
+            menu.handle(Scancode::Up, &mut settings);
+        }
         assert_eq!(
             menu.handle(Scancode::Return, &mut settings),
             MenuOutcome::Stay
@@ -727,8 +802,8 @@ mod tests {
         menu.set_match_lines(Some(status(1)));
         assert_eq!(menu.get_page(), Page::Match);
         let lines: Vec<(String, bool)> = menu.get_lines(&settings, Scoreboard::Waiting);
-        assert!(lines[0].0.starts_with("[MATCH]"), "{}", lines[0].0);
-        assert!(lines[0].0.chars().count() <= 64, "{}", lines[0].0);
+        assert!(lines[1].0.starts_with("[MATCH]"), "{}", lines[1].0);
+        assert!(lines[1].0.chars().count() <= 64, "{}", lines[1].0);
         assert_eq!(lines[2..], status(1));
         menu.set_match_lines(Some(status(2)));
         assert_eq!(
@@ -743,9 +818,101 @@ mod tests {
         menu.set_match_lines(None);
         assert_eq!(menu.get_page(), Page::Scores);
         assert!(
-            menu.get_lines(&settings, Scoreboard::Waiting)[0]
+            menu.get_lines(&settings, Scoreboard::Waiting)[1]
                 .0
-                .starts_with("MENU  [SCORES]")
+                .starts_with("[SCORES]")
         );
+    }
+
+    #[test]
+    fn arrows_turn_pages_unless_a_row_is_chosen() {
+        let (mut menu, mut settings) = (Menu::New(), SETTINGS);
+        menu.handle(Scancode::Left, &mut settings);
+        assert_eq!(menu.get_page(), Page::Quit);
+        menu.handle(Scancode::Right, &mut settings);
+        menu.handle(Scancode::Right, &mut settings);
+        assert_eq!(menu.get_page(), Page::Settings);
+        menu.handle(Scancode::Right, &mut settings);
+        assert_eq!(menu.get_page(), Page::Map);
+        menu.handle(Scancode::Left, &mut settings);
+        assert_eq!((menu.get_page(), settings), (Page::Settings, SETTINGS));
+        menu.handle(Scancode::Up, &mut settings);
+        assert_eq!((menu.is_on_pages, menu.row_index), (false, ROWS.len() - 1));
+        menu.handle(Scancode::Down, &mut settings);
+        assert!(menu.is_on_pages);
+        menu.handle(Scancode::Down, &mut settings);
+        assert_eq!((menu.is_on_pages, menu.row_index), (false, 0));
+        menu.handle(Scancode::Right, &mut settings);
+        assert_eq!(menu.get_page(), Page::Settings);
+        assert!(settings.look_rad_per_pt > SETTINGS.look_rad_per_pt);
+        menu.handle(Scancode::Up, &mut settings);
+        assert!(menu.is_on_pages);
+        menu.handle(Scancode::Down, &mut settings);
+        menu.handle(Scancode::E, &mut settings);
+        assert_eq!((menu.get_page(), menu.is_on_pages), (Page::Map, true));
+    }
+
+    #[test]
+    fn a_click_on_a_name_opens_its_page() {
+        let (mut menu, settings) = (Menu::New(), SETTINGS);
+        let bar: String = menu.get_lines(&settings, Scoreboard::Waiting)[TAB_BAR_LINE]
+            .0
+            .clone();
+        let column_of = |name: &str| bar.find(name).expect("a page's name");
+        let click = |menu: &mut Menu, line: usize, column: usize| {
+            menu.click(TextCell { line, column });
+        };
+        click(&mut menu, TAB_BAR_LINE, column_of("CREDITS") + 2);
+        assert_eq!(menu.get_page(), Page::Credits);
+        click(&mut menu, TAB_BAR_LINE, column_of("MAP") - 2);
+        assert_eq!(menu.get_page(), Page::Credits);
+        click(&mut menu, TAB_BAR_LINE + 1, column_of("MAP"));
+        assert_eq!(menu.get_page(), Page::Credits);
+        click(&mut menu, TAB_BAR_LINE, column_of("SETTINGS"));
+        assert_eq!((menu.get_page(), menu.is_on_pages), (Page::Settings, true));
+    }
+
+    #[test]
+    fn the_title_is_above_the_pages_names() {
+        let (mut menu, mut settings) = (Menu::New(), SETTINGS);
+        menu.handle(Scancode::E, &mut settings);
+        let lines: Vec<(String, bool)> = menu.get_lines(&settings, Scoreboard::Waiting);
+        assert!(lines[0].0.starts_with("MENU ") && lines[0].0.ends_with('?'));
+        assert_eq!(lines[1].0, " SCORES  [SETTINGS]  MAP   CREDITS   QUIT ");
+        assert!(lines[0].1 && lines[1].1);
+        assert!(lines.iter().all(|(line, _)| !line.contains("Q/E")));
+        menu.handle(Scancode::Down, &mut settings);
+        let lines: Vec<(String, bool)> = menu.get_lines(&settings, Scoreboard::Waiting);
+        assert!(lines[0].1 && !lines[1].1);
+        let highlighted_count: usize = lines.iter().filter(|(_, is_on)| *is_on).count();
+        assert_eq!(highlighted_count, 2);
+    }
+
+    #[test]
+    fn help_shows_only_over_the_question_mark() {
+        let (mut menu, mut settings) = (Menu::New(), SETTINGS);
+        let title: String = menu.get_lines(&settings, Scoreboard::Waiting)[0].0.clone();
+        let mark: TextCell = TextCell {
+            line: 0,
+            column: title.find('?').expect("a help mark"),
+        };
+        assert!(!menu.is_help_shown());
+        for _ in 0..PAGE_COUNT {
+            let page: Vec<(String, bool)> = menu.get_lines(&settings, Scoreboard::Waiting);
+            menu.set_pointer(Some(mark));
+            assert!(menu.is_help_shown());
+            let help: Vec<(String, bool)> = menu.get_lines(&settings, Scoreboard::Waiting);
+            assert_eq!(help[..2], page[..2]);
+            assert_eq!(help[3].0, "HOW TO USE THE MENU");
+            assert!(help.iter().any(|(line, _)| line.contains("Q/E")));
+            assert!(help.iter().any(|(line, _)| line.contains("SETTINGS page")));
+            assert!(help.len() <= 25);
+            assert!(help.iter().all(|(line, _)| line.chars().count() <= 64));
+            menu.set_pointer(Some(TextCell { line: 3, column: 5 }));
+            assert_eq!(menu.get_lines(&settings, Scoreboard::Waiting), page);
+            menu.set_pointer(None);
+            assert!(!menu.is_help_shown());
+            menu.handle(Scancode::E, &mut settings);
+        }
     }
 }

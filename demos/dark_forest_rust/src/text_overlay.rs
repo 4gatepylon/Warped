@@ -1,7 +1,8 @@
 //! `text_overlay` draws lines of text with SDL's built-in 8x8 font into an RGBA picture for the
 //! HUD (`HudImage`): the menu and the title screen. It redraws only when the lines change.
 //!
-//! Interface: `TextPicture` (`New`, `draw`, `draw_team_box`, `get_image`), `GLYPH_PX`.
+//! Interface: `TextPicture` (`New`, `draw`, `draw_team_box`, `get_image`, `get_layout`),
+//! `GLYPH_PX`.
 //!
 //! Example: `picture.draw(&[("MENU".to_string(), true)], false); let image = picture.get_image(1600, 1200, 0.85);`
 //!
@@ -14,6 +15,7 @@ use sdl3::surface::Surface;
 
 use crate::render::HudImage;
 use warped_shared::hud::make_team_box_rgba;
+use warped_shared::menu_and_map::TextLayout;
 
 /// `GLYPH_PX` is the width and height of one character of SDL's debug font.
 pub const GLYPH_PX: f32 = 8.0;
@@ -151,6 +153,22 @@ impl TextPicture {
             if self.pixels_rgba[at + BYTES_PER_PIXEL - 1] == 0 {
                 self.pixels_rgba[at..at + BYTES_PER_PIXEL].copy_from_slice(pixel);
             }
+        }
+    }
+
+    /// `get_layout` gives how the picture's left-aligned text lies in a window where `get_image`
+    /// places it with `height_frac`, to find the text under the mouse.
+    ///
+    /// Example: `let cell = picture.get_layout(0.85).get_cell_at(window_px, pointer_px);`
+    pub fn get_layout(&self, height_frac: f32) -> TextLayout {
+        TextLayout {
+            mask_px: (self.width_px, self.height_px),
+            height_frac,
+            max_width_frac: f64::from(MAX_WIDTH_FRAC),
+            left_px: LEFT_PX,
+            top_px: self.top_px,
+            line_px: LINE_PX,
+            glyph_px: GLYPH_PX,
         }
     }
 
