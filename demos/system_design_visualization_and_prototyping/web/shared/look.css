@@ -1,9 +1,11 @@
 /*
- * `mockup.css` styles the window mock-ups of `index.html` in the look of the game's own menus: light text in a
- * blocky monospace font on near-black, with the teams' blue and red.
+ * `look.css` styles every page of the prototype in the look of the game's own menus: light text in a blocky
+ * monospace font on near-black, with the teams' blue and red.
  *
- * Interface: `index.html` links it. The classes are `.window` (one mocked window), `.box`, `.btn`, `.tag`, `.row`,
- * `.cols`, the colours `.blue`, `.red`, `.purple`, `.dim`, `.warn`, and `.modal` (a window over the others).
+ * Interface: every page links it. The classes are `.window` (one mocked window), `.box`, `.btn`, `.tag`, `.row`,
+ * `.cols`, the colours `.blue`, `.red`, `.purple`, `.dim`, `.warn`, `.modal` (a window over the others), `#sim`
+ * (the simulation controls, in yellow so they can't be taken for part of the game) and `.page` (a page that
+ * scrolls, such as the system view).
  *
  * Example: <div class="box"><span class="tag blue">blue won</span></div>
  */
@@ -165,3 +167,47 @@ tr.is_me td { color: var(--warn); }
 .timeline { height: 10px; background: var(--line); position: relative; margin: 8px 0; }
 .timeline i { position: absolute; top: -3px; width: 3px; height: 16px; background: var(--red); }
 .timeline b { position: absolute; left: 0; top: 0; bottom: 0; width: 38%; background: var(--blue); }
+
+#sim {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  padding: 8px 12px;
+  background: #2b2400;
+  color: var(--warn);
+  border-bottom: 3px solid var(--warn);
+  border-image: repeating-linear-gradient(45deg, var(--warn) 0 12px, #000 12px 24px) 3;
+  font-size: 13px;
+}
+#sim .btn { border-color: var(--warn); color: var(--warn); }
+#sim .btn:hover { background: var(--warn); color: #000; }
+#sim input { width: 70px; background: #000; color: var(--warn); border: 1px solid var(--warn); font: inherit; padding: 2px 6px; }
+#sim a { color: var(--warn); }
+.sim_only { border-color: var(--warn) !important; color: var(--warn) !important; }
+
+.page { max-width: 1280px; margin: 0 auto; padding: 16px 24px 48px; }
+.page h2 { margin-top: 28px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.page table { font-size: 13px; }
+.page pre { margin: 0 0 8px; color: var(--dim); font: inherit; font-size: 12px; white-space: pre-wrap; }
+.scroll { max-height: 320px; overflow: auto; }
+
+.bar { height: 14px; background: var(--line); position: relative; margin: 4px 0 10px; }
+.bar b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--blue); }
+.bar.is_full b { background: var(--red); }
+
+.machine { display: inline-block; vertical-align: top; width: 290px; margin: 0 10px 10px 0; }
+.machine.booting { border-style: dashed; color: var(--dim); }
+.slot { display: flex; gap: 8px; align-items: center; border: 1px solid var(--line); padding: 2px 6px; margin-top: 4px; font-size: 12px; min-height: 24px; }
+.slot.starting { border-color: var(--warn); color: var(--warn); }
+.slot.running { border-color: var(--blue); }
+.slot.empty { color: var(--dim); border-style: dashed; }
+
+#diagram { width: 100%; height: auto; background: var(--panel); border: 1px solid var(--line); }
+#diagram rect { fill: var(--ground); stroke: var(--ink); }
+#diagram text { fill: var(--ink); font: 700 13px Menlo, Monaco, monospace; }
+#diagram text.count { fill: var(--dim); font-size: 11px; }
+#diagram line { stroke: var(--line); stroke-width: 2; }
+#diagram line.is_recent { stroke: var(--warn); stroke-width: 3; }
+#diagram polygon { fill: var(--line); }
+#diagram polygon.is_recent { fill: var(--warn); }

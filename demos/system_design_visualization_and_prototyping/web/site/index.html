@@ -1,0 +1,120 @@
+<!doctype html>
+<!--
+  `index.html` mocks up the website: the public pages (download, rankings, status) and the superadmin console.
+
+  Interface:
+  - The bar under the simulation controls picks a page; buttons inside the mocked screen go where they would.
+  - Live from the simulated backend: the status page, and the console's SETTINGS tab. The rest is made up until a
+    later part of the prototype wires it.
+  - The bar at the bottom keeps a like or dislike and a note per page; "All feedback" lists them to copy.
+
+  Example: `make run-prototype`, then open http://127.0.0.1:8010/site/ in a browser.
+
+  Must know:
+  - Gotchas: each page is a `section` with the id `w-<name>`; `../shared/windows.js` explains the `data-`
+    attributes, and `site.js` fills the live parts.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warped website mock-up</title>
+<link rel="stylesheet" href="../shared/look.css">
+</head>
+<body>
+
+<div id="toolbar">
+  <span class="warn">WEBSITE MOCK-UP</span>
+  <label>Page <select id="view_window"></select></label>
+  <button class="btn small" data-go="feedback">ALL FEEDBACK</button>
+</div>
+
+<div id="stage"><div id="screen">
+
+<section class="window" id="w-download" data-title="Download">
+  <div class="row"><h1>Warped</h1><span class="right"><button class="btn small" data-go="rankings">RANKINGS</button>
+    <button class="btn small" data-go="status">STATUS</button></span></div>
+  <p class="big">A shooter in curved space.</p>
+  <p class="dim">Five against five. Rooms that are spheres, tori and hyperbolic planes. Wormholes you throw.</p>
+  <div class="cols">
+    <div class="box"><h2>macOS</h2><p>Version 0.9.2 <span class="dim">Apple silicon and Intel</span></p>
+      <p><button class="btn main">DOWNLOAD FOR MAC</button></p></div>
+    <div class="box dim"><h2>Windows</h2><p>Not yet.</p></div>
+    <div class="box dim"><h2>Linux</h2><p>Not yet.</p></div>
+  </div>
+  <p class="dim">Free to try: your first match or 30 minutes online. Then $13.37, once. Local games are free.</p>
+  <p class="dim">Terms of service, privacy policy, code of conduct. Not offered in the European Union. 13 and older.</p>
+</section>
+
+<section class="window" id="w-rankings" data-title="Rankings">
+  <div class="row"><h1>Rankings</h1><span class="dim">Season 2. Read-only, no sign-in.</span>
+    <button class="btn small right" data-go="download">HOME</button></div>
+  <table>
+    <tr><th>#</th><th>Player</th><th>Tier</th><th>Rating</th><th>Matches</th><th>Won</th></tr>
+    <tr><td>1</td><td>perihelion</td><td>WARPED</td><td>2,241</td><td>131</td><td>71%</td></tr>
+    <tr><td>2</td><td>zenith</td><td>MASTER</td><td>2,118</td><td>96</td><td>66%</td></tr>
+    <tr><td>3</td><td>apogee</td><td>MASTER</td><td>2,034</td><td>102</td><td>63%</td></tr>
+    <tr><td>4</td><td>quasar9</td><td>DIAMOND</td><td>1,967</td><td>88</td><td>61%</td></tr>
+  </table>
+  <p class="dim">Made up for now: ratings arrive with a later part of the prototype.</p>
+</section>
+
+<section class="window" id="w-status" data-title="Status">
+  <div class="row"><h1>Status</h1><span class="blue">LIVE FROM THE SIMULATED BACKEND</span>
+    <button class="btn small right" data-go="download">HOME</button></div>
+  <div class="cols">
+    <div class="box"><h2>Services</h2><div id="status_services"></div></div>
+    <div class="box"><h2>How full it is</h2><div id="status_caps"></div></div>
+  </div>
+</section>
+
+<section class="window" id="w-console" data-title="Superadmin console">
+  <div class="row"><h1>Superadmin console</h1><span class="dim">A web page, only for superadmins.</span></div>
+  <div data-tabs="settings">
+    <div class="tabs"><button class="btn" data-tab="settings">SETTINGS</button><button class="btn" data-tab="review">REVIEW</button>
+      <button class="btn" data-tab="run">RUN THE GAME</button><button class="btn" data-tab="log">LOG</button></div>
+    <div data-pane="settings">
+      <p class="dim">Live: a change takes effect at once in the simulated system.</p>
+      <table id="settings_table"></table>
+      <p id="settings_error" class="red"></p></div>
+    <div data-pane="review">
+      <table>
+        <tr><th>Account</th><th>Why it is here</th><th>Evidence</th><th></th></tr>
+        <tr><td>umbra</td><td class="warn">suspended: 91 reporters in 90 days</td><td>12 replays, 1 failed audit</td>
+          <td><button class="btn small">LIFT</button> <button class="btn small danger">BAN</button></td></tr>
+        <tr><td>parallax</td><td>appeal of a chat ban</td><td>chat log</td>
+          <td><button class="btn small">UPHOLD</button> <button class="btn small">LIFT</button></td></tr>
+      </table></div>
+    <div data-pane="run">
+      <p><button class="btn">POST AN ANNOUNCEMENT</button> <button class="btn">START A TOURNAMENT GAME</button></p>
+      <div class="row">Maintenance <input type="checkbox"> <span class="dim">stops new matches, lets running ones finish</span></div>
+      <p class="dim">Now: 37 matches, 352 players online. Caps: 100 and 1,000.</p></div>
+    <div data-pane="log">
+      <p class="dim">Nov 10 14:02 superadmin_a changed "Largest rating window" from 400 to 500</p>
+      <p class="dim">Nov 9 19:40 superadmin_b banned an account for cheating (2 failed audits)</p></div>
+  </div>
+</section>
+
+<section class="window" id="w-feedback" data-title="All feedback">
+  <div class="row"><h1>All feedback</h1><button class="btn small right" data-go="download">HOME</button></div>
+  <p class="dim">Kept in this browser only. Copy it and paste it into the chat.</p>
+  <p><button class="btn" data-act="copy_feedback">COPY ALL FEEDBACK</button>
+    <button class="btn danger" data-act="clear_feedback">CLEAR ALL FEEDBACK</button></p>
+  <pre class="box" id="all_feedback"></pre>
+</section>
+
+</div></div>
+
+<div id="feedback">
+  <span>This page:</span>
+  <button class="btn small" data-act="verdict" data-verdict="like">I LIKE IT</button>
+  <button class="btn small" data-act="verdict" data-verdict="dislike">I DON'T LIKE IT</button>
+  <textarea id="feedback_note" placeholder="What do you like or not like about this page?"></textarea>
+</div>
+
+<script src="../shared/api.js"></script>
+<script src="../shared/sim_controls.js"></script>
+<script src="../shared/windows.js"></script>
+<script src="site.js"></script>
+</body>
+</html>

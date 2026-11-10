@@ -1,6 +1,6 @@
 /**
  * @file
- * `mockup.js` makes the window mock-ups of `index.html` navigable: it shows one window at a time, hides what the
+ * `windows.js` makes the mocked windows of a page (`../game/index.html`, `../site/index.html`) navigable: it shows one window at a time, hides what the
  * chosen role and account may not see, plays a pretend search for a match, and keeps the reviewer's feedback.
  *
  * Interface, all through attributes in `index.html`:
@@ -12,7 +12,7 @@
  * - `data-act="<action>"` runs one of `ACTIONS`.
  * - URL hash: `#play` opens the Play window, and the hash follows the open window.
  *
- * Example: open `game_design/window_design/index.html` in a browser.
+ * Example: <script src="../shared/windows.js"></script> at the end of a page of `section class="window"`s.
  *
  * Must know:
  * - Gotchas: nothing here talks to a server. Players, games and timings are made up, and feedback is kept in this
@@ -25,8 +25,8 @@ const SEARCH_TICK_MS = 1000;
 const BOTS_OFFER_AFTER_S = 5;
 const READY_CHECK_AFTER_S = 10;
 const READY_CHECK_S = 20;
-const FEEDBACK_STORAGE_KEY = 'warped_window_mockup_feedback';
-const FIRST_WINDOW_NAME = 'home';
+const FEEDBACK_STORAGE_KEY = `warped_window_mockup_feedback${location.pathname}`;
+const FIRST_WINDOW_NAME = document.querySelector('.window').id.slice('w-'.length);
 const ROLE_WORDS = { player: [], admin: ['admin'], root: ['admin', 'root'] };
 
 const state = { window_name: FIRST_WINDOW_NAME, game_kind: 'custom', waited_s: 0, ready_left_s: 0, search_timer: null };
@@ -99,14 +99,23 @@ function draw_feedback() {
 }
 
 /**
+ * `read_choice` returns the value of the toolbar's `select` with `id`, or `fallback` on a page whose toolbar
+ * doesn't have that choice.
+ *
+ * @example const role_name = read_choice('view_role', 'player');
+ */
+function read_choice(id, fallback) {
+  const select = document.getElementById(id);
+  return select === null ? fallback : select.value;
+}
+
+/**
  * `apply_view` hides every `data-needs` element whose words the chosen role, account and kind of game don't meet.
  *
  * @example get_element('view_role').value = 'admin'; apply_view();
  */
 function apply_view() {
-  const role_name = get_element('view_role').value;
-  const account_word = get_element('view_account').value;
-  const words_that_hold = new Set([...ROLE_WORDS[role_name], account_word, state.game_kind]);
+  const words_that_hold = new Set([...ROLE_WORDS[read_choice('view_role', 'player')], read_choice('view_account', 'paid'), state.game_kind]);
   for (const element of document.querySelectorAll('[data-needs]')) {
     const has_every_word = element.dataset.needs.split(' ').every((word) => words_that_hold.has(word));
     element.classList.toggle('hidden', !has_every_word);
@@ -121,13 +130,16 @@ function apply_view() {
  */
 function show_window(window_name) {
   const wanted = get_element(`w-${window_name}`);
-  const is_blocked = 'online' in wanted.dataset && get_element('view_account').value === 'unpaid';
+  const is_blocked = 'online' in wanted.dataset && read_choice('view_account', 'paid') === 'unpaid';
   const shown = is_blocked ? get_element('w-purchase') : wanted;
   state.window_name = shown.id.slice('w-'.length);
   for (const other of document.querySelectorAll('.window')) {
     other.classList.toggle('is_open', other === shown);
   }
-  get_element('side').classList.toggle('is_open', 'side' in shown.dataset);
+  const side_panel = document.getElementById('side');
+  if (side_panel !== null) {
+    side_panel.classList.toggle('is_open', 'side' in shown.dataset);
+  }
   shown.classList.toggle('has_side', 'side' in shown.dataset);
   get_element('view_window').value = state.window_name;
   history.replaceState(null, '', `#${state.window_name}`);
@@ -284,8 +296,9 @@ function main() {
   }
   document.addEventListener('click', handle_click);
   get_element('view_window').addEventListener('change', (event) => show_window(event.target.value));
-  get_element('view_role').addEventListener('change', apply_view);
-  get_element('view_account').addEventListener('change', () => show_window(state.window_name));
+  for (const select of document.querySelectorAll('#view_role, #view_account')) {
+    select.addEventListener('change', () => show_window(state.window_name));
+  }
   get_element('feedback_note').addEventListener('input', (event) => save_feedback({ note: event.target.value }));
   window.addEventListener('resize', fit_screen);
   window.addEventListener('hashchange', () => show_window(location.hash.slice(1)));

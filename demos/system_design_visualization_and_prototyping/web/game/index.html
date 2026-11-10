@@ -1,7 +1,8 @@
 <!doctype html>
 <!--
-  `index.html` mocks up the windows of `../WINDOW_DESIGN.md` that aren't built yet, so that they can be clicked
-  through and judged before anyone builds them. Every player, game and number in it is made up.
+  `index.html` mocks up the game app: the windows of `game_design/WINDOW_DESIGN.md` that aren't built yet, so that
+  they can be clicked through and judged before anyone builds them. The players, games and numbers in a window are
+  made up until a part of the prototype wires that window to the simulated backend.
 
   Interface:
   - The bar at the top picks a window, the role to view it as, and whether the account has the purchase.
@@ -9,22 +10,22 @@
   - The bar at the bottom keeps a like or dislike and a note per window; "All feedback" lists them to copy.
   - URL hash: `#play` opens the Play window.
 
-  Example: open `game_design/window_design/index.html` in a browser.
+  Example: `make run-prototype`, then open http://127.0.0.1:8010/game/ in a browser.
 
   Must know:
-  - Gotchas: each window is a `section` with the id `w-<name>`; `mockup.js` explains the `data-` attributes.
+  - Gotchas: each window is a `section` with the id `w-<name>`; `../shared/windows.js` explains the `data-` attributes.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Warped window mock-ups</title>
-<link rel="stylesheet" href="mockup.css">
+<title>Warped game app mock-up</title>
+<link rel="stylesheet" href="../shared/look.css">
 </head>
 <body>
 
 <div id="toolbar">
-  <span class="warn">MOCK-UP, NOT A GAME SCREENSHOT</span>
+  <span class="warn">GAME APP MOCK-UP, NOT A GAME SCREENSHOT</span>
   <label>Window <select id="view_window"></select></label>
   <label>You are <select id="view_role">
     <option value="player">a player</option>
@@ -74,7 +75,7 @@
   <p><button class="btn main" data-go="maps">SAVED MAPS</button> <span class="dim">Levels and settings to start games from.</span></p>
   <p><button class="btn main" data-go="local">LOCAL GAMES</button> <span class="dim">Tutorial, bots, this Wi-Fi. Free.</span></p>
   <p class="dim">Also here: <a href="#end">end of match</a>, <a href="#match">the menu in a match</a>,
-    <a href="#replay">watching and replays</a>, <a href="#web">on the web</a>, <a href="#signin">sign-in</a>.</p>
+    <a href="#replay">watching and replays</a>, <a href="#signin">sign-in</a>. The website is <a href="../site/">its own mock-up</a>.</p>
 </section>
 
 <section class="window" id="w-purchase" data-title="Purchase">
@@ -443,38 +444,6 @@
   </div>
 </section>
 
-<section class="window" id="w-web" data-title="On the web: superadmin console">
-  <div class="row"><h1>Superadmin console</h1><span class="dim">A web page, only for superadmins.</span></div>
-  <div data-tabs="settings">
-    <div class="tabs"><button class="btn" data-tab="settings">SETTINGS</button><button class="btn" data-tab="review">REVIEW</button>
-      <button class="btn" data-tab="run">RUN THE GAME</button><button class="btn" data-tab="log">LOG</button></div>
-    <div data-pane="settings">
-      <table>
-        <tr><th>Section</th><th>Setting</th><th>Value</th></tr>
-        <tr><td>Paying</td><td>Price of the purchase</td><td><input size="6" value="13.37"> $</td></tr>
-        <tr><td>Where and on what</td><td>Most matches at once</td><td><input size="6" value="100"></td></tr>
-        <tr><td>Matchmaking</td><td>Largest rating window</td><td><input size="6" value="500"></td></tr>
-        <tr><td>Fair play</td><td>Failed audits before a ban</td><td><input size="6" value="2"></td></tr>
-        <tr><td class="dim" colspan="3">... every setting marked ≈ in OUTSIDE_GAME_DESIGN.md</td></tr>
-      </table></div>
-    <div data-pane="review">
-      <table>
-        <tr><th>Account</th><th>Why it is here</th><th>Evidence</th><th></th></tr>
-        <tr><td>umbra</td><td class="warn">suspended: 91 reporters in 90 days</td><td>12 replays, 1 failed audit</td>
-          <td><button class="btn small">LIFT</button> <button class="btn small danger">BAN</button></td></tr>
-        <tr><td>parallax</td><td>appeal of a chat ban</td><td>chat log</td>
-          <td><button class="btn small">UPHOLD</button> <button class="btn small">LIFT</button></td></tr>
-      </table></div>
-    <div data-pane="run">
-      <p><button class="btn">POST AN ANNOUNCEMENT</button> <button class="btn">START A TOURNAMENT GAME</button></p>
-      <div class="row">Maintenance <input type="checkbox"> <span class="dim">stops new matches, lets running ones finish</span></div>
-      <p class="dim">Now: 37 matches, 352 players online. Caps: 100 and 1,000.</p></div>
-    <div data-pane="log">
-      <p class="dim">Nov 10 14:02 superadmin_a changed "Largest rating window" from 400 to 500</p>
-      <p class="dim">Nov 9 19:40 superadmin_b banned an account for cheating (2 failed audits)</p></div>
-  </div>
-</section>
-
 <section class="window" id="w-feedback" data-title="All feedback">
   <div class="row"><h1>All feedback</h1><button class="btn small right" data-go="home">HOME</button></div>
   <p class="dim">Kept in this browser only. Copy it and paste it into the chat.</p>
@@ -534,6 +503,8 @@
   <textarea id="feedback_note" placeholder="What do you like or not like about this window?"></textarea>
 </div>
 
-<script src="mockup.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/sim_controls.js"></script>
+<script src="../shared/windows.js"></script>
 </body>
 </html>

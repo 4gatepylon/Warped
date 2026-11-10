@@ -1,0 +1,37 @@
+<!doctype html>
+<!--
+  `index.html` is the prototype's front page: it links the game app mock-up, the website mock-up and the system
+  view, under the simulation controls.
+
+  Interface: each box opens one page.
+
+  Example: `make run-prototype`, then open http://127.0.0.1:8010/ in a browser.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warped system prototype</title>
+<link rel="stylesheet" href="shared/look.css">
+</head>
+<body>
+<div class="page">
+  <h1>Warped system prototype</h1>
+  <p class="dim">A simulation of everything around a match, to try the design before building it. Nothing here is the
+    real game, and every player is made up.</p>
+  <div class="cols">
+    <div class="box"><h2>Game app</h2><p class="dim">The windows of the Mac app, to click through.</p>
+      <p><a class="btn main" href="game/">OPEN</a></p></div>
+    <div class="box"><h2>Website</h2><p class="dim">The download page, rankings, status and the superadmin console.</p>
+      <p><a class="btn main" href="site/">OPEN</a></p></div>
+    <div class="box"><h2>System view</h2><p class="dim">What the backend is doing: components, messages, machines,
+      game servers and the database.</p>
+      <p><a class="btn main" href="system/">OPEN</a></p></div>
+  </div>
+  <p class="dim">The yellow band at the top steers the simulation. Try "Players online" 200, then open the system
+    view.</p>
+</div>
+<script src="shared/api.js"></script>
+<script src="shared/sim_controls.js"></script>
+</body>
+</html>
