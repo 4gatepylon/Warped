@@ -144,6 +144,7 @@ struct CityUniforms {
     flashlight_direction: [f32; 4],
     flashlight: [f32; 4],
     hole_sides: [[f32; 4]; MAX_HOLE_COUNT],
+    glass_lights: [f32; 4],
 }
 
 /// `CityScene` is the geometry that never changes: opaque triangles and the glass's, with an id
@@ -188,6 +189,9 @@ pub struct CityFrame {
     /// `visuals` is the player's brightness, contrast, saturation and gamma for the finished frame
     /// (W-51, basic visuals); `GpuPlayerVisuals::IDENTITY` skips that pass.
     pub visuals: GpuPlayerVisuals,
+    /// `glass_light_frac` is how bright the glass shell's ribs glow now, as a share of full
+    /// (W-203, `GlassLightsSettings::get_brightness_frac`).
+    pub glass_light_frac: f32,
 }
 
 impl CityFrame {
@@ -1548,6 +1552,7 @@ impl CityGpu {
             flashlight_direction: frame.flashlight[1],
             flashlight: frame.flashlight[2],
             hole_sides,
+            glass_lights: [frame.glass_light_frac, 0.0, 0.0, 0.0],
         };
         let dynamic: Buffer = make_buffer(device, &frame.dynamic)?;
         let beams: Buffer = make_buffer(device, &frame.beams)?;
