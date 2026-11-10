@@ -28,6 +28,7 @@ terms.
 - [Moving and looking](#moving-and-looking)
 - [Space and physics](#space-and-physics)
 - [Building, measuring and shipping](#building-measuring-and-shipping)
+- [Tracking work](#tracking-work)
 
 ## Structure of play
 
@@ -271,3 +272,11 @@ its named objects and marked map pictures. An object's name there is its officia
 | **Mac app**, **bundle** | `Warped.app`, the app packaged for macOS, and the zip of it that players download. | |
 | **download page** | The public web page where players get the bundle ([`infra/`](../infra/README.md)). | |
 | **playtest** | The user playing a build to judge it. | |
+
+## Tracking work
+
+| Say | Meaning | Might be called by the user |
+| --- | --- | --- |
+| **wishlist**, **item** | The checklist of what the user has asked for ([`USER_WISHLIST_CHECKLIST.md`](../demos/hyperbolic_wormholes_rust/USER_WISHLIST_CHECKLIST.md)), and one request on it, with an id such as `W-85` and a short name. | |
+| **open**, **claimed**, **pending user review**, **done** | An item's four statuses: nobody has started it; an agent is working on it; it is merged into a `staging/user-<username>` branch and waits for the user to test it; the user tested it and confirmed it works. An item is done only once the user confirms it. | "done" for merged but unconfirmed |
+| **WIP** | Work in progress: a commit that saves unfinished work so another agent can pick it up. | |
