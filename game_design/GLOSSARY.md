@@ -26,6 +26,7 @@ terms.
 - [World objects](#world-objects)
 - [Worlds](#worlds)
 - [Moving and looking](#moving-and-looking)
+- [Space and physics](#space-and-physics)
 
 ## Structure of play
 
@@ -187,3 +188,17 @@ its named objects and marked map pictures. An object's name there is its officia
 | **flashlight** | A cone of light from the player's eye while `F` is held. Other players don't see it yet. | |
 | **deactivate** | To turn a console off: hold `E` for 10 s while aiming at it from within 3 m. Letting go, or aiming away, resets its progress. | "capture", "disable" |
 | **throw** | To send out one of the player's two wormhole mouths with `Q`. A throw that doesn't land within its flight time, or lands too close to a wall or another warp object, **fizzles**, and can be thrown again. | |
+
+## Space and physics
+
+"Curvature" alone can mean a level's curvature type or its curvature amount. Write the one you mean.
+
+| Say | Meaning | Might be called by the user |
+| --- | --- | --- |
+| **space** | The geometry of a level's world: hyperbolic (Dust, Lunar Surface), inside a sphere (City Sphere), or flat with two looping axes, T² × ℝ (Snow Planet and Dark Forest, which don't loop yet). | |
+| **curvature type** | Which way a level's space is curved: hyperbolic, spherical, or flat (Euclidean). It is `space.kind` in a level layout. | "curvature" |
+| **curvature amount** | How strongly a level's space is curved, given by its **curvature radius** in meters: the smaller the radius, the stronger the curvature. It is `space.curvature_radius_m` in a level layout, and the game setting `space.curvature_per_map_curvature` can curve a level more than its layout (Lunar Surface's 40 m plays as 26.7 m). Flat space has none. | "curvature" |
+| **gravity** | What pulls players onto the ground, or outward onto the sphere in City Sphere. | |
+| **pull** | The acceleration that draws a player along the ground toward a black hole or a mouth. It builds a **drift**, a velocity added to the player's walk. | "gravity" toward a warp object |
+| **time dilation** | Time running slower for a player near a black hole: their movement, energy, console holds and guns slow down. | |
+| **bend** | What a warp object does to light, to lasers and to a player's path near it. | |
