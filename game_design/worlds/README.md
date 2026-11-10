@@ -36,8 +36,9 @@ Left and right were checked in the game's code, not only read off the pictures.
 
 - **Voxel levels** (Dust, Snow Planet, City Sphere, Lunar Surface). A player's camera looks along its frame's −z
   axis and its right is the frame's +x axis (`demos/snow_planet_rust/src/physics.rs`, `forward = -frame.col(2)`,
-  `right = frame.col(0)`). The renderer puts that +x on the right of the screen (`render_cpu.rs`, `render_pixel`),
-  and the map pictures are a top view that is not mirrored (`map_photo.rs`).
+  `right = frame.col(0)`). The renderer puts that +x on the right of the screen (`render_pixel` in
+  `demos/snow_planet_rust/src/render_cpu.rs`), and the map pictures are a top view that is not mirrored
+  (`demos/snow_planet_rust/src/map_photo.rs`).
 - **Dark Forest.** A player's forward is `R_y(yaw) * −z` and right is `R_y(yaw) * +x`, rendered with a right-handed
   view (`demos/dark_forest_rust/src/game/player.rs`).
 
