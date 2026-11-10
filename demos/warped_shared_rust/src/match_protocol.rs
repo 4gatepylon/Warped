@@ -20,7 +20,8 @@
 //!   (the game master's choice; no authentication yet).
 //! - A beacon is `MATCH_BEACON_MAGIC`, a version byte, the match server's port and a summary of
 //!   its match, broadcast every `MATCH_BEACON_PERIOD_S` to UDP `MATCH_DISCOVERY_PORT`; a reader
-//!   ignores bytes after the fields it knows, so a later version can append fields.
+//!   ignores bytes after the fields it knows, so a later version can append fields. Loopback-only
+//!   programs (`network_scope`) send it to 127.0.0.1 instead of broadcasting it.
 
 use std::error::Error;
 use std::fs;
@@ -33,6 +34,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::match_state::{MatchState, Outcome, Team};
+use crate::network_scope;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -268,12 +270,12 @@ pub struct MatchClient {
 
 impl MatchClient {
     /// `Connect` makes a client of the match server at `server` playing for `team` (`None` until
-    /// the player picks one).
+    /// the player picks one); a server on this Mac is reached on the loopback interface only.
     ///
     /// Example: `let client = MatchClient::Connect(server, Some(Team::Blue))?;`
     #[allow(non_snake_case)]
     pub fn Connect(server: SocketAddr, team: Option<Team>) -> Result<MatchClient> {
-        let socket: UdpSocket = UdpSocket::bind(("0.0.0.0", 0))?;
+        let socket: UdpSocket = network_scope::bind_socket_toward(server)?;
         socket.set_nonblocking(true)?;
         Ok(MatchClient {
             socket,
@@ -476,13 +478,13 @@ pub struct MatchAnnouncer {
 }
 
 impl MatchAnnouncer {
-    /// `New` makes an announcer sending to `target`.
+    /// `New` makes an announcer sending to `target` (on the loopback interface only, for a target
+    /// on this Mac; broadcasts only to a broadcast address).
     ///
     /// Example: `let mut announcer = MatchAnnouncer::New("127.0.0.1:48301".parse()?)?;`
     #[allow(non_snake_case)]
     pub fn New(target: SocketAddr) -> Result<MatchAnnouncer> {
-        let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-        socket.set_broadcast(true)?;
+        let socket: UdpSocket = network_scope::bind_socket_toward(target)?;
         Ok(MatchAnnouncer {
             socket,
             target,
@@ -492,13 +494,13 @@ impl MatchAnnouncer {
     }
 
     /// `OnNetwork` makes an announcer broadcasting to `MATCH_DISCOVERY_PORT` on the local
-    /// network.
+    /// network, or sending to it on 127.0.0.1 when `is_loopback_only`.
     ///
-    /// Example: `let mut announcer = MatchAnnouncer::OnNetwork()?;`
+    /// Example: `let mut announcer = MatchAnnouncer::OnNetwork(false)?;`
     #[allow(non_snake_case)]
-    pub fn OnNetwork() -> Result<MatchAnnouncer> {
+    pub fn OnNetwork(is_loopback_only: bool) -> Result<MatchAnnouncer> {
         MatchAnnouncer::New(SocketAddr::from((
-            Ipv4Addr::BROADCAST,
+            network_scope::get_beacon_ip(is_loopback_only),
             MATCH_DISCOVERY_PORT,
         )))
     }
@@ -571,13 +573,14 @@ pub struct MatchListener {
 }
 
 impl MatchListener {
-    /// `Bind` listens on UDP `port` (`MATCH_DISCOVERY_PORT` for the local network). It fails if
-    /// another program holds the port.
+    /// `Bind` listens on UDP `port` of `ip`: every interface (`Ipv4Addr::UNSPECIFIED`) for games
+    /// on the local network (`MATCH_DISCOVERY_PORT`), or the loopback interface alone for tests. It
+    /// fails if another program holds the port.
     ///
-    /// Example: `let mut listener = MatchListener::Bind(MATCH_DISCOVERY_PORT)?;`
+    /// Example: `let mut listener = MatchListener::Bind(Ipv4Addr::UNSPECIFIED, MATCH_DISCOVERY_PORT)?;`
     #[allow(non_snake_case)]
-    pub fn Bind(port: u16) -> Result<MatchListener> {
-        let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).map_err(|error| {
+    pub fn Bind(ip: Ipv4Addr, port: u16) -> Result<MatchListener> {
+        let socket: UdpSocket = UdpSocket::bind((ip, port)).map_err(|error| {
             format!(
                 "can't listen for games on UDP port {port} ({error}); join a game by its address"
             )
@@ -632,7 +635,7 @@ mod tests {
     //! | Bad beacon | too short, wrong magic, version 0, unknown phase | `bad_beacons_are_refused` |
     //! | Beacon from a view | waiting, intermission, playing, round over, over; a count above 255 | `beacons_summarise_the_view` |
     //! | Found list | a new server, the same server again (replaced), another server (sorted), a non-beacon, a server gone quiet | `found_matches_update_and_expire` |
-    //! | Over the network | a beacon sent to the listener's port is found at the sender's address | `a_listener_hears_an_announcer` |
+    //! | Over loopback | a beacon sent to the listener's port is found at the sender's address (both on 127.0.0.1) | `a_listener_hears_an_announcer` |
 
     use super::*;
     use std::path::PathBuf;
@@ -763,7 +766,8 @@ mod tests {
 
     #[test]
     fn a_listener_hears_an_announcer() {
-        let mut listener: MatchListener = MatchListener::Bind(TEST_DISCOVERY_PORT).unwrap();
+        let mut listener: MatchListener =
+            MatchListener::Bind(Ipv4Addr::LOCALHOST, TEST_DISCOVERY_PORT).unwrap();
         let target: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, TEST_DISCOVERY_PORT));
         let mut announcer: MatchAnnouncer = MatchAnnouncer::New(target).unwrap();
         let beacon: MatchBeacon =

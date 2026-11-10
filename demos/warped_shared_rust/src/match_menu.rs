@@ -4,7 +4,8 @@
 //!
 //! Interface: `get_progression_lines`, `MAX_LINE_COUNT` (the terminal's page),
 //! `get_match_lines` (the in-level menu's MATCH page), `get_progression_shapes`,
-//! `get_progression_shapes_with_footer`, `Shape` (from `page.rs`),
+//! `get_progression_shapes_with_footer`, `get_click_target` and `PageClick` (a click chooses a
+//! level or the match), `Shape` (from `page.rs`),
 //! `PAGE_SIZE`, `HUD_RGB`, `HIGHLIGHT_RGB`, `DIM_RGB`, `TEAM_RGB` (the window's page).
 //!
 //! Example: `let lines = get_progression_lines(&view, Some(Team::Blue));`
@@ -348,7 +349,12 @@ const LEVEL_GAP: f32 = 12.0;
 const CAPTURE_BAR: f32 = 6.0;
 const HISTORY_TOP: f32 = 232.0 + THUMBNAIL_PAD + THUMBNAIL_HEIGHT;
 const CHIP_WIDTH: f32 = 72.0;
-const LEVEL_WINDOW_FOOTER: &str = "Escape quits. The level opens in its own window each round.";
+const TEAM_BOX_PAD: f32 = 3.0;
+const LEVEL_WINDOW_FOOTER: &str =
+    "Escape quits. M: back to the match. Levels open in their own window.";
+const MATCH_BUTTON_TEXT: &str = "[ back to the match ]";
+const MATCH_BUTTON_PAD: f32 = 4.0;
+const CLICK_HINT: &str = "Click a level to play it now; the wavefronts show the match's way.";
 
 /// `get_team_rgb` gives a team's colour (the minimap's), or the purple level's for `None`.
 ///
@@ -382,6 +388,63 @@ fn format_short_status(ownership: &Ownership, state: &MatchState, level: usize) 
     }
 }
 
+/// `PageClick` is what a click on the progression page chooses: free play on a level (its
+/// index), or back to the match.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PageClick {
+    Level(usize),
+    Match,
+}
+
+/// `get_level_box` gives the top left corner and size, in page units, of level `level`'s panel
+/// in a row of `level_count`.
+///
+/// Example: `let (min, size) = get_level_box(5, 2);`
+fn get_level_box(level_count: usize, level: usize) -> ([f32; 2], [f32; 2]) {
+    let width: f32 =
+        (PAGE_SIZE[0] - 2.0 * MARGIN - LEVEL_GAP * (level_count - 1) as f32) / level_count as f32;
+    (
+        [MARGIN + level as f32 * (width + LEVEL_GAP), LEVEL_TOP],
+        [width, LEVEL_HEIGHT],
+    )
+}
+
+/// `get_match_button_box` gives the "back to the match" button's top left corner and size.
+///
+/// Example: `let (min, size) = get_match_button_box();`
+fn get_match_button_box() -> ([f32; 2], [f32; 2]) {
+    let size: [f32; 2] = [
+        MATCH_BUTTON_TEXT.len() as f32 * GLYPH + 2.0 * MATCH_BUTTON_PAD,
+        LINE + MATCH_BUTTON_PAD,
+    ];
+    let y: f32 = LEVEL_TOP + LEVEL_HEIGHT + 14.0 + 2.0 * LINE + 6.0;
+    ([PAGE_SIZE[0] - MARGIN - size[0], y], size)
+}
+
+/// `is_inside` says whether `at` is inside the box at `min` of `size`.
+///
+/// Example: `assert!(is_inside([1.0, 1.0], [0.0, 0.0], [2.0, 2.0]));`
+fn is_inside(at: [f32; 2], min: [f32; 2], size: [f32; 2]) -> bool {
+    (0..2).all(|a| at[a] >= min[a] && at[a] < min[a] + size[a])
+}
+
+/// `get_click_target` gives what a click at `at` (page units, `page::get_page_point`) on
+/// `view`'s progression page chooses: a level's panel plays it freely, and during free play the
+/// "back to the match" button goes back; anywhere else `None`.
+///
+/// Example: `if let Some(PageClick::Level(level)) = get_click_target(&view, at) { ... }`
+pub fn get_click_target(view: &MatchView, at: [f32; 2]) -> Option<PageClick> {
+    let count: usize = view.state.level_count();
+    if let Some(level) = (0..count).find(|&level| {
+        let (min, size) = get_level_box(count, level);
+        is_inside(at, min, size)
+    }) {
+        return Some(PageClick::Level(level));
+    }
+    let (min, size) = get_match_button_box();
+    (view.state.get_free_play().is_some() && is_inside(at, min, size)).then_some(PageClick::Match)
+}
+
 /// `push_level_row` adds the five levels in a row: one panel each, tinted by its side, outlined on
 /// the level played next (red while it is being played), with its defender, a bar in the colour
 /// of the team that captured it, and each team's wavefront marked under it.
@@ -390,7 +453,7 @@ fn format_short_status(ownership: &Ownership, state: &MatchState, level: usize) 
 fn push_level_row(shapes: &mut Vec<Shape>, view: &MatchView) {
     let state: &MatchState = &view.state;
     let count: usize = state.level_count();
-    let width: f32 = (PAGE_SIZE[0] - 2.0 * MARGIN - LEVEL_GAP * (count - 1) as f32) / count as f32;
+    let width: f32 = get_level_box(count, 0).1[0];
     let playing: Option<usize> = match view.phase {
         Phase::Playing { level, .. } => Some(level),
         _ => None,
@@ -408,7 +471,7 @@ fn push_level_row(shapes: &mut Vec<Shape>, view: &MatchView) {
         TEAM_RGB[1],
     );
     for (level, entry) in view.levels.iter().enumerate().take(count) {
-        let left: f32 = MARGIN + level as f32 * (width + LEVEL_GAP);
+        let left: f32 = get_level_box(count, level).0[0];
         let defender: Option<Team> = state.get_level_defender(level);
         let ownership: Ownership = state.get_ownership(level);
         let border_rgb: Option<[u8; 3]> = if playing == Some(level) {
@@ -585,12 +648,19 @@ pub fn get_progression_shapes_with_footer(
         ),
         None => ("press 1 for blue, 2 for red".to_string(), HUD_RGB),
     };
-    push_text(
-        &mut shapes,
-        [PAGE_SIZE[0] - MARGIN - you.len() as f32 * GLYPH, 12.0],
-        you.clone(),
-        you_rgb,
-    );
+    let you_x: f32 = PAGE_SIZE[0] - MARGIN - you.len() as f32 * GLYPH;
+    if team.is_some() {
+        shapes.push(Shape::Panel {
+            min: [you_x - TEAM_BOX_PAD, 12.0 - TEAM_BOX_PAD],
+            size: [
+                you.len() as f32 * GLYPH + 2.0 * TEAM_BOX_PAD,
+                GLYPH + 2.0 * TEAM_BOX_PAD,
+            ],
+            rgba: get_dark_rgba(you_rgb),
+            border_rgb: Some(you_rgb),
+        });
+    }
+    push_text(&mut shapes, [you_x, 12.0], you.clone(), you_rgb);
     let phase_rgb: [u8; 3] = match view.phase {
         Phase::WaitingForTeams => HUD_RGB,
         _ => HIGHLIGHT_RGB,
@@ -633,6 +703,27 @@ pub fn get_progression_shapes_with_footer(
         );
     }
     push_history(&mut shapes, view);
+    if view.state.get_free_play().is_some() {
+        let (min, size) = get_match_button_box();
+        shapes.push(Shape::Panel {
+            min,
+            size,
+            rgba: get_dark_rgba(HUD_RGB),
+            border_rgb: Some(HUD_RGB),
+        });
+        push_text(
+            &mut shapes,
+            [min[0] + MATCH_BUTTON_PAD, min[1] + MATCH_BUTTON_PAD],
+            MATCH_BUTTON_TEXT,
+            HUD_RGB,
+        );
+    }
+    push_text(
+        &mut shapes,
+        [MARGIN, PAGE_SIZE[1] - 2.0 * LINE - 4.0],
+        CLICK_HINT,
+        DIM_RGB,
+    );
     if let Some(outcome) = state.outcome() {
         let text: String = format!("RESULT: {}", describe_outcome(outcome));
         let rgb: [u8; 3] = match outcome {
@@ -669,6 +760,8 @@ mod tests {
     //! | Long matches | 40 rounds fit `MAX_LINE_COUNT` | `a_long_match_fits_the_page` |
     //! | Window page | five panels, a picture box inside each, next level outlined, wavefront markers, chips, result | `the_window_page_shows_levels_wavefronts_and_history` |
     //! | Window page bounds | every shape inside `PAGE_SIZE` after a long match | `the_window_page_stays_on_the_page` |
+    //! | Own team | none (no box), blue, red (a box in its colour around "you play ...") | `the_window_page_boxes_your_team` |
+    //! | Clicks | each level's centre and corner, the gap between levels, elsewhere, the match button without and with free play (drawn then) | `clicks_choose_every_level_or_the_match` |
     //! | MATCH page | a long match cut to the in-level menu's lines and width | `the_match_page_fits_the_in_level_menu` |
     //! | Free play | each phase on a free level, after match rounds (no match round indexed), the level outlined | `free_play_shows_its_level_and_wins` |
 
@@ -719,6 +812,37 @@ mod tests {
             .map(|(line, _)| line)
             .collect::<Vec<String>>()
             .join("\n")
+    }
+
+    #[test]
+    fn clicks_choose_every_level_or_the_match() {
+        let mut state: MatchState = MatchState::New(5);
+        let view: MatchView = make_view(state.clone(), Phase::WaitingForTeams);
+        for level in 0..5 {
+            let (min, size) = get_level_box(5, level);
+            let centre: [f32; 2] = [min[0] + size[0] / 2.0, min[1] + size[1] / 2.0];
+            assert_eq!(
+                get_click_target(&view, centre),
+                Some(PageClick::Level(level))
+            );
+            assert_eq!(get_click_target(&view, min), Some(PageClick::Level(level)));
+        }
+        let (second_min, second_size) = get_level_box(5, 1);
+        let in_gap: [f32; 2] = [second_min[0] - 1.0, second_min[1] + second_size[1] / 2.0];
+        assert_eq!(get_click_target(&view, in_gap), None);
+        assert_eq!(get_click_target(&view, [1.0, 1.0]), None);
+        let (button_min, _) = get_match_button_box();
+        let on_button: [f32; 2] = [button_min[0] + 2.0, button_min[1] + 2.0];
+        assert_eq!(get_click_target(&view, on_button), None);
+        state.start_free_play(3);
+        let freely: MatchView = make_view(state, Phase::WaitingForTeams);
+        assert_eq!(get_click_target(&freely, on_button), Some(PageClick::Match));
+        let shapes: Vec<Shape> = get_progression_shapes(&freely, None);
+        assert!(
+            shapes.iter().any(
+                |shape| matches!(shape, Shape::Text { text, .. } if text == MATCH_BUTTON_TEXT)
+            )
+        );
     }
 
     #[test]
@@ -923,6 +1047,43 @@ mod tests {
             texts.iter().any(|(text, _)| text.starts_with("RESULT:"))
                 == view.state.outcome().is_some()
         );
+    }
+
+    #[test]
+    fn the_window_page_boxes_your_team() {
+        let view: MatchView = make_view(MatchState::New(5), Phase::WaitingForTeams);
+        let get_team_boxes = |shapes: &[Shape]| -> Vec<([f32; 2], [f32; 2], [u8; 3])> {
+            shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    Shape::Panel {
+                        min,
+                        size,
+                        border_rgb: Some(rgb),
+                        ..
+                    } if min[1] < LEVEL_TOP => Some((*min, *size, *rgb)),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(get_team_boxes(&get_progression_shapes(&view, None)).is_empty());
+        for team in [Team::Blue, Team::Red] {
+            let shapes: Vec<Shape> = get_progression_shapes(&view, Some(team));
+            let boxes = get_team_boxes(&shapes);
+            assert_eq!(boxes.len(), 1, "{boxes:?}");
+            let (min, size, rgb) = boxes[0];
+            assert_eq!(rgb, TEAM_RGB[team.get_index()]);
+            let you: String = format!("you play {}", team.get_name());
+            let at: [f32; 2] = shapes
+                .iter()
+                .find_map(|shape| match shape {
+                    Shape::Text { at, text, .. } if *text == you => Some(*at),
+                    _ => None,
+                })
+                .expect("the you-play line");
+            let end: [f32; 2] = [at[0] + you.len() as f32 * GLYPH, at[1] + GLYPH];
+            assert!((0..2).all(|a| min[a] < at[a] && end[a] < min[a] + size[a]));
+        }
     }
 
     #[test]

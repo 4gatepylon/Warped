@@ -4,6 +4,7 @@
 //! player stops hosting or quits.
 //!
 //! Interface: `GameKind`, `BotObjective`, `BotPlan`, `Programs` (`Find`), `plan_bots`,
+//! `MAX_ALLY_COUNT`, `MAX_ENEMY_COUNT`, `MAX_BOT_COUNT`,
 //! `make_match_server_command`, `make_bot_command`, `HostedGame` (`Start`, `has_stopped`,
 //! `move_sit_out_bot`, `stop`), `make_run_folder`, `SIT_OUT_ROUND_COUNT`.
 //!
@@ -23,9 +24,10 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use warped_shared::app_bundle::get_app_resources_folder;
+use warped_shared::app_bundle::{get_app_logs_folder, get_app_resources_folder};
 use warped_shared::match_protocol::stop_child;
 use warped_shared::match_state::Team;
+use warped_shared::network_scope;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -35,20 +37,26 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 pub const SIT_OUT_ROUND_COUNT: usize = 255;
 const MATCH_PROGRAM_IN_APP: &str = "warped-match";
 const CHECKOUT_MATCH_PROGRAM: &str = "../warped_match_rust/.build/release/hyperbolic-wormholes";
-const LOGS_HOME_PATH: &str = "Library/Logs/Warped";
 const CHECKOUT_ARTIFACTS_FOLDER: &str = ".artifacts";
 
 /// `GameKind` is the game the player starts from the main menu: hosted for others, alone, or
-/// against bots (how many on each team, blue then red, and what they do).
+/// with bots (how many on the player's team and on the other, and what they do).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameKind {
     Host,
     Alone,
     Bots {
-        counts: [u32; 2],
+        ally_count: u32,
+        enemy_count: u32,
         objective: BotObjective,
     },
 }
+
+/// `MAX_ALLY_COUNT`, `MAX_ENEMY_COUNT` and `MAX_BOT_COUNT` bound the bots of a game: a level
+/// takes 8 players, the player and at most 7 bots.
+pub const MAX_ALLY_COUNT: u32 = 4;
+pub const MAX_ENEMY_COUNT: u32 = 5;
+pub const MAX_BOT_COUNT: u32 = 7;
 
 /// `BotObjective` is what a bot does in each round: turn off the other team's consoles, or fight.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -79,27 +87,43 @@ pub struct BotPlan {
 }
 
 /// `plan_bots` gives the bots a game of `kind` needs for a player on `player_team`: none for a
-/// hosted game, one sitting-out bot on the other team alone, and the chosen bots otherwise.
+/// hosted game; one sitting-out bot on the other team alone; the allies on the player's team and
+/// the enemies on the other otherwise, with a sitting-out bot there when there are no enemies.
 ///
 /// Example: `let bots = plan_bots(GameKind::Alone, Team::Blue);`
 pub fn plan_bots(kind: GameKind, player_team: Team) -> Vec<BotPlan> {
     match kind {
         GameKind::Host => Vec::new(),
-        GameKind::Alone => vec![BotPlan {
-            team: player_team.get_other(),
-            objective: BotObjective::Consoles,
-            is_sitting_out: true,
-        }],
-        GameKind::Bots { counts, objective } => [Team::Blue, Team::Red]
-            .into_iter()
-            .flat_map(|team| {
-                (0..counts[team.get_index()]).map(move |_| BotPlan {
-                    team,
-                    objective,
-                    is_sitting_out: false,
-                })
-            })
-            .collect(),
+        GameKind::Alone => plan_bots(
+            GameKind::Bots {
+                ally_count: 0,
+                enemy_count: 0,
+                objective: BotObjective::Consoles,
+            },
+            player_team,
+        ),
+        GameKind::Bots {
+            ally_count,
+            enemy_count,
+            objective,
+        } => {
+            let make = |team: Team, is_sitting_out: bool| BotPlan {
+                team,
+                objective,
+                is_sitting_out,
+            };
+            let other: Team = player_team.get_other();
+            let mut plans: Vec<BotPlan> =
+                (0..ally_count).map(|_| make(player_team, false)).collect();
+            plans.extend((0..enemy_count).map(|_| make(other, false)));
+            if enemy_count == 0 {
+                plans.push(BotPlan {
+                    objective: BotObjective::Consoles,
+                    ..make(other, true)
+                });
+            }
+            plans
+        }
     }
 }
 
@@ -138,11 +162,20 @@ impl Programs {
 }
 
 /// `make_match_server_command` gives the command that serves a match of the manifest's levels on
-/// UDP `match_port`, each round's level server on `level_port`.
+/// UDP `match_port`, each round's level server on `level_port`, with it and every level on
+/// 127.0.0.1 only (`WARPED_LOOPBACK_ONLY=1`) when `is_loopback_only`.
 ///
-/// Example: `let command = make_match_server_command(&programs, 47850, 47852);`
-pub fn make_match_server_command(programs: &Programs, match_port: u16, level_port: u16) -> Command {
+/// Example: `let command = make_match_server_command(&programs, 47850, 47852, false);`
+pub fn make_match_server_command(
+    programs: &Programs,
+    match_port: u16,
+    level_port: u16,
+    is_loopback_only: bool,
+) -> Command {
     let mut command: Command = Command::new(&programs.match_server);
+    if is_loopback_only {
+        command.env(network_scope::LOOPBACK_ONLY_VARIABLE, "1");
+    }
     command
         .arg("--serve-match")
         .arg("--match-levels")
@@ -171,16 +204,14 @@ pub fn make_bot_command(programs: &Programs, server: SocketAddr, plan: &BotPlan)
 
 /// `make_run_folder` makes the folder of a run of `script` (`warped` for the children's logs,
 /// `screen_pictures`): in the checkout's `.artifacts/<script>/<run_id>/`, or in
-/// `~/Library/Logs/Warped/<run_id>/` when the app runs from `Warped.app`; it holds
-/// `command.txt` (the command line and the commit).
+/// `~/Library/Logs/Warped/<script>/<run_id>/` when the app runs from `Warped.app`; it holds
+/// `command.txt` (the command line and the commit, `app` inside the app).
 ///
 /// Example: `let folder = make_run_folder("warped", "20261109-120000")?;`
 pub fn make_run_folder(script: &str, run_id: &str) -> Result<PathBuf> {
-    let folder: PathBuf = match get_app_resources_folder() {
-        Some(_) => {
-            let home: String = std::env::var("HOME")?;
-            Path::new(&home).join(LOGS_HOME_PATH).join(run_id)
-        }
+    let app_logs: Option<PathBuf> = get_app_logs_folder();
+    let folder: PathBuf = match &app_logs {
+        Some(logs) => logs.join(script).join(run_id),
         None => Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(CHECKOUT_ARTIFACTS_FOLDER)
             .join(script)
@@ -188,12 +219,15 @@ pub fn make_run_folder(script: &str, run_id: &str) -> Result<PathBuf> {
     };
     fs::create_dir_all(&folder)
         .map_err(|error| format!("can't make {}: {error}", folder.display()))?;
-    let commit: String = Command::new("git")
-        .args(["describe", "--always", "--dirty"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_else(|error| format!("unknown ({error})"));
+    let commit: String = match app_logs {
+        Some(_) => "app".to_string(),
+        None => Command::new("git")
+            .args(["describe", "--always", "--dirty"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .unwrap_or_else(|error| format!("unknown ({error})")),
+    };
     let command: String = std::env::args().collect::<Vec<String>>().join(" ");
     fs::write(
         folder.join("command.txt"),
@@ -228,21 +262,23 @@ pub struct HostedGame {
 }
 
 impl HostedGame {
-    /// `Start` starts the match server on `ports` (match, level) and the bots of `kind` for a
-    /// player on `player_team`, logging into `run_folder`.
+    /// `Start` starts the match server on `ports` (match, level), on 127.0.0.1 only when
+    /// `is_loopback_only`, and the bots of `kind` for a player on `player_team`, logging into
+    /// `run_folder`.
     ///
-    /// Example: `let game = HostedGame::Start(&programs, kind, Team::Blue, (47850, 47852), &folder)?;`
+    /// Example: `let game = HostedGame::Start(&programs, kind, Team::Blue, (47850, 47852), false, &folder)?;`
     #[allow(non_snake_case)]
     pub fn Start(
         programs: &Programs,
         kind: GameKind,
         player_team: Team,
         ports: (u16, u16),
+        is_loopback_only: bool,
         run_folder: &Path,
     ) -> Result<HostedGame> {
         let server: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, ports.0));
         let match_server: Child = spawn_logged(
-            make_match_server_command(programs, ports.0, ports.1),
+            make_match_server_command(programs, ports.0, ports.1, is_loopback_only),
             run_folder,
             "match_server",
         )?;
@@ -333,11 +369,12 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Game kind | hosted, alone (blue, red), bots (none, some on each team, one team only) | `each_game_kind_plans_its_bots` |
-    //! | Match server command | ports and manifest passed | `the_match_server_serves_the_manifest_on_its_ports` |
+    //! | Game kind | hosted, alone (blue, red), bots (none: as alone; allies and enemies; allies only: a sitting-out enemy; the most) | `each_game_kind_plans_its_bots` |
+    //! | Match server command | ports and manifest passed; on the network (no variable), loopback only (`WARPED_LOOPBACK_ONLY=1`) | `the_match_server_serves_the_manifest_on_its_ports` |
     //! | Bot command | consoles, fight, sitting out (as many rounds as `SIT_OUT_ROUND_COUNT`, the other team named) | `bots_join_with_their_team_and_objective` |
 
     use super::*;
+    use std::ffi::OsStr;
 
     /// `get_args` gives a command's arguments as strings.
     ///
@@ -369,34 +406,45 @@ mod tests {
             assert!(alone[0].is_sitting_out);
         }
         let objective: BotObjective = BotObjective::Fight;
-        let none: GameKind = GameKind::Bots {
-            counts: [0, 0],
+        let make = |ally_count: u32, enemy_count: u32| GameKind::Bots {
+            ally_count,
+            enemy_count,
             objective,
         };
-        assert!(plan_bots(none, Team::Blue).is_empty());
-        let both: Vec<BotPlan> = plan_bots(
-            GameKind::Bots {
-                counts: [1, 2],
-                objective,
-            },
-            Team::Blue,
+        assert_eq!(
+            plan_bots(make(0, 0), Team::Red),
+            plan_bots(GameKind::Alone, Team::Red)
         );
+        let both: Vec<BotPlan> = plan_bots(make(1, 2), Team::Red);
         let teams: Vec<Team> = both.iter().map(|plan| plan.team).collect();
-        assert_eq!(teams, [Team::Blue, Team::Red, Team::Red]);
+        assert_eq!(teams, [Team::Red, Team::Blue, Team::Blue]);
         assert!(
             both.iter()
                 .all(|plan| !plan.is_sitting_out && plan.objective == objective)
         );
-        let red_only: GameKind = GameKind::Bots {
-            counts: [0, 3],
-            objective: BotObjective::Consoles,
-        };
-        assert_eq!(plan_bots(red_only, Team::Red).len(), 3);
+        let allies_only: Vec<BotPlan> = plan_bots(make(MAX_ALLY_COUNT, 0), Team::Blue);
+        assert_eq!(allies_only.len() as u32, MAX_ALLY_COUNT + 1);
+        assert!(
+            allies_only
+                .last()
+                .is_some_and(|plan| plan.is_sitting_out && plan.team == Team::Red)
+        );
+        assert_eq!(
+            plan_bots(make(2, MAX_ENEMY_COUNT), Team::Blue).len() as u32,
+            MAX_BOT_COUNT
+        );
     }
 
     #[test]
     fn the_match_server_serves_the_manifest_on_its_ports() {
-        let command: Command = make_match_server_command(&make_programs(), 48_304, 48_305);
+        let command: Command = make_match_server_command(&make_programs(), 48_304, 48_305, false);
+        assert_eq!(command.get_envs().count(), 0);
+        let loopback: Command = make_match_server_command(&make_programs(), 48_304, 48_305, true);
+        let variable: (&OsStr, Option<&OsStr>) = loopback.get_envs().next().unwrap();
+        assert_eq!(
+            variable,
+            ("WARPED_LOOPBACK_ONLY".as_ref(), Some("1".as_ref()))
+        );
         assert_eq!(command.get_program(), "/app/warped-match");
         assert_eq!(
             get_args(&command),

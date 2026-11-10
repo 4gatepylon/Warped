@@ -25,11 +25,14 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   and bots.
 - **Playing alone runs a bot on the other team that sits out every round** (the match client's
   `--bot-round-winners`, naming the player's team for 255 rounds), because a round starts only when
-  each team has a player. The player is blue; switching team moves the bot.
-- **Fighting bots are passed `--bot-objective fight`**, which the match client takes but doesn't pass
-  on yet (it always starts console bots); a one-line change in `../warped_match_rust/src/main.rs`
-  makes it so, left for after W-140 (hold Tab for the map, Esc for the menu), which was changing
-  that file.
+  each team has a player. The player is blue; switching team moves the bot. A game with allies but
+  no enemies gets the same sitting-out bot.
+- **Bots: up to 4 allies and 5 enemies, at most 7 together** (W-155, play against bots: "5v5 or
+  smth like that"), because a level server takes 8 players (`net::MAX_PLAYER_COUNT`); a full 5v5
+  needs that raised in every level. **Weigh in.** In a game with bots the player is blue, and
+  switching team doesn't move the bots.
+- **The match client passes `--bot-objective` to its rounds' bots** (`consoles` when not given, as
+  before), so fighting bots fight.
 - **The main menu lists match servers only**, found by a new beacon on the reserved UDP 47851
   (`WARPMTCH`, a version byte, the port, players per team, phase, round; readers ignore bytes
   after the fields they know). A level server alone (`make serve-game`) isn't listed: the app joins
@@ -44,4 +47,14 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   edits every key binding and the in-level menu's nine numbers with the shared
   `settings_editor`, which the game master's settings page will use too.
 - **Children's logs** go to `.artifacts/warped/<run_id>/` in the checkout and to
-  `~/Library/Logs/Warped/<run_id>/` from `Warped.app` (as the match crate's app already did).
+  `~/Library/Logs/Warped/warped/<run_id>/` from `Warped.app` (the match server's to
+  `~/Library/Logs/Warped/serve_match/`).
+- **The Mac app holds every program it starts** (`make package-mac-app`): the app as
+  `Contents/MacOS/Warped`, the match server (which is also Lunar Surface and runs the bots) as
+  `warped-match`, and each other level as `levels/<level>`, named from the manifest; the match
+  server finds them there (`app_bundle::get_app_level_program`). The levels build one after another
+  into one shared target folder, which saves several GB over building each in its own `.build/`.
+- **The packaged levels still read their files from the checkout** (`CARGO_MANIFEST_DIR`: maps,
+  textures, settings), so the app plays levels only on a Mac with the checkout where it was built.
+  Making them relocatable changes every level crate, left to the levels-as-libraries and W-143
+  work. **Weigh in** on when the app must run on another Mac.

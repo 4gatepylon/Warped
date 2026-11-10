@@ -15,6 +15,10 @@
 //! - `--save-screen-pictures`: draw every screen without a window into
 //!   `.artifacts/screen_pictures/<run_id>/` at `--width-px` x `--height-px` pixels, and exit.
 //! - `--label <label>`: a suffix for the run folder's name.
+//! - `--exit-after-s <s>`: close the window after that many seconds (to check it starts).
+//! - `--print-level-programs`: print the levels `make package-mac-app` puts in the app, and exit.
+//! - `--loopback-only`: keep the app and the games it hosts on 127.0.0.1 (checks; nothing open to
+//!   the network); `WARPED_LOOPBACK_ONLY=1` does the same.
 //!
 //! Example: `warped --width-px 2560 --height-px 1440`
 //!
@@ -34,21 +38,21 @@ mod screens;
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
-use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
-use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice, MTLPixelFormat};
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
+use warped_shared::app_bundle::get_level_slug;
 use warped_shared::key_bindings::get_pressed_control;
 use warped_shared::match_protocol::{
-    LevelEntry, MATCH_DISCOVERY_PORT, MATCH_PORT, MatchView, Phase,
+    LevelEntry, MATCH_DISCOVERY_PORT, MATCH_PORT, MatchView, Phase, SELF_PROGRAM,
 };
 use warped_shared::match_state::{MatchState, Team};
+use warped_shared::metal_window::{MetalWindow, WindowOptions};
+use warped_shared::network_scope;
 use warped_shared::page::Shape;
 use warped_shared::player_settings::{PerPlayerSettings, get_saved_player_settings_path};
 
@@ -100,6 +104,44 @@ struct Arguments {
     /// Suffix for the run folder's name (letters, digits, - and _).
     #[arg(long)]
     label: Option<String>,
+    /// Close the window after this many seconds (to check that it starts).
+    #[arg(long)]
+    exit_after_s: Option<f64>,
+    /// Print, for `make package-mac-app`, each level of the manifest that has its own program: its
+    /// file name in the app, its crate folder (from the repository's root), its program's name and
+    /// its map picture (`-` for none), tab-separated, one a line; and exit.
+    #[arg(long)]
+    print_level_programs: bool,
+    /// Keep everything on 127.0.0.1, with nothing open to the network: listen for games there, and
+    /// host games whose match and level servers do the same (checks and tests; also
+    /// WARPED_LOOPBACK_ONLY=1).
+    #[arg(long)]
+    loopback_only: bool,
+}
+
+/// `print_level_programs` prints the levels `make package-mac-app` builds and puts in the app (see
+/// `--print-level-programs`).
+///
+/// Example: `print_level_programs(&levels)?;`
+fn print_level_programs(levels: &[LevelEntry]) -> Result<()> {
+    for level in levels.iter().filter(|level| level.program != SELF_PROGRAM) {
+        let program: &str = Path::new(&level.program)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "{}'s program {:?} has no file name",
+                    level.name, level.program
+                )
+            })?;
+        println!(
+            "{}\t{}\t{program}\t{}",
+            get_level_slug(&level.name),
+            level.folder,
+            level.map_picture.as_deref().unwrap_or("-")
+        );
+    }
+    Ok(())
 }
 
 /// `validate_arguments` fails, naming the argument, on a size of 0 or a label with other
@@ -186,32 +228,24 @@ fn get_menu_input(event: &Event, is_rebinding: bool) -> Option<MenuInput> {
 ///
 /// Example: `run_window(&arguments, app)?;`
 fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
-    let sdl: sdl3::Sdl = sdl3::init()?;
-    let video: sdl3::VideoSubsystem = sdl.video()?;
-    let mut builder: sdl3::video::WindowBuilder =
-        video.window(WINDOW_TITLE, arguments.width_px, arguments.height_px);
-    builder.high_pixel_density().resizable().position_centered();
-    let flags: u32 = builder.window_flags() | sdl3::sys::video::SDL_WINDOW_METAL.0 as u32;
-    let window: sdl3::video::Window = builder.set_window_flags(flags).build()?;
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
-    let view: sdl3::sys::metal::SDL_MetalView =
-        unsafe { sdl3::sys::metal::SDL_Metal_CreateView(window.raw()) };
-    if view.is_null() {
-        return Err(format!("SDL: couldn't make a Metal view: {}", sdl3::get_error()).into());
-    }
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A LAYER POINTER THAT ISN'T A CAMetalLayer WILL HAPPEN
-    let layer: &CAMetalLayer =
-        unsafe { &*sdl3::sys::metal::SDL_Metal_GetLayer(view).cast::<CAMetalLayer>() };
-    let device: Retained<ProtocolObject<dyn MTLDevice>> =
-        MTLCreateSystemDefaultDevice().ok_or("Metal: this Mac has no GPU Metal can use")?;
-    layer.setDevice(Some(&device));
-    layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
-    layer.setFramebufferOnly(false);
-    let mut painter: Painter = Painter::New(device)?;
-    let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
+    let mut window: MetalWindow = MetalWindow::Open(
+        WINDOW_TITLE,
+        (arguments.width_px, arguments.height_px),
+        WindowOptions::default(),
+    )?;
+    let mut painter: Painter = Painter::New(window.get_device())?;
     let mut shown: Option<(Vec<Shape>, (u32, u32))> = None;
+    let started_at: Instant = Instant::now();
     while !app.should_quit() {
-        for event in event_pump.poll_iter() {
+        if arguments
+            .exit_after_s
+            .is_some_and(|seconds| started_at.elapsed().as_secs_f64() >= seconds)
+        {
+            println!("warped: closing after {} s", started_at.elapsed().as_secs());
+            return Ok(());
+        }
+        let events: Vec<Event> = window.get_event_pump_mut().poll_iter().collect();
+        for event in events {
             match event {
                 Event::Quit { .. } => return Ok(()),
                 Event::KeyDown {
@@ -222,6 +256,15 @@ fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
                     scancode: Some(Scancode::Tab),
                     ..
                 } => app.set_map_held(false),
+                Event::MouseButtonDown {
+                    mouse_btn: sdl3::mouse::MouseButton::Left,
+                    x,
+                    y,
+                    ..
+                } => {
+                    let (width, height) = window.get_window().size();
+                    app.click([x, y], [width as f32, height as f32]);
+                }
                 _ => {}
             }
             if let Some(input) = get_menu_input(&event, app.is_rebinding()) {
@@ -231,15 +274,17 @@ fn run_window(arguments: &Arguments, mut app: App) -> Result<()> {
         app.update();
         let (shapes, page_size, pictures): (Vec<Shape>, [f32; 2], Vec<Option<Picture>>) =
             app.get_page();
-        let size_px: (u32, u32) = window.size_in_pixels();
+        let size_px: (u32, u32) = window.get_window().size_in_pixels();
         if shown.as_ref() != Some(&(shapes.clone(), size_px)) {
+            let layer: &CAMetalLayer = window.get_layer();
             layer.setDrawableSize(CGSize {
                 width: f64::from(size_px.0),
                 height: f64::from(size_px.1),
             });
             let pixels: Vec<u8> =
                 render_page(size_px, page_size, &shapes, &pictures, PixelOrder::Bgra)?;
-            if painter.paint(layer, &pixels, (size_px.0 as usize, size_px.1 as usize))? {
+            let size: (usize, usize) = (size_px.0 as usize, size_px.1 as usize);
+            if painter.paint(layer, window.get_device(), &pixels, size)? {
                 shown = Some((shapes, size_px));
             }
         }
@@ -352,6 +397,9 @@ fn main() -> Result<()> {
     validate_arguments(&arguments)?;
     let manifest: PathBuf = get_levels_manifest_path();
     let levels: Vec<LevelEntry> = load_levels(&manifest)?;
+    if arguments.print_level_programs {
+        return print_level_programs(&levels);
+    }
     let pictures: Vec<Option<Picture>> = load_map_pictures(&manifest, &levels)?;
     let player_settings_path: PathBuf = match &arguments.player_settings {
         Some(path) => path.clone(),
@@ -366,6 +414,7 @@ fn main() -> Result<()> {
         match_port: arguments.match_port,
         level_port: arguments.level_port,
         discovery_port: arguments.discovery_port,
+        is_loopback_only: arguments.loopback_only || network_scope::is_loopback_only(),
     };
     let app: App = App::New(
         levels,

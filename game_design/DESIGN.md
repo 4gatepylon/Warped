@@ -293,6 +293,32 @@ which has nothing to do with the guns' heat.
 | Time to refill from empty while walking or standing | 15 s |
 | Energy at spawn | Full |
 
+### Gravity toward warps
+
+Black holes and wormhole mouths pull players along the ground, in every level (W-144): the
+level's own warps, and the thrown mouths once linked. Each adds a speed toward itself to the
+player's walk, so running toward one is faster, running away slower, and a player standing still
+drifts toward it. The pull is relatively weak but noticeable: strongest near the warp, falling off
+with distance, and never stopping a player who walks away.
+
+- The pull points at the warp along the ground; a warp overhead (Lunar Surface's black hole, Snow
+  Planet's) pulls by the part of its direction along the ground, so a player drifts to stand
+  under it.
+- A mouth's pull fades to nothing at its throat, so a player drifting in stops at the mouth
+  rather than being pulled through it; walking in still goes through.
+- All warps' pulls together are capped at the strongest pull. It is a share of walking speed, so
+  it scales with each level's walking speed: more than crouching speed (crouching away from a
+  warp that close is pulled in), less than walking speed.
+- The game server's settings hold it (`gravity` in `server_settings.yaml`, the same built-in
+  values in every level when left out, which a level or the game master can change).
+
+| Parameter | Value |
+| --- | --- |
+| Strongest pull | 0.75 of walking speed (Lunar Surface: 7.5 m/s) (`gravity.max_pull_per_walk_speed`) |
+| Full pull | within 3 m of a black hole's horizon or a mouth's throat (`gravity.full_pull_m`) |
+| Falling off | as the square of the share of the way left to the reach |
+| Reach | 24 m out from the horizon or throat (`gravity.reach_m`) |
+
 ### Map edge
 
 A level has no wall at its edge. On Lunar Surface the crater's wall is the edge: from its foot,

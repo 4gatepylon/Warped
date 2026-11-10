@@ -14,8 +14,10 @@
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make bench-levels LABEL=<label>: time every bench view of the five levels at 2560x1440 into .artifacts/bench_levels/ (tools/bench_levels.sh).
 #     make progression-pictures WIDTH_PX=<n> HEIGHT_PX=<n>: render the progression page for a few match states into .artifacts/progression_pictures/.
+#     make play-alone TEAM=<blue|red>: play a match without a second person: the match server, a bot that sits out every round, and your window (tools/play_with_bots.sh).
+#     make play-bots ALLIES=<0-4> ENEMIES=<0-5> BOT_OBJECTIVE=<consoles|fight> TEAM=<blue|red>: the same with bots on your team and the other (at most 7).
 #     make play-all-levels MATCH_PORT=<n> LEVEL_PORT=<n> LABEL=<label>: play a bot match steered through all five levels and check it (.artifacts/play_all_levels/).
-#     make e2e-match MATCH_PORT=<n> LEVEL_PORT=<n>: play a whole match of two bots, consoles off in 1 s (.artifacts/e2e_match/).
+#     make e2e-match MATCH_PORT=<n> LEVEL_PORT=<n>: play a whole match of two bots, consoles off in 1 s, on 127.0.0.1 only (.artifacts/e2e_match/).
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
@@ -37,6 +39,9 @@ LEVEL_PORT ?= 48112
 E2E_MATCH_RUN := .artifacts/e2e_match/$(shell date -u +%Y%m%d-%H%M%S)
 LABEL ?=
 TEAM ?=
+ALLIES ?= 0
+ENEMIES ?= 1
+BOT_OBJECTIVE ?= consoles
 TEAM_FLAG := $(if $(TEAM),--team $(TEAM))
 SERVER_MATCH ?= 127.0.0.1
 MAP ?= lunar-surface
@@ -62,7 +67,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help progression-pictures levels serve-match join-match bot-match e2e-match play-all-levels serve-game join-game build-server-bundle package-mac-app bench-views bench-levels run-autopilot test fmt clean reset-artifacts
+.PHONY: help progression-pictures levels serve-match join-match bot-match play-alone play-bots e2e-match play-all-levels serve-game join-game build-server-bundle package-mac-app bench-views bench-levels run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -70,6 +75,10 @@ help:
 	@echo "  make serve-match                                 Run a match server (UDP 47850) over the levels of match_levels.yaml"
 	@echo "  make join-match SERVER=127.0.0.1 TEAM=blue       Open the match window (progression page); each round opens its level"
 	@echo "  make bot-match TEAM=red                          Join the match with a bot that turns off the other team's consoles"
+	@echo "  make play-alone TEAM=blue                        Server, a bot that sits out every round, and your window, in one command"
+	@echo "  make play-bots ALLIES=2 ENEMIES=3 BOT_OBJECTIVE=fight"
+	@echo "                                                   The same with bots on your team (0-4) and the other (0-5), at most 7"
+	@echo "                                                   (in both, click a level on the progression page to play it now)"
 	@echo "  make e2e-match MATCH_PORT=48110 LEVEL_PORT=48112"
 	@echo "                                                   A whole match of two bots, consoles off in 1 s (e2e/; .artifacts/e2e_match/)"
 	@echo "  make play-all-levels MATCH_PORT=48110 LEVEL_PORT=48112"
@@ -197,6 +206,7 @@ join-match:
 bot-match:
 	cargo run --release -- --match $(SERVER_MATCH) --bot --team $(or $(TEAM),red)
 
+e2e-match: export WARPED_LOOPBACK_ONLY := 1
 e2e-match: levels
 	cargo build --release
 	mkdir -p $(E2E_MATCH_RUN)
@@ -204,6 +214,14 @@ e2e-match: levels
 	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --match-port $(MATCH_PORT) --bot --team blue > $(E2E_MATCH_RUN)/blue.log 2>&1 &
 	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --match-port $(MATCH_PORT) --bot --team red > $(E2E_MATCH_RUN)/red.log 2>&1 &
 	./.build/release/hyperbolic-wormholes --serve-match --match-levels e2e/match_levels_fast.yaml --match-port $(MATCH_PORT) --port $(LEVEL_PORT) --intermission-s 2 --round-over-s 2 --label e2e 2>&1 | tee $(E2E_MATCH_RUN)/server.log
+
+play-alone: levels
+	cargo build --release
+	./tools/play_with_bots.sh --team $(or $(TEAM),blue)
+
+play-bots: levels
+	cargo build --release
+	./tools/play_with_bots.sh --team $(or $(TEAM),blue) --allies $(ALLIES) --enemies $(ENEMIES) --bot-objective $(BOT_OBJECTIVE)
 
 play-all-levels: levels
 	cargo build --release

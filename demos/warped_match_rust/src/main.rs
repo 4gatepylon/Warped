@@ -177,6 +177,7 @@ const HELD_MAP_DIM_FRAC: f32 = 0.6;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
 const PICTURE_PX_PER_MASK_PX: i32 = 2;
+const TEAM_BOX_PAD_MASK_PX: i32 = 2;
 const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
 const LOADING_DIM_FRAC: f32 = 1.0;
@@ -352,8 +353,9 @@ struct Arguments {
     team: Option<TeamFlag>,
     /// With --bot: what the bot does. `consoles` holds E on the other team's consoles until its
     /// team wins (without walking there; the server, as in the hyperbolic demo, trusts players).
-    #[arg(long, value_enum, default_value_t = BotObjective::Fight, requires = "bot")]
-    bot_objective: BotObjective,
+    /// Defaults to `fight`, and with --match to `consoles` (each round's bot).
+    #[arg(long, value_enum, requires = "bot")]
+    bot_objective: Option<BotObjective>,
     /// Run a match server (match_flow.rs) on UDP --match-port, without a window: it plays the
     /// levels of --match-levels round by round and exits once the match is over.
     #[arg(long, conflicts_with_all = ["serve", "join", "match_server", "bench_views", "autopilot", "play_route"])]
@@ -783,6 +785,16 @@ fn run_match_server(arguments: &Arguments) -> Result<()> {
     Ok(())
 }
 
+/// `get_bot_objective_flag` gives a bot objective as `--bot-objective` takes it.
+///
+/// Example: `assert_eq!(get_bot_objective_flag(BotObjective::Fight), "fight");`
+fn get_bot_objective_flag(objective: BotObjective) -> &'static str {
+    match objective {
+        BotObjective::Fight => "fight",
+        BotObjective::Consoles => "consoles",
+    }
+}
+
 /// `run_match_client` joins the match server at `address`: it shows the progression page
 /// (`match_menu.rs`) in a window, or prints it with `--bot`, and for each round it starts the
 /// round's level joined to `--team` (a window, or a `--bot-objective consoles` bot) and stops it
@@ -859,8 +871,32 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                     Scancode::_2 if client.team.is_none() => {
                         client.team = Some(match_state::Team::Red)
                     }
+                    Scancode::M => client.send_play(None)?,
                     _ => {}
                 },
+                Event::MouseButtonDown {
+                    mouse_btn: sdl3::mouse::MouseButton::Left,
+                    x,
+                    y,
+                    ..
+                } => {
+                    if let (Some(view), Some(canvas)) = (&client.view, &canvas) {
+                        let (width, height) = canvas.window().size();
+                        let at: [f32; 2] = warped_shared::page::get_page_point(
+                            [x, y],
+                            [width as f32, height as f32],
+                            match_menu::PAGE_SIZE,
+                        );
+                        match match_menu::get_click_target(view, at) {
+                            Some(match_menu::PageClick::Level(level)) => {
+                                println!("playing {} freely (clicked)", view.levels[level].name);
+                                client.send_play(Some(level))?;
+                            }
+                            Some(match_menu::PageClick::Match) => client.send_play(None)?,
+                            None => {}
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -905,10 +941,12 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                 let extra: Vec<String> = match arguments.bot {
                     true => {
                         let label: String = format!("match-{}-round-{round}", team.get_name());
+                        let objective: BotObjective =
+                            arguments.bot_objective.unwrap_or(BotObjective::Consoles);
                         let mut extra: Vec<String> = [
                             "--bot",
                             "--bot-objective",
-                            "consoles",
+                            get_bot_objective_flag(objective),
                             "--exit-after-s",
                             "3600",
                         ]
@@ -1310,7 +1348,8 @@ fn get_map_flag(map: MapName) -> String {
 ///
 /// Example: `let address = find_lan_address();`
 fn find_lan_address() -> Option<IpAddr> {
-    let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    let listen_ip: Ipv4Addr = warped_shared::network_scope::get_listen_ip(net::is_loopback_only());
+    let socket: UdpSocket = UdpSocket::bind((listen_ip, 0)).ok()?;
     socket.connect(ROUTE_PROBE_ADDRESS).ok()?;
     Some(socket.local_addr().ok()?.ip())
 }
@@ -1573,7 +1612,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
             &mut client,
             duration_s,
             arguments.black_hole_strength,
-            arguments.bot_objective,
+            arguments.bot_objective.unwrap_or(BotObjective::Fight),
             &console_reach::find_console_places(&map)?,
             |frame, id| {
                 saver.submit((frame, id));
@@ -1639,8 +1678,9 @@ fn save_frame(renderer: &mut dyn Renderer, frame: FrameData, path: &Path) -> Res
     save_png(path, &pixels, size.0, size.1)
 }
 
-/// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder, with
-/// `command.txt` holding the command line and the git commit, and returns its path.
+/// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder (inside
+/// `Warped.app`, `~/Library/Logs/Warped/<script>/<run_id>/`), with `command.txt` holding the
+/// command line and the git commit (`app` inside the app), and returns its path.
 ///
 /// Example: `let folder = make_run_folder("bench_views", None)?;`
 fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
@@ -1649,7 +1689,11 @@ fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
     if let Some(label) = label {
         run_id = format!("{run_id}-{label}");
     }
-    let folder: PathBuf = crate_folder.join(".artifacts").join(script).join(&run_id);
+    let app_logs: Option<PathBuf> = app_bundle::get_app_logs_folder();
+    let folder: PathBuf = match &app_logs {
+        Some(logs) => logs.join(script).join(&run_id),
+        None => crate_folder.join(".artifacts").join(script).join(&run_id),
+    };
     if folder.exists() {
         return Err(format!(
             "run folder {} already exists; wait a second or pass another --label",
@@ -1658,11 +1702,14 @@ fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
         .into());
     }
     fs::create_dir_all(&folder)?;
-    let commit: String = std::process::Command::new("git")
-        .args(["describe", "--always", "--dirty"])
-        .current_dir(crate_folder)
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?;
+    let commit: String = match app_logs {
+        Some(_) => "app".to_string(),
+        None => std::process::Command::new("git")
+            .args(["describe", "--always", "--dirty"])
+            .current_dir(crate_folder)
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?,
+    };
     let command: String = std::env::args().collect::<Vec<String>>().join(" ");
     fs::write(
         folder.join("command.txt"),
@@ -4352,7 +4399,13 @@ impl Session {
                 height_frac: MENU_HEIGHT_FRAC,
                 is_centered: false,
                 dim_frac: MENU_DIM_FRAC,
-                picture: (menu.get_page() == menu::Page::Map).then(|| self.make_map_picture()),
+                picture: match menu.get_page() {
+                    menu::Page::Map => Some(self.make_map_picture()),
+                    menu::Page::Scores => {
+                        menu::get_own_team_lines(scoreboard).map(make_team_box_picture)
+                    }
+                    _ => None,
+                },
             });
         }
         if self.menu_and_map.get_cover() == menu_and_map::Cover::Map {
@@ -4417,7 +4470,9 @@ impl Session {
     /// one block, empty while it reloads; no pulses), and on a voxel map the sprint energy. Health
     /// and energy carry pulses that run over their filled part while they change
     /// (`update_bar_pulses`). Below the middle, the progress of turning off a console (while
-    /// holding `E` on one).
+    /// holding `E` on one). On a voxel map, at the top centre, a square per console, dark once
+    /// off, with a box around this player's team's (`make_pylon_square_rects`; W-146, pylon
+    /// squares and own-team box).
     ///
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
@@ -4431,6 +4486,22 @@ impl Session {
             &self.settings.rifle,
             &self.hud_pulses,
         ));
+        if let Some(voxel) = &self.voxel {
+            let (off_mask, _) = self.get_console_states();
+            let pylons: Vec<warped_shared::hud::PylonSquare> = (voxel.world.consoles.iter())
+                .enumerate()
+                .map(|(i, console)| warped_shared::hud::PylonSquare {
+                    team: console.team,
+                    is_off: off_mask >> i & 1 == 1,
+                })
+                .collect();
+            let own_team: Option<u32> = self.multiplayer.as_ref().and_then(|m| m.client.team);
+            rects.extend(warped_shared::hud::make_pylon_square_rects(
+                &pylons,
+                own_team,
+                self.last_output_px,
+            ));
+        }
         rects
     }
 
@@ -4641,6 +4712,33 @@ struct Picture {
     size_px: (u32, u32),
     min_mask_px: [i32; 2],
     max_excl_mask_px: [i32; 2],
+}
+
+/// `make_team_box_picture` gives the scores page's box around this player's team's rows
+/// (`menu::get_own_team_lines`: `team` and its rows' `lines`, first and end excluded), in the
+/// team's colour (`make_team_box_rgba`), across the menu's text, one picture pixel per mask pixel.
+///
+/// Example: `let picture = menu::get_own_team_lines(scoreboard).map(make_team_box_picture);`
+fn make_team_box_picture((team, lines): (u32, [usize; 2])) -> Picture {
+    let [first, end_excl] = lines.map(|line| TEXT_TOP_PX + TEXT_LINE_PX * line as f32);
+    let min_mask_px: [i32; 2] = [
+        MENU_LEFT_PX as i32 - TEAM_BOX_PAD_MASK_PX,
+        first as i32 - TEAM_BOX_PAD_MASK_PX,
+    ];
+    let max_excl_mask_px: [i32; 2] = [
+        MENU_MASK_PX.0 as i32 - MENU_LEFT_PX as i32 + TEAM_BOX_PAD_MASK_PX,
+        (end_excl - TEXT_LINE_PX + DEBUG_GLYPH_PX) as i32 + TEAM_BOX_PAD_MASK_PX,
+    ];
+    let size_px: (u32, u32) = (
+        (max_excl_mask_px[0] - min_mask_px[0]) as u32,
+        (max_excl_mask_px[1] - min_mask_px[1]) as u32,
+    );
+    Picture {
+        pixels: warped_shared::hud::make_team_box_rgba(size_px, team),
+        size_px,
+        min_mask_px,
+        max_excl_mask_px,
+    }
 }
 
 /// `get_map_picture_max_px` gives the largest map picture the map page holds, in pixels.
@@ -5407,6 +5505,12 @@ mod tests {
         for line in scores_menu.get_lines(&mine, &long_path, scoreboard) {
             assert!(line.0.chars().count() <= max_char_count, "{}", line.0);
         }
+        let team_box: Picture =
+            make_team_box_picture(menu::get_own_team_lines(scoreboard).expect("own team"));
+        let mask_max_px: [i32; 2] = [MENU_MASK_PX.0 as i32, MENU_MASK_PX.1 as i32];
+        assert!((0..2).all(
+            |a| team_box.min_mask_px[a] >= 0 && team_box.max_excl_mask_px[a] <= mask_max_px[a]
+        ));
         for menu in [settings_menu, scores_menu, credits_menu, quit_menu] {
             let menu_text: OverlayText = OverlayText {
                 lines: menu.get_lines(&mine, &long_path, scoreboard),

@@ -14,17 +14,53 @@ make run-warped                     # builds the match server and the five level
 popd
 ```
 
+## The Mac app
+
+```bash
+make -C demos/warped_mvp_rust package-mac-app   # .build/Warped/Warped.app and .build/Warped.zip
+```
+
+`make package-mac-app` (`tools/package_mac_app.sh`) builds `Warped.app`:
+
+| In the app | What |
+| --- | --- |
+| `Contents/MacOS/Warped` | the one-window app (`warped`) |
+| `Contents/MacOS/warped-match` | the match server, the bots, and Lunar Surface (`../warped_match_rust`) |
+| `Contents/MacOS/levels/<level>` | every other level of the manifest, by its name (`dust`, `snow_planet`, ...) |
+| `Contents/Resources/match_levels.yaml` | the levels manifest, with each level's map picture beside it |
+| `Contents/Resources/assets`, `models` | the guns' and maps' models and textures |
+| `Contents/Resources/AppIcon.icns`, `Contents/Info.plist` | the match's icon and Info.plist (`../warped_match_rust/app/`) |
+
+The levels are built one after another into one shared target folder (`.build/levels_target/`), so
+their common crates build once. The app is signed ad hoc (not by Apple).
+
+**Install** (also in the zip's `How to open Warped.txt`):
+
+1. Unzip, and drag `Warped.app` into Applications.
+2. Double-click it. The app isn't signed by Apple, so the first time macOS refuses: right-click
+   (Control-click) `Warped.app`, choose Open, then Open again; or System Settings, Privacy &
+   Security, Open Anyway; or in Terminal `xattr -dr com.apple.quarantine /Applications/Warped.app`.
+3. Allow Local Network access when asked, so games on the Wi-Fi can be found.
+
+**Limitation**: the levels still read their maps, textures and settings from the checkout they were
+built in (`CARGO_MANIFEST_DIR`), so the app plays its levels on the Mac that built it (and on a Mac
+with the same checkout at the same path). Running elsewhere needs each level to look its files up
+through `warped_shared::app_bundle` first; the levels-as-libraries and level-definition work
+(W-143) is the place for it. The menus, joining, hosting and the match server work anywhere.
+
 ## Screens
 
 - **Main menu**: the games on this network (each match server's beacon, UDP 47851) to join; joining
   a game by its address; the game to start, the five-level match or any one level of the levels
-  manifest (Left/Right on "Game"), hosted for others, played alone, or against bots (how many on
-  each team, turning off consoles or fighting); while this app hosts a game, going back to it or
+  manifest (Left/Right on "Game"), hosted for others, played alone, or with bots (on your team, 0
+  to 4, and on the other, 0 to 5, at most 7 together since a level takes 8 players; turning off
+  consoles or fighting; you play blue); while this app hosts a game, going back to it or
   stopping it; player settings; credits; quit.
 - **Game menu**: the match's status (the progression page shared with the match window: the level
   being played and its map picture, the wavefronts, the round, who attacks and defends, free play's
   wins, players per team); your team and switching it; rejoining the round being played; the game
-  master's choice of what everyone plays (the match, or any one level; no authentication yet, so
+  master's choice of what everyone plays (the match, or any one level: Left/Right on its row, or
+  click a level on the match's status, and "back to the match" there; no authentication yet, so
   anyone may set it); game settings (next update); player settings; leaving to the main menu.
 - **Level**: a round's level. Escape opens the in-level menu (the same match status; resume, player
   settings, exit to the game menu, quit); holding Tab shows the map. **Until the levels are
@@ -82,6 +118,10 @@ changes, every setting has a row) and the menu keys. The shared crate tests the 
 expiry, a listener hearing an announcer on UDP 48301), the play messages and free play; the match
 crate tests that a match server switches levels on the game master's word and everyone follows (a
 fake level program, UDP 48302 and 48303).
+
+Tests listen for beacons on 127.0.0.1 only. `warped --loopback-only` (or `WARPED_LOOPBACK_ONLY=1`) keeps the app,
+the match server it hosts and every level and bot on this computer, so testing it never makes macOS ask for network
+permission; without it the app finds and hosts games on the local network.
 
 ## Folders
 

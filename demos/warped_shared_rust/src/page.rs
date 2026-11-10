@@ -2,8 +2,8 @@
 //! page units, scaled to fit the window), and, on macOS, `draw_shapes`, which draws them with an
 //! SDL canvas (a window's, or a surface's for a picture without a window).
 //!
-//! Interface: `Shape`, `GLYPH`, `push_text`, `Thumbnail`, `make_thumbnail`, `draw_shapes`
-//! (macOS).
+//! Interface: `Shape`, `GLYPH`, `push_text`, `get_page_point`, `Thumbnail`, `make_thumbnail`,
+//! `draw_shapes` (macOS).
 //!
 //! Example: `draw_shapes(&mut canvas, size_px, [640.0, 455.0], &shapes, &thumbnails)?;`
 //!
@@ -50,6 +50,16 @@ pub fn push_text(shapes: &mut Vec<Shape>, at: [f32; 2], text: impl Into<String>,
         text: text.into(),
         rgb,
     });
+}
+
+/// `get_page_point` gives where `point` (in the same units as `size`, e.g. a click in window
+/// points) falls on a page of `page_size` units drawn to fit `size` and centred, as
+/// `draw_shapes` draws it.
+///
+/// Example: `let at = get_page_point([640.0, 400.0], [1280.0, 800.0], [640.0, 455.0]);`
+pub fn get_page_point(point: [f32; 2], size: [f32; 2], page_size: [f32; 2]) -> [f32; 2] {
+    let scale: f32 = (size[0] / page_size[0]).min(size[1] / page_size[1]);
+    [0, 1].map(|a| point[a] / scale - (size[a] / scale - page_size[a]) / 2.0)
 }
 
 /// `Thumbnail` is a picture on a page: its texture and its size in pixels.
@@ -144,4 +154,32 @@ pub fn draw_shapes<T: sdl3::render::RenderTarget>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for `page.rs`.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Window shape | wider than the page (bars left and right), taller (bars above and below) | `points_map_back_to_the_page` |
+
+    use super::*;
+
+    #[test]
+    fn points_map_back_to_the_page() {
+        let page: [f32; 2] = [640.0, 455.0];
+        assert_eq!(
+            get_page_point([1280.0, 0.0], [2560.0, 910.0], page),
+            [320.0, 0.0]
+        );
+        assert_eq!(
+            get_page_point([0.0, 455.0], [640.0, 1365.0], page),
+            [0.0, 0.0]
+        );
+        assert_eq!(
+            get_page_point([640.0, 910.0], [640.0, 1365.0], page),
+            [640.0, 455.0]
+        );
+    }
 }
