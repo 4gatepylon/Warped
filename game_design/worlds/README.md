@@ -14,6 +14,7 @@ pictures beside each file mark the objects with red circles and rectangles and t
 One file per level, in the map's order from blue to red:
 
 - [Dust](dust.md)
+- [Snow Planet](snow_planet.md)
 
 ## Naming rules
 
