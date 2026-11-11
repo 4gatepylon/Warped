@@ -1,0 +1,38 @@
+# `pyproject.toml` defines the world docs' uv project: the generator's dependencies and tools.
+#
+# Interface:
+#     make_world_doc.py: writes each level's generated/ folder from its source/ folder.
+#     world_doc_schema.py: the Pydantic models of source/world.yaml.
+#     dev dependency group: pytest and ruff.
+#     ruff: SIM401 is off, as this repository reads optional keys with an explicit `in` check,
+#     never `dict.get` (AGENTS.md, Failing fast). PYI042 is off, as type aliases end in `_t`
+#     (AGENTS.md, Names and declarations).
+#
+# Example:
+#     uv run python make_world_doc.py lunar_surface
+[project]
+name = "warped-world-docs"
+version = "0.1.0"
+description = "Writes Warped's world docs and map pictures from each level's source of truth"
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.1",
+    "pillow>=12.0",
+    "pydantic>=2.12",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+extend-ignore = ["SIM401", "PYI042"]
