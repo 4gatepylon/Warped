@@ -22,8 +22,11 @@
 //!   the default is" is asked of it, so a group can be changed one setting at a time (three
 //!   shares that must add up to 1); the rules are checked when the settings are saved.
 //! - Gotchas: Escape with unsaved changes asks once; a second Escape leaves and drops them.
+//! - Gotchas: a save the match server doesn't answer within `SAVE_ANSWER_TIMEOUT_S` (a match
+//!   server from before saves answers with nothing) is reported as not saved; the changes stay.
 
 use std::error::Error;
+use std::time::Instant;
 
 use serde_json::{Map, Value};
 use warped_shared::game_settings::{GameSettings, Overrides, SettingsMessage, SettingsScope};
@@ -51,6 +54,8 @@ const NOTHING_TO_SAVE_LINE: &str = "Nothing to save: no unsaved changes.";
 const SAVING_LINE: &str = "Checked. Saving to the match server...";
 const SAVED_LINE: &str = "Saved: the next round of each level plays by these settings.";
 const DROPPED_LINE: &str = "Dropped the unsaved changes.";
+const SAVE_ANSWER_TIMEOUT_S: f64 = 3.0;
+const UNANSWERED_LINE: &str = "Not saved: the match server didn't answer the save within 3 s. It may be from an older build of the game, which can't take a save; the changes are still here.";
 const LEAVE_LINE: &str =
     "Unsaved changes: save or drop them, or press Escape again to leave without them.";
 const WAITING_LINE: &str = "Asking the match server for its game settings...";
@@ -200,6 +205,7 @@ pub struct GameSettingsPage {
     server: Option<GameSettings>,
     edited: Option<GameSettings>,
     is_saving: bool,
+    saving_since: Option<Instant>,
     is_leaving: bool,
 }
 
@@ -218,6 +224,7 @@ impl GameSettingsPage {
             server: None,
             edited: None,
             is_saving: false,
+            saving_since: None,
             is_leaving: false,
         }
     }
@@ -291,6 +298,14 @@ impl GameSettingsPage {
         if self.is_saving && !self.has_unsaved_changes() {
             self.is_saving = false;
             message = Some(SAVED_LINE.to_string());
+        }
+        let is_unanswered: bool = self.is_saving
+            && self
+                .saving_since
+                .is_some_and(|since| since.elapsed().as_secs_f64() >= SAVE_ANSWER_TIMEOUT_S);
+        if is_unanswered {
+            self.is_saving = false;
+            message = Some(UNANSWERED_LINE.to_string());
         }
         self.show_edited();
         if let Some(message) = message {
@@ -424,6 +439,7 @@ impl GameSettingsPage {
         }
         let overrides: Overrides = edited.get_overrides();
         self.is_saving = true;
+        self.saving_since = Some(Instant::now());
         self.show_message(SAVING_LINE.to_string());
         GameSettingsOutcome::Send(SettingsMessage::Save(overrides))
     }
@@ -578,7 +594,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Sections | shared keys, a switch, a level's own, a level with none (shown, empty), a level without a file, the levels' names | `sections_show_every_level` |
     //! | Changes | nothing changed (nothing to save), a step up (kept, nothing sent), a reset (no longer unsaved), a typed fraction where the default is whole (refused), a switch turned off and a level's own key; then saved: one message with them all, unsaved until the server has them, then "Saved" | `changes_wait_for_a_save` |
-    //! | A save that breaks a rule | refused on the page (the level and the reason, nothing sent); refused by the server (its reason, only for these overrides, not an older refusal) | `a_save_that_breaks_a_rule_says_why` |
+    //! | A save that breaks a rule | refused on the page (the level and the reason, nothing sent); refused by the server (its reason, only for these overrides, not an older refusal); never answered (said so after the wait, the changes kept) | `a_save_that_breaks_a_rule_says_why` |
     //! | Unsaved changes | dropped on DROP; Escape once asks, twice leaves | `unsaved_changes_are_dropped_on_request_or_on_leaving_twice` |
     //! | Server's answer | values follow it, same keys keep the selection, waiting before it, Escape closes | `the_page_follows_the_servers_answer` |
     //! | Steps | whole, 2.0, 0.33, 250, 0 | `steps_follow_the_default` |
@@ -775,6 +791,14 @@ mod tests {
             "{text}"
         );
         assert!(page.has_unsaved_changes());
+        let GameSettingsOutcome::Send(_) = press(&mut page, SAVE_ID) else {
+            panic!("the same save is sent again");
+        };
+        page.saving_since = Some(Instant::now() - std::time::Duration::from_secs(4));
+        page.update(&make_settings());
+        let text: String = get_message(&page);
+        assert!(text.contains("didn't answer the save"), "{text}");
+        assert!(page.has_unsaved_changes() && !page.is_saving);
     }
 
     #[test]

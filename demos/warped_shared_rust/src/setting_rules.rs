@@ -268,9 +268,14 @@ pub fn check_group(group: &SettingGroup, settings: &Value) -> Result<(), String>
         .join(" and ");
     Err(match group.relation {
         Relation::SumsToOne => format!(
-            "{section}{} are shares of one whole and must add up to 1, not {}",
+            "{section}{} are shares of one whole and must add up to 1, not {} ({})",
             names.join(" + "),
-            (found.iter().sum::<f64>() / SUM_TOLERANCE).round() * SUM_TOLERANCE
+            (found.iter().sum::<f64>() / SUM_TOLERANCE).round() * SUM_TOLERANCE,
+            found
+                .iter()
+                .map(f64::to_string)
+                .collect::<Vec<String>>()
+                .join(" + ")
         ),
         Relation::Ascending => format!(
             "{section}{} must be in ascending order, not {values}",
@@ -447,7 +452,7 @@ mod tests {
         let error: String = check_group(&SETTING_GROUPS[0], &speckle(0.2)).unwrap_err();
         assert_eq!(
             error,
-            "beam_speckle: black_frac + white_frac + dropout_frac are shares of one whole and must add up to 1, not 1.1"
+            "beam_speckle: black_frac + white_frac + dropout_frac are shares of one whole and must add up to 1, not 1.1 (0.2 + 0.1 + 0.8)"
         );
         assert_eq!(
             split_section(&["rifle.noise_start_rad", "sniper.noise_max_rad"]),
