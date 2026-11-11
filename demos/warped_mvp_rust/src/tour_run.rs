@@ -82,7 +82,7 @@ impl TourRun {
     ///
     /// Example: `tour_run.before_frame(&mut app);`
     pub fn before_frame(&self, app: &mut App) {
-        if app.is_in_game_menu() && !self.is_done() {
+        if app.is_in_map_menu() && !self.is_done() {
             app.request_play(Some(self.level_indices[self.done_count]));
         }
     }
@@ -104,7 +104,7 @@ impl TourRun {
         self.summaries.push((level_name.to_string(), summary));
         self.save_page(
             app,
-            &format!("game_menu_after_{}.png", get_level_slug(level_name)),
+            &format!("map_menu_after_{}.png", get_level_slug(level_name)),
         )?;
         self.done_count += 1;
         Ok(())

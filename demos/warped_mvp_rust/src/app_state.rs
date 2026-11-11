@@ -11,7 +11,7 @@
 //!
 //! Must know:
 //! - Gotchas: a round's level plays through its library (`take_level_to_play`, then `end_level`);
-//!   a level without one shows the stand-in screen (`game_menu::get_level_shapes`).
+//!   a level without one shows the stand-in screen (`map_menu::get_level_shapes`).
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -29,13 +29,13 @@ use warped_shared::page::{Shape, get_page_point};
 use warped_shared::player_settings::PerPlayerSettings;
 
 use crate::children::{GameKind, HostedGame, Programs, describe_game_kind, make_run_folder};
-use crate::game_menu::{
-    GameAction, GameMenu, LevelMenu, LevelMenuAction, get_level_shapes, get_round,
-};
 use crate::game_settings_page::{GameSettingsOutcome, GameSettingsPage};
 use crate::level_library::get_play_level;
 use crate::levels_manifest::Picture;
 use crate::main_menu::{MainAction, MainMenu, MainRow};
+use crate::map_menu::{
+    LevelMenu, LevelMenuAction, MapMenu, MapMenuAction, get_level_shapes, get_round,
+};
 use crate::menu_page::{LINE, MARGIN, MenuInput, MenuRow, push_heading, push_rows, push_title};
 use crate::player_settings_page::{PageOutcome, PlayerSettingsPage};
 use crate::screens::{Navigator, Screen};
@@ -129,7 +129,7 @@ pub fn get_credits_shapes() -> (Vec<Shape>, [f32; 2]) {
 pub struct App {
     navigator: Navigator,
     main_menu: MainMenu,
-    game_menu: GameMenu,
+    map_menu: MapMenu,
     level_menu: LevelMenu,
     player_page: Option<PlayerSettingsPage>,
     game_settings_page: Option<GameSettingsPage>,
@@ -175,7 +175,7 @@ impl App {
         App {
             navigator: Navigator::New(),
             main_menu: MainMenu::New(),
-            game_menu: GameMenu::New(),
+            map_menu: MapMenu::New(),
             level_menu: LevelMenu::New(),
             player_page: None,
             game_settings_page: None,
@@ -252,7 +252,7 @@ impl App {
         let client: MatchClient =
             MatchClient::Connect(server, team).map_err(|error| error.to_string())?;
         self.client = Some(client);
-        self.game_menu = GameMenu::New();
+        self.map_menu = MapMenu::New();
         self.left_round = None;
         self.level_round = None;
         self.navigator.enter_game();
@@ -292,11 +292,11 @@ impl App {
         }
     }
 
-    /// `is_in_game_menu` says whether the map menu is shown (no level, no page over it).
+    /// `is_in_map_menu` says whether the map menu is shown (no level, no page over it).
     ///
-    /// Example: `if app.is_in_game_menu() { ... }`
-    pub fn is_in_game_menu(&self) -> bool {
-        self.navigator.get_screen() == Screen::GameMenu
+    /// Example: `if app.is_in_map_menu() { ... }`
+    pub fn is_in_map_menu(&self) -> bool {
+        self.navigator.get_screen() == Screen::MapMenu
     }
 
     /// `start_game` hosts a game of `kind` playing `choice` (the match, or one level) and joins
@@ -494,7 +494,7 @@ impl App {
     ///
     /// Example: `app.click([320.0, 120.0], [1280.0, 800.0], 1);`
     pub fn click(&mut self, at: [f32; 2], size: [f32; 2], click_count: u8) {
-        if self.navigator.get_screen() != Screen::GameMenu {
+        if self.navigator.get_screen() != Screen::MapMenu {
             return;
         }
         let (_, page_size, _) = self.get_page();
@@ -510,7 +510,7 @@ impl App {
             PageClick::Match => None,
         };
         self.pending_play = Some((choice, None));
-        self.game_menu.message = Some(if click_count >= DOUBLE_CLICK_COUNT {
+        self.map_menu.message = Some(if click_count >= DOUBLE_CLICK_COUNT {
             self.pending_now = Some((choice, None));
             "Asked the match server to start at once.".to_string()
         } else {
@@ -548,7 +548,7 @@ impl App {
                 }
             }
             Screen::GameSettings => self.handle_game_settings(input),
-            Screen::GameMenu => self.handle_game_menu(input),
+            Screen::MapMenu => self.handle_map_menu(input),
             Screen::Level => {
                 if input == MenuInput::Back {
                     self.level_menu = LevelMenu::New();
@@ -559,7 +559,7 @@ impl App {
                 LevelMenuAction::Stay => {}
                 LevelMenuAction::Resume => self.navigator.go_back(),
                 LevelMenuAction::OpenPlayerSettings => self.open_player_settings(),
-                LevelMenuAction::ExitToGameMenu => {
+                LevelMenuAction::ExitToMapMenu => {
                     self.left_round = self.level_round;
                     self.level_round = None;
                     self.navigator.leave_level();
@@ -632,43 +632,43 @@ impl App {
         }
     }
 
-    /// `handle_game_menu` applies an input to the map menu.
+    /// `handle_map_menu` applies an input to the map menu.
     ///
-    /// Example: `self.handle_game_menu(MenuInput::Activate);`
-    fn handle_game_menu(&mut self, input: MenuInput) {
+    /// Example: `self.handle_map_menu(MenuInput::Activate);`
+    fn handle_map_menu(&mut self, input: MenuInput) {
         let team: Option<Team> = self.get_team();
-        let rows = self.game_menu.get_rows(team);
+        let rows = self.map_menu.get_rows(team);
         let view: Option<MatchView> = self.get_view().cloned();
         let result: Result<(), String> =
-            match self.game_menu.handle(input, &rows, team, view.as_ref()) {
-                GameAction::Stay => Ok(()),
-                GameAction::SetTeam(team) => self.set_team(team),
-                GameAction::Rejoin => {
+            match self.map_menu.handle(input, &rows, team, view.as_ref()) {
+                MapMenuAction::Stay => Ok(()),
+                MapMenuAction::SetTeam(team) => self.set_team(team),
+                MapMenuAction::Rejoin => {
                     self.left_round = None;
                     Ok(())
                 }
-                GameAction::Play(choice) => {
+                MapMenuAction::Play(choice) => {
                     self.pending_play = Some((choice, None));
-                    self.game_menu.message = Some(
+                    self.map_menu.message = Some(
                         "Asked the match server; everyone follows after the break.".to_string(),
                     );
                     Ok(())
                 }
-                GameAction::OpenGameSettings => {
+                MapMenuAction::OpenGameSettings => {
                     self.open_game_settings();
                     Ok(())
                 }
-                GameAction::OpenPlayerSettings => {
+                MapMenuAction::OpenPlayerSettings => {
                     self.open_player_settings();
                     Ok(())
                 }
-                GameAction::Leave => {
+                MapMenuAction::Leave => {
                     self.leave();
                     Ok(())
                 }
             };
         if let Err(error) = result {
-            self.game_menu.message = Some(error);
+            self.map_menu.message = Some(error);
         }
     }
 
@@ -732,7 +732,7 @@ impl App {
                 self.pending_play = None;
             } else if sent_at.is_none_or(|at| at.elapsed().as_secs_f64() >= PLAY_RESEND_S) {
                 if let Err(error) = client.send_play(choice, false) {
-                    self.game_menu.message = Some(error.to_string());
+                    self.map_menu.message = Some(error.to_string());
                 }
                 self.pending_play = Some((choice, Some(Instant::now())));
             }
@@ -745,7 +745,7 @@ impl App {
                 self.pending_now = None;
             } else if sent_at.is_none_or(|at| at.elapsed().as_secs_f64() >= PLAY_RESEND_S) {
                 if let Err(error) = client.send_play(choice, true) {
-                    self.game_menu.message = Some(error.to_string());
+                    self.map_menu.message = Some(error.to_string());
                 }
                 self.pending_now = Some((choice, Some(Instant::now())));
             }
@@ -767,7 +767,7 @@ impl App {
             self.level_round = None;
             self.navigator.leave_level();
         }
-        if self.navigator.get_screen() == Screen::GameMenu
+        if self.navigator.get_screen() == Screen::MapMenu
             && is_on_team
             && round.is_some()
             && round != self.left_round
@@ -844,7 +844,7 @@ impl App {
             Ok(LevelEnd::CloseWindow) => self.should_quit = true,
             Err(error) => {
                 self.left_round = self.level_round;
-                self.game_menu.message = Some(format!("The level stopped: {error}"));
+                self.map_menu.message = Some(format!("The level stopped: {error}"));
             }
         }
         self.level_round = None;
@@ -854,7 +854,7 @@ impl App {
         if self.player_settings_path.exists() {
             match PerPlayerSettings::Load(&self.player_settings_path) {
                 Ok(settings) => self.player_settings = settings,
-                Err(error) => self.game_menu.message = Some(error.to_string()),
+                Err(error) => self.map_menu.message = Some(error.to_string()),
             }
         }
     }
@@ -915,13 +915,13 @@ impl App {
                 .as_ref()
                 .expect("the game settings page is open")
                 .get_shapes(),
-            Screen::GameMenu => {
+            Screen::MapMenu => {
                 let label: String = self
                     .client
                     .as_ref()
                     .map_or(String::new(), |client| client.server.to_string());
-                self.game_menu
-                    .get_shapes(&self.game_menu.get_rows(team), team, view, &label)
+                self.map_menu
+                    .get_shapes(&self.map_menu.get_rows(team), team, view, &label)
             }
             Screen::Level => match (view, team, self.level_round) {
                 (Some(view), Some(team), Some(round)) => {
@@ -1111,7 +1111,7 @@ mod tests {
             },
         );
         exchange(&mut app, &server, &playing);
-        assert_eq!(app.navigator.get_screen(), Screen::GameMenu);
+        assert_eq!(app.navigator.get_screen(), Screen::MapMenu);
         app.set_team(Team::Red).unwrap();
         app.update();
         assert_eq!(app.navigator.get_screen(), Screen::Level);
@@ -1122,9 +1122,9 @@ mod tests {
         }
         app.handle(MenuInput::Activate);
         app.update();
-        assert_eq!(app.navigator.get_screen(), Screen::GameMenu);
-        app.handle_game_menu(MenuInput::Down);
-        app.handle_game_menu(MenuInput::Activate);
+        assert_eq!(app.navigator.get_screen(), Screen::MapMenu);
+        app.handle_map_menu(MenuInput::Down);
+        app.handle_map_menu(MenuInput::Activate);
         app.update();
         assert_eq!(app.navigator.get_screen(), Screen::Level);
         let over: MatchView = make_view(
@@ -1137,7 +1137,7 @@ mod tests {
         let mut over: MatchView = over;
         over.state.record_round(Team::Red);
         exchange(&mut app, &server, &over);
-        assert_eq!(app.navigator.get_screen(), Screen::GameMenu);
+        assert_eq!(app.navigator.get_screen(), Screen::MapMenu);
         app.handle(MenuInput::Back);
         assert_eq!(app.navigator.get_screen(), Screen::MainMenu);
         assert!(app.client.is_none());
@@ -1226,7 +1226,7 @@ mod tests {
         assert!(app.has_game_settings());
         assert!(app.describe_game().starts_with("a game joined; "));
         app.handle(MenuInput::Back);
-        assert_eq!(app.navigator.get_screen(), Screen::GameMenu);
+        assert_eq!(app.navigator.get_screen(), Screen::MapMenu);
         assert!(app.game_settings_page.is_none());
         assert!(!app.has_game_settings());
     }
@@ -1250,7 +1250,7 @@ mod tests {
         let window: [f32; 2] = [page_size[0] * 2.0, page_size[1] * 2.0];
         app.click([2.0 * 30.0, 2.0 * 100.0], window, 2);
         assert_eq!(app.pending_now, Some((Some(0), None)));
-        assert!(app.game_menu.message.as_ref().unwrap().contains("at once"));
+        assert!(app.map_menu.message.as_ref().unwrap().contains("at once"));
     }
 
     #[test]

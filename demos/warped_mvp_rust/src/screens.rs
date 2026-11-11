@@ -22,7 +22,7 @@ pub enum Screen {
     PlayerSettings,
     GameSettings,
     Credits,
-    GameMenu,
+    MapMenu,
     Level,
     LevelMenu,
 }
@@ -69,7 +69,7 @@ impl Navigator {
     /// Example: `navigator.open(Screen::PlayerSettings);`
     pub fn open(&mut self, page: Screen) {
         assert!(
-            !matches!(page, Screen::MainMenu | Screen::GameMenu | Screen::Level),
+            !matches!(page, Screen::MainMenu | Screen::MapMenu | Screen::Level),
             "Navigator::open: {page:?} isn't a page; use enter_game or enter_level"
         );
         self.stack.push(page);
@@ -94,14 +94,14 @@ impl Navigator {
     ///
     /// Example: `navigator.enter_game();`
     pub fn enter_game(&mut self) {
-        self.stack = vec![Screen::MainMenu, Screen::GameMenu];
+        self.stack = vec![Screen::MainMenu, Screen::MapMenu];
     }
 
     /// `enter_level` shows the level over the map menu, closing anything else.
     ///
     /// Example: `navigator.enter_level();`
     pub fn enter_level(&mut self) {
-        self.stack = vec![Screen::MainMenu, Screen::GameMenu, Screen::Level];
+        self.stack = vec![Screen::MainMenu, Screen::MapMenu, Screen::Level];
     }
 
     /// `leave_level` goes back to the map menu (the round ended, or the level menu's exit).
@@ -126,8 +126,8 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Escape on each screen | main menu, a page over it, map menu, a page over it, level, level menu, a page over that | `escape_follows_the_users_rules` |
-    //! | Exits | the level menu's exit, a round ending under a page (still in the level until then), leaving the game | `exits_go_to_the_game_menu_then_the_main_menu` |
-    //! | Pages | each page opens over its screen; the map menu and level are refused as pages | `pages_open_over_any_screen`, `the_game_menu_is_not_a_page` |
+    //! | Exits | the level menu's exit, a round ending under a page (still in the level until then), leaving the game | `exits_go_to_the_map_menu_then_the_main_menu` |
+    //! | Pages | each page opens over its screen; the map menu and level are refused as pages | `pages_open_over_any_screen`, `the_map_menu_is_not_a_page` |
 
     use super::*;
 
@@ -142,7 +142,7 @@ mod tests {
         navigator.enter_game();
         navigator.open(Screen::PlayerSettings);
         navigator.go_back();
-        assert_eq!(navigator.get_screen(), Screen::GameMenu);
+        assert_eq!(navigator.get_screen(), Screen::MapMenu);
         navigator.enter_level();
         navigator.go_back();
         assert_eq!(navigator.get_screen(), Screen::LevelMenu);
@@ -160,18 +160,18 @@ mod tests {
     }
 
     #[test]
-    fn exits_go_to_the_game_menu_then_the_main_menu() {
+    fn exits_go_to_the_map_menu_then_the_main_menu() {
         let mut navigator: Navigator = Navigator::New();
         navigator.enter_level();
         navigator.go_back();
         navigator.leave_level();
-        assert_eq!(navigator.get_screen(), Screen::GameMenu);
+        assert_eq!(navigator.get_screen(), Screen::MapMenu);
         navigator.enter_level();
         navigator.go_back();
         navigator.open(Screen::PlayerSettings);
         assert!(navigator.is_in_level());
         navigator.leave_level();
-        assert_eq!(navigator.get_screen(), Screen::GameMenu);
+        assert_eq!(navigator.get_screen(), Screen::MapMenu);
         assert!(!navigator.is_in_level());
         navigator.leave_game();
         assert_eq!(navigator, Navigator::New());
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "isn't a page")]
-    fn the_game_menu_is_not_a_page() {
-        Navigator::New().open(Screen::GameMenu);
+    fn the_map_menu_is_not_a_page() {
+        Navigator::New().open(Screen::MapMenu);
     }
 }
