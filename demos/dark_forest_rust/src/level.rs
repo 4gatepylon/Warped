@@ -1,6 +1,6 @@
 //! `level.rs` plays Dark Forest in a window it is lent: `Level::Load` sets up the renderer, the
 //! sounds and the forest's scene on the window's Metal layer; `Level::run_title_screen` shows the
-//! title screen (the program run alone); `Level::play` joins the game (alone against robots, or
+//! title screen (the program run alone); `Level::play` joins the game (alone against bots, or
 //! online) and runs the frame loop until the player leaves or closes the window, the caller's
 //! `MatchLink` says the round is over, or a flag's run (a photo, a benchmark) ends. Dropping the
 //! `Level` frees its GPU resources and gives the layer back as it found it.
@@ -901,7 +901,7 @@ impl Level {
         )
     }
 
-    /// `play` joins the game `args` names (alone against robots, or a server's) and plays it in
+    /// `play` joins the game `args` names (alone against bots, or a server's) and plays it in
     /// `window` until the player leaves (`LevelEnd::LeaveLevel`) or closes the window
     /// (`LevelEnd::CloseWindow`), `window.match_link` says the round is over
     /// (`LevelEnd::RoundOver`, with the winner the forest saw), or a flag's run (a photo, a

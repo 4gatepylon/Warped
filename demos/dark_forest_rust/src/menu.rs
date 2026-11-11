@@ -232,7 +232,7 @@ fn get_score_lines(scoreboard: Scoreboard) -> Vec<(String, bool)> {
             death_count,
         } => {
             return vec![
-                ("Playing alone against robots.".to_string(), false),
+                ("Playing alone against bots.".to_string(), false),
                 (String::new(), false),
                 (format_score_row("TEAM", "PLAYER", "KILLS", "DEATHS"), false),
                 (

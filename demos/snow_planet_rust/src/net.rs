@@ -1301,7 +1301,7 @@ pub fn serve(
         if should_start_new_game.swap(false, Ordering::Relaxed) {
             match server.game.winner {
                 Some(_) if level_result_file.is_some() => {
-                    println!("This level's result is written; the match server ends it.");
+                    println!("This level's result is written; the game server ends it.");
                 }
                 Some(_) => server.start_new_game(),
                 None => println!("No team has won yet, so the game goes on."),

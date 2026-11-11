@@ -104,7 +104,7 @@ pub enum Effect {
 #[derive(Parser, Clone, Debug)]
 #[command(
     about = "Dark Forest, a Warped level (Rust + SDL3 + Metal)",
-    after_help = "Examples:\n  dark-forest                     play alone against robots\n  dark-forest --host              serve and play; others --join auto\n  dark-forest --serve --level-result-file /tmp/r.json\n  dark-forest --join 127.0.0.1 --team blue --bot --bot-objective consoles --exit-after-s 60"
+    after_help = "Examples:\n  dark-forest                     play alone against bots\n  dark-forest --host              serve and play; others --join auto\n  dark-forest --serve --level-result-file /tmp/r.json\n  dark-forest --join 127.0.0.1 --team blue --bot --bot-objective consoles --exit-after-s 60"
 )]
 pub struct Args {
     /// Internal render resolution as a fraction of the window's pixels (0.25 to 1.0).

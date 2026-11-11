@@ -1107,7 +1107,7 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 }
 
 /// `write_level_result` writes `{"winner": "<team>"}` to `path` at once, through `<path>.partial`
-/// and a rename, so a match server polling `path` never reads half a file.
+/// and a rename, so a game server polling `path` never reads half a file.
 ///
 /// Example: `write_level_result(Path::new("round_1.json"), 0)?;`
 fn write_level_result(path: &std::path::Path, winner: u32) -> Result<()> {
@@ -1206,7 +1206,7 @@ pub fn serve(
         if should_start_new_game.swap(false, Ordering::Relaxed) {
             match server.game.winner {
                 Some(_) if level_result_file.is_some() => {
-                    println!("This level's result is written; the match server ends it.");
+                    println!("This level's result is written; the game server ends it.");
                 }
                 Some(_) => server.start_new_game(),
                 None => println!("No team has won yet, so the game goes on."),

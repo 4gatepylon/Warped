@@ -1,5 +1,5 @@
 //! `title` is the title screen the window opens on when no flag says what to play (ported from
-//! the hyperbolic demo's `title.rs`): playing alone against robots, hosting a game on this Wi-Fi,
+//! the hyperbolic demo's `title.rs`): playing alone against bots, hosting a game on this Wi-Fi,
 //! joining one, or quitting. It keeps no window state: the window feeds it keys and draws its lines.
 //!
 //! Interface: `TitleScreen` (`New`, `get_lines`, `move_selection`, `get_selected`), `Choice`.
@@ -16,7 +16,7 @@ pub enum Choice {
 }
 
 const CHOICES: [(Choice, &str); 4] = [
-    (Choice::PlayAlone, "PLAY ALONE AGAINST ROBOTS"),
+    (Choice::PlayAlone, "PLAY ALONE AGAINST BOTS"),
     (Choice::Host, "HOST A GAME ON THIS WI-FI"),
     (Choice::Join, "JOIN A GAME ON THIS WI-FI"),
     (Choice::Quit, "QUIT"),

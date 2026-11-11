@@ -60,7 +60,7 @@ const CREDITS_LINES: [&str; 9] = [
     "Everything else is made in code in this repository.",
 ];
 
-/// `Ports` is the UDP ports a game this app hosts uses (its match server's, and each round's
+/// `Ports` is the UDP ports a game this app hosts uses (its game server's, and each round's
 /// level server's), the port it listens on for games on the network, and whether it listens on
 /// the loopback interface alone (tests: nothing open to the network).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -71,7 +71,7 @@ pub struct Ports {
     pub is_loopback_only: bool,
 }
 
-/// `parse_address` reads a typed match server address, an IP address with an optional `:port`
+/// `parse_address` reads a typed game server address, an IP address with an optional `:port`
 /// (`MATCH_PORT` without one), or `None` if it isn't one.
 ///
 /// Example: `assert_eq!(parse_address("10.0.0.2"), "10.0.0.2:47850".parse().ok());`
@@ -145,7 +145,7 @@ pub struct App {
     hosted_team: Option<Team>,
     pending_play: Option<(Option<usize>, Option<Instant>)>,
     /// `pending_now` is a double-clicked choice (W-204, double-click a level to enter at once)
-    /// the match server is still to start without its break, and when it was last asked.
+    /// the game server is still to start without its break, and when it was last asked.
     pending_now: Option<(Option<usize>, Option<Instant>)>,
     left_round: Option<(usize, usize)>,
     level_round: Option<(usize, usize)>,
@@ -245,7 +245,7 @@ impl App {
         self.client.as_ref().and_then(|client| client.team)
     }
 
-    /// `join` joins the match server at `server` (as `team`, if known) and shows its map menu.
+    /// `join` joins the game server at `server` (as `team`, if known) and shows its map menu.
     ///
     /// Example: `self.join(server, None)?;`
     fn join(&mut self, server: SocketAddr, team: Option<Team>) -> Result<(), String> {
@@ -282,7 +282,7 @@ impl App {
         }
     }
 
-    /// `request_play` asks the match server, as the game master, to play `choice` (a level's
+    /// `request_play` asks the game server, as the game master, to play `choice` (a level's
     /// index freely, or the match with `None`), sending it until the server's view shows it.
     ///
     /// Example: `app.request_play(Some(2));`
@@ -361,7 +361,7 @@ impl App {
     }
 
     /// `open_game_settings` opens the game master's settings page over the map menu; it asks the
-    /// match server for the settings at once.
+    /// game server for the settings at once.
     ///
     /// Example: `app.open_game_settings();`
     pub fn open_game_settings(&mut self) {
@@ -374,7 +374,7 @@ impl App {
     }
 
     /// `has_game_settings` says whether the game master's settings page is open and shows the
-    /// match server's settings (not still waiting for them).
+    /// game server's settings (not still waiting for them).
     ///
     /// Example: `if app.has_game_settings() { ... }`
     pub fn has_game_settings(&self) -> bool {
@@ -385,7 +385,7 @@ impl App {
 
     /// `describe_game` says who is in the game this player is in, for the play log: the game
     /// this app hosts (alone, with how many bots, for others) or one it joined, and the players
-    /// on each team as the match server last counted them (bots too).
+    /// on each team as the game server last counted them (bots too).
     ///
     /// Example: `let game: String = app.describe_game();`
     pub fn describe_game(&self) -> String {
@@ -403,7 +403,7 @@ impl App {
     }
 
     /// `has_unsaved_game_settings` says whether the game master's settings page is open with
-    /// changes the match server doesn't have.
+    /// changes the game server doesn't have.
     ///
     /// Example: `if app.has_unsaved_game_settings() { ... }`
     pub fn has_unsaved_game_settings(&self) -> bool {
@@ -432,7 +432,7 @@ impl App {
     }
 
     /// `save_game_settings` saves the open game settings page's changes as its SAVE SETTINGS row
-    /// does: checked on the page, then sent to the match server.
+    /// does: checked on the page, then sent to the game server.
     ///
     /// Example: `app.save_game_settings();`
     pub fn save_game_settings(&mut self) {
@@ -458,7 +458,7 @@ impl App {
     }
 
     /// `apply_game_settings_outcome` does what the game settings page asked for after an input:
-    /// nothing, send the match server a message (a save), or close the page.
+    /// nothing, send the game server a message (a save), or close the page.
     ///
     /// Example: `self.apply_game_settings_outcome(outcome);`
     fn apply_game_settings_outcome(&mut self, outcome: GameSettingsOutcome) {
@@ -489,7 +489,7 @@ impl App {
     /// `click` applies a left click at `at` in a window of `size` (both in window points): on the
     /// map menu, a click on a level of the match's status plays it freely (the game master's
     /// choice), and during free play the "back to the match" button goes back. A double click
-    /// (`click_count` 2 or more) also asks the match server to start at once, without the break
+    /// (`click_count` 2 or more) also asks the game server to start at once, without the break
     /// before the round (W-204, double-click a level to enter at once).
     ///
     /// Example: `app.click([320.0, 120.0], [1280.0, 800.0], 1);`
@@ -512,9 +512,9 @@ impl App {
         self.pending_play = Some((choice, None));
         self.map_menu.message = Some(if click_count >= DOUBLE_CLICK_COUNT {
             self.pending_now = Some((choice, None));
-            "Asked the match server to start at once.".to_string()
+            "Asked the game server to start at once.".to_string()
         } else {
-            "Asked the match server; everyone follows after the break (double-click to skip it)."
+            "Asked the game server; everyone follows after the break (double-click to skip it)."
                 .to_string()
         });
     }
@@ -650,7 +650,7 @@ impl App {
                 MapMenuAction::Play(choice) => {
                     self.pending_play = Some((choice, None));
                     self.map_menu.message = Some(
-                        "Asked the match server; everyone follows after the break.".to_string(),
+                        "Asked the game server; everyone follows after the break.".to_string(),
                     );
                     Ok(())
                 }
@@ -974,7 +974,7 @@ pub fn format_utc_now() -> String {
 
 #[cfg(test)]
 mod tests {
-    //! Unit tests for `app_state.rs`: the app's flow through a real match server's protocol, with
+    //! Unit tests for `app_state.rs`: the app's flow through a real game server's protocol, with
     //! the server stood in for by a socket on this test's ports (48306 to 48309).
     //!
     //! | Partitioning | Parts | Tests |
@@ -1076,7 +1076,7 @@ mod tests {
         plays
     }
 
-    /// `start_server` binds a fake match server on `port`.
+    /// `start_server` binds a fake game server on `port`.
     ///
     /// Example: `let server = start_server(48307);`
     fn start_server(port: u16) -> FakeServer {

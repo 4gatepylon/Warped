@@ -55,7 +55,7 @@ pub enum MapMenuRow {
 }
 
 /// `MapMenuAction` is what the app does after an input on the map menu: nothing, play for a team,
-/// rejoin the round being played, ask the match server to play `choice` (a level's index, or
+/// rejoin the round being played, ask the game server to play `choice` (a level's index, or
 /// `None` for the match), open the game master's settings or the player's, or leave to the main
 /// menu.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -371,7 +371,7 @@ pub fn get_level_shapes(
         false => {
             for (i, line) in [
                 "This level will draw here once the levels are libraries (W-141).",
-                "Until then the round goes on without you: the match server",
+                "Until then the round goes on without you: the game server",
                 "plays it, and this screen follows the match.",
             ]
             .iter()

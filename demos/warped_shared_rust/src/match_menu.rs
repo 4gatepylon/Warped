@@ -65,7 +65,7 @@ fn format_status(ownership: &Ownership, state: &MatchState, level: usize) -> Str
             format!("won by {} (round 1, played once)", team.get_name())
         }
         (Some(team), _) => format!(
-            "captured by {} (round {})",
+            "won by {} (round {})",
             team.get_name(),
             won_round.map_or(0, |round| round.number)
         ),
@@ -922,8 +922,8 @@ mod tests {
             " Dust            blue 2   blue     not reached",
             " Snow Planet     blue 1   blue     red wavefront",
             " City Sphere     purple   -        won by blue (round 1, played once)",
-            " Dark Forest     red 1    red      captured by blue (round 2)",
-            " Lunar Surface   red 2    red      captured by blue (round 5)",
+            " Dark Forest     red 1    red      won by blue (round 2)",
+            " Lunar Surface   red 2    red      won by blue (round 5)",
             " #3  Lunar Surface  blue attacks won by red  (defender holds, roles swap)",
             " #4  Snow Planet    red attacks  won by blue (defender holds, roles swap)",
             "Result: blue wins the match",
