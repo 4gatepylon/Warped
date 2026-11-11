@@ -1,8 +1,10 @@
 # Online design and system prototype: handoff
 
-State on 2026-11-10, when the session that wrote the outside-game design, the window mock-ups and part 1 of this
-prototype paused. Read this first if you continue the work. It is written for an agent that has only this
-repository: it repeats what was otherwise only in that session.
+State on 2026-11-11. A Claude Code session on the user's Mac wrote the outside-game design, the window mock-ups and
+part 1 of this prototype; a Cursor cloud agent then built part 2 (accounts) and is going on with the parts after it.
+Read this first if you continue the work. It is written for an agent that has only this repository: it repeats
+what was otherwise only in those sessions. [`DECISIONS.md`](DECISIONS.md) lists what was decided without the user,
+and [`VERIFY.md`](VERIFY.md) how to check each feature.
 
 ## The goal
 
@@ -88,6 +90,10 @@ you make:
   | 567 | `claude/game-design-picture-folders` | Where each design doc's pictures go |
   | 577 | `claude/window-design-mockups` | The window mock-up website |
   | 586 | `claude/prototype-accounts` | Part 1 of this prototype (despite the branch's name) |
+  | see below | `cursor/prototype-2-accounts-fe19` | Part 2: accounts, fake Google, fake Stripe |
+
+  Each later part is a branch `cursor/prototype-<n>-<what>-fe19` on the one before; `git log --oneline
+  claude/prototype-accounts..` on the top branch, or the PRs' Stack lines, list them.
 
 - **The earlier session's transcript** is on the user's Mac only:
   `~/.claude/projects/-Users-4gate-git-Warped--claude-worktrees-game-cloud-system-diagram-00f22d/cec760d8-0369-41df-9944-b4d5c675c974.jsonl`,
@@ -101,13 +107,16 @@ you make:
 - Read the root `AGENTS.md` and the skills it names. The ones this work keeps hitting: `stacked-prs`,
   `pr-description` (its template, unchanged, on every PR), `merging-to-staging`, `graphical-changes`,
   `docstrings`, `unit-tests`, `makefiles`, `clis`.
-- **Continue the stack:** check out `claude/prototype-accounts` and add each new part as a branch on top of it
+- **Continue the stack:** check out the top branch and add each new part as a branch on top of it
   (`gh stack add <branch>`, then `gh stack submit --auto --open --remote origin`; the repository has two remotes,
-  so `gh stack` needs `--remote origin`). If `gh stack` isn't available, ask the user before stacking by hand.
+  so `gh stack` needs `--remote origin`). Where `gh stack` isn't available (a Cursor cloud agent, whose `gh` is
+  read-only, 2026-11-10), open each PR with the agent's own PR tool, based on the branch below and stacked on its
+  PR (`DECISIONS.md` 1).
 - **Size:** the user chose one PR per part for this prototype, each over the 200-line limit. Say so in the PR's
   Size section with the line count.
 - **After each part,** take screenshots of one common flow and attach them to the PR
-  (`gh pr edit <n> --body-file body.md --attach <file>`).
+  (`gh pr edit <n> --body-file body.md --attach <file>`). `make capture-flows` plays every flow in Chrome and
+  screenshots it; add each new flow to `scripts/capture_flows.py` and a row to `VERIFY.md`.
 - **Each PR's Stack line** names the layers below and above. When you add a layer, update the line in every PR.
 - Never merge into `staging/global` or `main`, and leave this stack unmerged too: the user wants to review it as a
   whole when they are back. Rebase it when `staging/user-4gatepylon` moves.
@@ -118,9 +127,12 @@ you make:
 `README.md` says what it is and how to run it (`make run-prototype`, then `http://127.0.0.1:8010/`; `make test`;
 `make fmt`). The rules that matter when adding to it:
 
-- **Simulate each component of the real design separately.** Each is a group of methods of `World` (`world.py`), and
-  whenever one component would call another, `World._send` records a row in the `message` table. Add new components
-  to `COMPONENTS` in `world.py` and to `NODES` in `web/system/system.js`, so the system view draws them.
+- **Simulate each component of the real design separately.** The fleet's components are groups of methods of
+  `World` (`world.py`); since part 2, a new component is its own class in its own file (`accounts.py`,
+  `identity_provider.py`, ...) that reaches the database and the other components only through the `Bus`
+  (`bus.py`). Whenever one component would call another, `Bus.send` records a row in the `message` table. Add new
+  components to `COMPONENTS` in `bus.py` and to `NODES` in `web/system/system.js`, and a table's owner to
+  `_TABLE_OWNERS_BY_PREFIX` in `world.py`, so the system view draws them.
 - **Rules are plain functions** in `rules.py`, with unit tests chosen by partitioning their inputs
   (`tests/test_rules.py`). `World` holds state and calls them.
 - **Every number the design marks ≈ is a row of `DEFAULT_SETTINGS`** in `store.py`, editable live in the website's
@@ -139,7 +151,10 @@ you make:
 
 Each part is one PR. Each should leave the system view showing its new components and messages.
 
-2. **Accounts.**
+2. **Accounts. Built** (`cursor/prototype-2-accounts-fe19`). Not built, left for later parts: Google's "Cancel"
+   (an `access_denied` answer) on the fake Google page; checking the EU at sign-in, not only at sign-up; and the
+   superadmin console's `PUT /api/settings` still takes no sign-in (part 7 should require a superadmin's session).
+   What was asked:
    - A stand-in identity provider ("fake Google") as its own component with its own routes: an authorize page that
      lists made-up identities, a token route, and signed ID tokens. The game app page does the real flow:
      authorization code with PKCE, `state` and `nonce`, then the backend redeems the code, verifies the token and
@@ -201,6 +216,6 @@ Left out on purpose: the real game, voice chat, real Google sign-in, real Stripe
 
 ## If you work without a Mac
 
-Nothing in the prototype needs one. `open <url>` in the READMEs is macOS's way to open a browser; use the URL. The
-screenshots so far were taken in a desktop app's browser pane; use whatever browser tooling you have, and ask the
-user before downloading one.
+Nothing in the prototype needs one. `open <url>` in the READMEs is macOS's way to open a browser; use the URL.
+`make capture-flows` drives the installed Google Chrome through Playwright (`channel="chrome"`), so it downloads
+no browser; on a machine without Chrome, ask the user before downloading one.
