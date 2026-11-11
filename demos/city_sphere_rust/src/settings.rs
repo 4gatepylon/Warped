@@ -38,7 +38,7 @@ pub use crate::play_settings::{
 #[allow(unused_imports)]
 pub use crate::play_settings::{HeadBobSettings, MinimapCorner};
 #[cfg(target_os = "macos")]
-pub use crate::play_settings::{HitEffectSettings, MinimapSettings, ViewSettings};
+pub use crate::play_settings::{HitEffectSettings, MainMapSettings, MinimapSettings, ViewSettings};
 #[cfg(target_os = "macos")]
 use warped_shared::visuals::VisualsSettings;
 
@@ -100,7 +100,7 @@ const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 7] = [
+const ADDED_PLAYER_KEYS: [&str; 8] = [
     "visuals",
     "keys.switch_view",
     "view.milky_way_brightness_frac",
@@ -108,6 +108,7 @@ const ADDED_PLAYER_KEYS: [&str; 7] = [
     "view.head_bob.gun_sprint_sway_m",
     "view.head_bob.rifle_walk_swing_rad",
     "view.head_bob.rifle_sprint_swing_rad",
+    "main_map",
 ];
 
 /// `Result` is this module's result type.
@@ -122,6 +123,7 @@ struct PlayerFile {
     view: ViewSettings,
     hit_effects: HitEffectSettings,
     minimap: MinimapSettings,
+    main_map: MainMapSettings,
     visuals: VisualsSettings,
 }
 
@@ -132,6 +134,7 @@ pub struct PerPlayerSettings {
     pub view: ViewSettings,
     pub hit_effects: HitEffectSettings,
     pub minimap: MinimapSettings,
+    pub main_map: MainMapSettings,
     pub visuals: VisualsSettings,
 }
 
@@ -535,7 +538,7 @@ impl PerPlayerSettings {
         let mut file: PlayerFile =
             serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
         key_bindings::upgrade_saved_names(&mut file.keys);
-        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
+        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap, "main_map": file.main_map});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         for (key, value_frac) in [
             ("view.wormhole_tint_frac", file.view.wormhole_tint_frac),
@@ -557,6 +560,7 @@ impl PerPlayerSettings {
             view: file.view,
             hit_effects: file.hit_effects,
             minimap: file.minimap,
+            main_map: file.main_map,
             visuals: file.visuals,
         })
     }
@@ -579,6 +583,7 @@ impl PerPlayerSettings {
             view: self.view.clone(),
             hit_effects: self.hit_effects.clone(),
             minimap: self.minimap.clone(),
+            main_map: self.main_map,
             visuals: self.visuals,
         };
         serde_yaml::to_string(&file).expect("player settings serialize to YAML")
@@ -610,6 +615,7 @@ mod tests {
     //! | Team dome size (W-148) | 0.2 (built in), a file without the section (0.2), small, a half, 0, above a half | `dome_size_takes_above_0_to_a_half` |
     //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`, the four `view.head_bob` sway and swing keys) | present (built in), missing in an old save (gets its built-in value), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
     //! | Menu and map keys (W-140, hold Tab for the map, Esc for the menu) | current (built in), saved before (`release_mouse`, `open_menu` on `Tab`: loads with `Escape` for the menu and `Tab` for the map), `release_mouse` beside `show_map` (fails) | `builtin_settings_read_and_survive_json`, `saves_from_before_the_held_map_open_the_menu_with_escape` |
+    //! | Main map section | present (built in), a save without it (fog of war range 60 m), a misspelled section (fails) | `saves_without_the_main_map_get_its_fog_of_war_range` |
     //! | Visuals (W-51, basic visuals) | the identity (built in), a save without the section (gets the identity), a value out of its range (fails, naming it) | `saves_without_visuals_load_with_the_identity` |
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
@@ -970,6 +976,24 @@ mod tests {
             .expect("release_mouse beside show_map still fails")
             .to_string();
         assert!(error.contains("release_mouse"), "{error}");
+    }
+
+    #[test]
+    fn saves_without_the_main_map_get_its_fog_of_war_range() {
+        let old_save: String = BUILTIN_PLAYER_YAML
+            .lines()
+            .filter(|line| {
+                !line.starts_with("main_map:") && !line.trim_start().starts_with("fog_of_war")
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+        assert!(!old_save.contains("main_map") && old_save.contains("minimap:"));
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("a save without it loads");
+        assert_eq!(loaded.main_map.fog_of_war_range_m, 60.0);
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let misspelled: String = BUILTIN_PLAYER_YAML.replacen("main_map:", "main_mapp:", 1);
+        assert!(PerPlayerSettings::FromYaml(&misspelled, "test").is_err());
     }
 
     #[test]

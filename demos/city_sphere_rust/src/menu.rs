@@ -1,18 +1,18 @@
 //! `menu.rs` is the in-game menu: its name with a `?` (help shows while the mouse is over it), the
 //! pages' names under it, and the page shown: the settings page, where a player
 //! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
-//! head bob, motion blur, how a hit looks, the wormhole tint, the Milky Way's brightness, the
-//! picture's brightness, contrast, saturation and gamma (W-51, basic visuals), and a row that saves
-//! them), the map page, whose
-//! picture the window draws (`map_layout.rs`), the scores page, with each player's team, kills
-//! and deaths from the server, the credits page, with where the game's assets come from
+//! head bob, motion blur, how a hit looks, the wormhole tint, the Milky Way's brightness, how far
+//! the satellite map stays clear before the fog of war, the picture's brightness, contrast,
+//! saturation and gamma (W-51, basic visuals), and a row that saves them), the map page, whose
+//! picture, the paper map, the window draws (`map_layout.rs`), the scores page, with each
+//! player's team, kills and deaths from the server, the credits page, with where the game's assets come from
 //! (`credits.rs`), the quit page, which leaves the level, and, when the caller supplies its lines
 //! (the one-window app's match status, `set_match_lines`), a MATCH page first. It keeps no window
 //! state: the window
 //! feeds it pressed controls, clicks, the mouse's place in its text and the scores, and draws its
 //! lines. The arrows or `Q`/`E` turn the page, and so does a click on a page's name (W-150, arrow
 //! keys and clicks for menu pages; W-151, menu layout and help tooltip). `Esc` opens it and closes it, and
-//! the map page's lines also head the map shown while `Tab` is held (W-140, hold Tab for the map,
+//! the satellite map shown while `Tab` is held has lines of its own (W-140, hold Tab for the map,
 //! Esc for the menu; `warped_shared::menu_and_map`).
 //!
 //! Interface: `Menu` (`New`, `handle`, `click`, `set_pointer`, `is_help_shown`, `get_lines`,
@@ -51,7 +51,9 @@ const PAGES: [(Page, &str); 5] = [
     (Page::Credits, "CREDITS"),
     (Page::Quit, "QUIT"),
 ];
-const MAP_LEGEND: &str = "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
+const SATELLITE_MAP_LEGEND: &str =
+    "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
+const PAPER_MAP_LEGEND: &str = "Squares: consoles  Rings: wormholes  Dashes: zones";
 const SETTINGS_HELP_LINES: [&str; 5] = [
     "",
     "On the SETTINGS page:",
@@ -70,7 +72,7 @@ const PLAYER_WIDTH: usize = 16;
 const KILLS_WIDTH: usize = 6;
 const DEATHS_WIDTH: usize = 8;
 const LABEL_WIDTH: usize = 24;
-const NUMBERS: [(Number, &str, f64, f64, f64); 9] = [
+const NUMBERS: [(Number, &str, f64, f64, f64); 10] = [
     (
         Number::LookSpeed,
         "mouse look rad/px",
@@ -86,6 +88,7 @@ const NUMBERS: [(Number, &str, f64, f64, f64); 9] = [
     (Number::HitBlur, "hit blur px", 1.0, 0.0, 20.0),
     (Number::WormholeTint, "wormhole tint 0-1", 0.1, 0.0, 1.0),
     (Number::MilkyWay, "milky way 0-1", 0.1, 0.0, 1.0),
+    (Number::FogOfWarRange, "fog of war range m", 10.0, 20.0, 2000.0),
 ];
 
 /// `Page` is one page of the menu.
@@ -124,6 +127,7 @@ enum Number {
     HitBlur,
     WormholeTint,
     MilkyWay,
+    FogOfWarRange,
     Visual(VisualsKnob),
 }
 
@@ -158,7 +162,7 @@ pub fn get_held_map_lines(keys: &KeyBindings) -> Vec<(String, bool)> {
             ),
             true,
         ),
-        (MAP_LEGEND.to_string(), false),
+        (SATELLITE_MAP_LEGEND.to_string(), false),
     ]
 }
 
@@ -196,6 +200,7 @@ fn get_number(settings: &PerPlayerSettings, number: Number) -> f64 {
         Number::HitBlur => settings.hit_effects.blur_px,
         Number::WormholeTint => settings.view.wormhole_tint_frac,
         Number::MilkyWay => settings.view.milky_way_brightness_frac,
+        Number::FogOfWarRange => settings.main_map.fog_of_war_range_m,
         Number::Visual(knob) => settings.visuals.get(knob),
     }
 }
@@ -214,6 +219,7 @@ fn get_number_slot(settings: &mut PerPlayerSettings, number: Number) -> &mut f64
         Number::HitBlur => &mut settings.hit_effects.blur_px,
         Number::WormholeTint => &mut settings.view.wormhole_tint_frac,
         Number::MilkyWay => &mut settings.view.milky_way_brightness_frac,
+        Number::FogOfWarRange => &mut settings.main_map.fog_of_war_range_m,
         Number::Visual(knob) => settings.visuals.get_mut(knob),
     }
 }
@@ -528,7 +534,7 @@ impl Menu {
                 return lines;
             }
             Page::Map => {
-                lines.push((MAP_LEGEND.to_string(), false));
+                lines.push((PAPER_MAP_LEGEND.to_string(), false));
                 return lines;
             }
             Page::Scores => {
@@ -575,6 +581,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Row kind | an action (rebound, or cancelled with Escape), a number (stepped, clamped), saving | `rows_rebind_step_and_save` |
     //! | Visuals row (W-51, basic visuals) | stepped up to its highest, down to its lowest, back to 1 | `visuals_rows_step_within_their_ranges` |
+    //! | Fog of war range row | stepped up once, up to its highest, down to its lowest | `the_fog_of_war_range_row_steps_within_its_range` |
     //! | Closing | Escape (the built-in open-menu control), another open-menu control; not the show-map control (`Tab`) | `escape_and_the_menu_key_close_it` |
     //! | Page | the first (SCORES, where the menu opens), turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
     //! | Arrows (W-150, arrow keys and clicks for menu pages) | left and right on a page without rows, on the settings page with the pages' names chosen (turn), with a row chosen (change the number, no turn); Down and Up into the rows, past the first and past the last row back to the names | `arrows_turn_pages_unless_a_row_is_chosen` |
@@ -650,7 +657,7 @@ mod tests {
         assert!(!menu.is_waiting_for_control && menu.row == 0);
         assert_eq!(
             menu.get_lines(&mine, "", Scoreboard::NoServer)[2].0,
-            MAP_LEGEND
+            PAPER_MAP_LEGEND
         );
         assert_eq!(
             menu.handle(Control::Key(Scancode::Escape), &mut mine),
@@ -725,7 +732,7 @@ mod tests {
         let mine: PerPlayerSettings = PerPlayerSettings::Builtin();
         let lines: Vec<(String, bool)> = get_held_map_lines(&mine.keys);
         assert!(lines[0].0.contains("Tab") && lines[0].1);
-        assert_eq!(lines[1], (MAP_LEGEND.to_string(), false));
+        assert_eq!(lines[1], (SATELLITE_MAP_LEGEND.to_string(), false));
     }
 
     #[test]
@@ -1003,5 +1010,33 @@ mod tests {
                 "{knob:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_fog_of_war_range_row_steps_within_its_range() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::E), &mut mine);
+        let (row, step, low, high): (Row, f64, f64, f64) = get_rows()
+            .into_iter()
+            .find_map(|row| match row {
+                Row::Number(Number::FogOfWarRange, _, step, low, high) => {
+                    Some((row, step, low, high))
+                }
+                _ => None,
+            })
+            .expect("a fog of war range row");
+        move_to(&mut menu, &mut mine, row);
+        let start_m: f64 = mine.main_map.fog_of_war_range_m;
+        menu.handle(Control::Key(Scancode::Right), &mut mine);
+        assert_eq!(mine.main_map.fog_of_war_range_m, start_m + step);
+        let press_count: usize = ((high - low) / step) as usize + 2;
+        for _ in 0..press_count {
+            menu.handle(Control::Key(Scancode::Right), &mut mine);
+        }
+        assert_eq!(mine.main_map.fog_of_war_range_m, high);
+        for _ in 0..press_count {
+            menu.handle(Control::Key(Scancode::Left), &mut mine);
+        }
+        assert_eq!(mine.main_map.fog_of_war_range_m, low);
     }
 }

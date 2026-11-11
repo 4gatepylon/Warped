@@ -2,15 +2,16 @@
 //! `server_settings.yaml`, movement, sprint energy, both guns and their beams, consoles,
 //! respawning, how a hit slows, the flashlight, aiming, thrown wormholes, the map's edge, space and
 //! the black hole, and the warps' pull on walkers (`gravity`, which may be left out); in
-//! `player_settings.yaml`, the view with its head bob, how a hit looks and the
-//! minimap. Each level's `settings.rs` composes them into its `ServerSettings` and
+//! `player_settings.yaml`, the view with its head bob, how a hit looks, the minimap and the main
+//! map. Each level's `settings.rs` composes them into its `ServerSettings` and
 //! `PerPlayerSettings` (City Sphere adds its own `glass`) and reads and checks the files.
 //!
 //! Interface: `MovementSettings`, `SprintEnergySettings`, `HeadBobSettings`, `SniperSettings`,
 //! `RifleSettings`, `BeamSpeckleSettings`, `ShootingSettings`, `ConsoleSettings`,
 //! `RespawnSettings`, `WhenHitSettings`,
 //! `HitEffectSettings`, `FlashlightSettings`, `AimSettings`, `WormholeSettings`, `MapEdgeSettings`,
-//! `SpaceSettings`, `BlackHoleSettings`, `GravitySettings`, `ViewSettings`, `MinimapCorner`, `MinimapSettings`.
+//! `SpaceSettings`, `BlackHoleSettings`, `GravitySettings`, `ViewSettings`, `MinimapCorner`, `MinimapSettings`,
+//! `MainMapSettings`.
 //!
 //! Example: `let rifle: &RifleSettings = &settings.rifle;`
 //!
@@ -510,8 +511,7 @@ pub enum MinimapCorner {
 }
 
 /// `MinimapSettings` is the minimap: whether it shows, the corner it sits in, its radius as a
-/// fraction of the window's height, and how far from the player it reaches (also the circle on
-/// the menu's map page).
+/// fraction of the window's height, and how far from the player it reaches.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct MinimapSettings {
@@ -519,6 +519,14 @@ pub struct MinimapSettings {
     pub corner: MinimapCorner,
     pub radius_frac: f64,
     pub range_m: f64,
+}
+
+/// `MainMapSettings` is the main map: how far from the player the satellite map (shown while
+/// `Tab` is held) stays clear before the fog of war starts.
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct MainMapSettings {
+    pub fog_of_war_range_m: f64,
 }
 
 #[cfg(test)]

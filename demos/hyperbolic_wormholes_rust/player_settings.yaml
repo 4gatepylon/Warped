@@ -70,7 +70,10 @@ minimap:  # The round map of what is around you, a Poincaré disk: straight path
   is_shown: true  # Whether it shows.
   corner: top_right  # Where it sits: top_left, top_right, bottom_left or bottom_right.
   radius_frac: 0.14  # Its radius, as a fraction of the window's height.
-  range_m: 60.0  # How far from you it reaches, in meters (also the circle on the menu's map page).
+  range_m: 60.0  # How far from you it reaches, in meters.
+
+main_map:  # The picture of the whole level from above.
+  fog_of_war_range_m: 60.0  # How far from you the satellite map (held Tab) stays clear, in meters; beyond it is the fog of war.
 
 visuals:  # How the finished picture looks on your screen (W-51), each 1 for none; nothing in the world changes.
   brightness: 1.0  # How bright the picture is, 0.5 to 2 (above 1 brighter).

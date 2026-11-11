@@ -393,7 +393,7 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | `E` (held) | Deactivate a console of the opposing team's pylons (see [Winning a level](#winning-a-level)) |
 | `Q` | Throw your purple wormhole mouth, the next press your green one, then purple again, and so on (see [Thrown wormholes](#thrown-wormholes)) |
 | `1`, `2` (in the lobby) | Join the blue or the red team |
-| `Tab` (held) | Show the whole level's map (the menu's MAP page) over the game while held; the game goes on and the player can still move and look. Letting go hides it. |
+| `Tab` (held) | Show the satellite map (the whole level, live, see [Screen](#screen)) over the game while held; the game goes on and the player can still move and look. Letting go hides it. |
 | `Esc` | Open or close the menu (see [Screen](#screen)), which frees the mouse while it is open; its QUIT page leaves the game. The player stands still while it is open, but the game goes on. |
 | `Q`, `E` (in the menu) | Turn to the menu's previous or next page |
 | `Up`, `Down`, `Return`, `Left`, `Right` (in the menu) | Pick a setting, rebind a key (`Return`, then the new key), change a number |
@@ -442,8 +442,11 @@ What a player sees while playing:
   `player_settings.yaml` (`minimap`).
 - **Console bar:** while a player holds `E` on a console, a bar below the crosshair fills over the
   10 s it takes, and they can't shoot (see [Winning a level](#winning-a-level)).
-- **Map while `Tab` is held:** the MAP page's picture and legend over the dimmed game, which goes on taking the
-  player's input, until `Tab` is let go.
+- **Satellite map, while `Tab` is held:** the whole level from above, live, over the dimmed game, which goes on
+  taking the player's input, until `Tab` is let go. It has the MAP page's marks, plus the player as a disk pointing
+  the way they face, every other player in the game, near or far, as a dot in their team's colour, and a circle of
+  the player's fog of war range around them (`main_map.fog_of_war_range_m` in `player_settings.yaml`, 60 m by
+  default), outside which the picture is darker and blurred: the fog of war. A legend line names the marks.
 - **Menu** (`Esc`, which frees the mouse; `Esc` again closes it and captures the mouse): its name on the first line,
   the names of its five pages on the line under it (the open one in brackets), then the page. It opens on SCORES.
   The left and right arrows, `Q` and `E`, or a click on a page's name turn the pages. On SETTINGS, `Down` or `Up`
@@ -462,14 +465,12 @@ What a player sees while playing:
     speed, motion blur, head bob walking and sprinting, how red, shaky and blurred a hit looks,
     the wormhole colour's strength, the Milky Way's brightness, and the picture's brightness,
     contrast, saturation and gamma, which change only how the finished picture looks on that
-    player's screen, W-51, basic visuals), then a row that saves them to
+    player's screen, W-51, basic visuals, and the satellite map's fog of war range), then a row that saves them to
     `~/.config/warped/player_settings.yaml` (or the `--player-settings` file), which later games
     load. A line below says what changed or went wrong.
-  - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole
-    mouths, the black hole, the spawns, the zones' edges and the map edge, the player as a disk
-    pointing the way they face, a circle of the minimap's reach around them (the rest darker and
-    blurred), and every other player in the game, near or far, as a dot in their team's colour.
-    A legend line names the marks.
+  - MAP: the paper map, the whole level from above and all of it clear, with the ground's relief,
+    structures, consoles, wormhole mouths, the black hole, the spawns, the zones' edges and the
+    map edge. It is not live: no players are on it. A legend line names the marks.
   - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
     and the libraries the game is built on.
   - QUIT: "Do you want to leave the game?"; `Return` or `Y` leaves it (a level run alone quits; the one-window app

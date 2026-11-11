@@ -105,7 +105,7 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 | **minimap render** | The render of the minimap. | |
 | **HUD** | Heads-up display: the information a player sees while walking normally, on top of the scene render. It holds the bars, the minimap, the crosshair, the console bar, the pylon squares and the readouts. The main map is not part of it. | |
 | **health bar**, **energy bar**, **ammo bar** | The HUD's bars, in the bottom left: health, sprint energy, and the ammo of the gun in hand. | "the bars" |
-| **minimap** | A disk in a corner of the HUD (top right by default) that shows the ground within 60 m, with players as dots and shots as lines. | "mini map" |
+| **minimap** | A disk in a corner of the HUD (top right by default) that shows the ground within the minimap's range (`minimap.range_m` in player settings, 60 m by default), with players as dots and shots as lines. | "mini map" |
 | **crosshair** | The mark in the middle of the HUD. Shots leave the eye toward it. | |
 | **console bar** | The bar below the crosshair that fills while the player holds `E` on a console. | |
 | **pylon squares** | At the top centre of the HUD: one square per console of each team, an empty slot once it is turned off, and the **own-team box**, a box in the player's team colour around their own team's squares. | |
@@ -113,8 +113,11 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 | **main menu** | The app's first page: the games on the network to join, joining by an address, hosting, playing alone or against bots, what to play, player settings, credits, quit. | "title screen" |
 | **game menu** | The app's page around a game or match: its status, your team, rejoining, the game master's choice, game settings, player settings, leaving to the main menu. | |
 | **game page** | The page you play in. Its SWG has the scene render, the actual render of the level's world. | The "game". |
-| **level menu** | The page `Esc` opens over the level page, with the sub-pages MATCH, SCORES, SETTINGS, MAP, CREDITS and QUIT. The player stands still while it is open, and the game goes on. | "the menu", "in-level menu", "in-game menu" |
-| **main map** | The picture of the whole level from above, as opposed to the minimap. It is a hidden part of the level page's SWG, shown while `Tab` is held, and the level menu's MAP sub-page shows it too. | "the map", "in-game map", "map page" |
+| **level menu** | The page `Esc` opens over the level page, with the sub-pages MATCH, SCORES, SETTINGS, MAP, CREDITS and QUIT. The player stands still while it is open, and the game goes on. | "the menu", "in-level menu", "in-game menu", "game menu" (the official game menu is the app's page around a game, so ask when the context doesn't settle which) |
+| **main map** | The picture of the whole level from above, as opposed to the minimap. It comes in two kinds, the satellite map and the paper map. | "the map", "in-game map", "map page" |
+| **satellite map** | The main map shown while `Tab` is held, a hidden part of the level page's SWG. It is live: it shows where the players are now, and its fog of war starts at the player's fog of war range. | |
+| **paper map** | The main map on the level menu's MAP sub-page. It shows the whole level clear, with no fog of war, and is not live: no players are on it. | |
+| **fog of war** | The darker, blurred part of the satellite map, behind a white rim: everything farther along the ground from the player than the **fog of war range** (`main_map.fog_of_war_range_m` in player settings, 60 m by default). Other players still show in it. | "blurriness" |
 | **game settings** | The game master's settings of a game, a sub-page of the game menu. The file stays `server_settings.yaml`. | "server settings" |
 | **player settings** | A player's own keys and view, a sub-page of every menu. The file is `player_settings.yaml`. | |
 | **level menu** | The page of a level run alone, outside the app, where a player picks a team: it says CONNECTING, then CONNECTED with each team's head count. In the app, the team is chosen on the game menu. | "team screen" or "lobby" |
@@ -123,7 +126,7 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 | **level menu tooltip** | The help the level menu's `?` shows while the mouse is over it. | |
 
 > NOTE: We may call things that appear over the level page "in-game", such as the "in-game menu" (the level menu) or
-> the "in-game map" (the main map, on `Tab`). That wording is not correct: a game is one that hasn't started. Read
+> the "in-game map" (the satellite map, on `Tab`). That wording is not correct: a game is one that hasn't started. Read
 > it as the official term, and never write it.
 
 ### The SWG model
@@ -142,7 +145,7 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 6. **Shared depth, by design.** Nodes can have any such offsets, but it is almost always recommended, and designed,
    that the UIEs and renders of a group share a similar `z`: the HUD's leaves all have the same `z`, and the HUD is
    on top of the scene render.
-7. **Hidden parts.** A part of an SWG can be hidden until something shows it, as the main map is.
+7. **Hidden parts.** A part of an SWG can be hidden until something shows it, as the satellite map is.
 8. **One SWG per page.** Each page has its own SWG. Leaving the level page for the game menu leaves one SWG for
    another.
 
