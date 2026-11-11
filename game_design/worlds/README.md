@@ -45,6 +45,8 @@ Left and right were checked in the game's code, not only read off the pictures.
 - **Dark Forest.** A player's forward is `R_y(yaw) * −z` and right is `R_y(yaw) * +x`, rendered with a right-handed
   view (`demos/dark_forest_rust/src/game/player.rs`).
 
+> NOTE: Dark Forest will be modified to conform to the Voxel levels' standards in all ways. Because different agents implemented different levels, Dark Forest was unfortunately and randomly implemented slightly differently. No one should ever index on Dark Forest's idiosyncracies as being indicative of what will happen more broadly.
+
 So on the pictures, where blue is on the left, left is the top of the picture. In Dark Forest, where blue is at the
 top, left is the right of the picture.
 
