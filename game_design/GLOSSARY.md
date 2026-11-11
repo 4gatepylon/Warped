@@ -51,7 +51,7 @@ terms.
 | **team** | Blue or red, about 5 players each. The purple level belongs to neither. | |
 | **wavefront**, **attacker**, **defender** | A team's next level to win on the other team's side; the team whose wavefront is being played; the team that owns the level being played. Not built yet. | |
 | **spawn** | Where a team's players enter a level. | |
-| **zone** | One region of a level's world: the blue zone, the middle zone or the red zone. City Sphere has only a blue zone and a red zone. | |
+| **zone** | One region of a level's world: the blue zone, the middle zone or the red zone. City Sphere has only a blue zone and a red zone, and its world doc splits each by floor and glass level (the floor blue zone, the glass level red zone, ...). | |
 | **boundary plane** | The faint see-through wall in a team's colour at the edge of its zone, which stops neither players nor lasers. In City Sphere it is a dome over each team's pylon. | "zone plane", "zone wall" |
 | **route** | One way across the middle zone. | |
 | **floor**, **glass level** | City Sphere's two surfaces to walk on: the floor is the sphere's surface, 24 m from the centre, where the city's blocks stand; the glass level is the inner side of the glass shell, 17 m from the centre, which roofs the floor and holds the pylons. | "outer sphere", "first floor", "street" for the floor; "inner sphere", "second floor", "glass", "glass floor" for the glass level |

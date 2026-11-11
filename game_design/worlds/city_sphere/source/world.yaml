@@ -3,15 +3,15 @@ root: City Sphere
 zones:
   City Sphere:
     shape: {kind: rect, min_px: [56.0, 0], max_px: [2040.0, 1984]}
-    description: "The whole inside of the sphere, unwrapped like a world map: the outer sphere above, the inner sphere below."
+    description: "The whole inside of the sphere, unwrapped like a world map: the floor above, the glass level below."
     zones:
-      - outer sphere blue zone
-      - outer sphere red zone
-      - inner sphere blue zone
-      - inner sphere red zone
-  outer sphere blue zone:
+      - floor blue zone
+      - floor red zone
+      - glass level blue zone
+      - glass level red zone
+  floor blue zone:
     shape: {kind: rect, min_px: [56.0, 0], max_px: [1048.0, 992]}
-    description: The streets on the outer sphere, 24 m from the centre, in the level layout's blue half.
+    description: The floor, 24 m from the centre, in the level layout's blue half.
     objects:
       - blue spawn
       - blue stairs
@@ -28,9 +28,9 @@ zones:
       - lift 0
       - lift 1
       - lift 2
-  outer sphere red zone:
+  floor red zone:
     shape: {kind: rect, min_px: [1048.0, 0], max_px: [2040.0, 992]}
-    description: The streets on the outer sphere, 24 m from the centre, in the level layout's red half.
+    description: The floor, 24 m from the centre, in the level layout's red half.
     objects:
       - red spawn
       - red stairs
@@ -47,9 +47,9 @@ zones:
       - lift 3
       - lift 4
       - lift 5
-  inner sphere blue zone:
+  glass level blue zone:
     shape: {kind: rect, min_px: [56.0, 992], max_px: [1048.0, 1984]}
-    description: The glass level on the inner sphere, 17 m from the centre, in the level layout's blue half.
+    description: The glass level, 17 m from the centre, in the level layout's blue half.
     objects:
       - blue pylon
       - blue cover 0
@@ -58,9 +58,9 @@ zones:
       - blue cover 3
       - blue cover 4
       - blue cover 5
-  inner sphere red zone:
+  glass level red zone:
     shape: {kind: rect, min_px: [1048.0, 992], max_px: [2040.0, 1984]}
-    description: The glass level on the inner sphere, 17 m from the centre, in the level layout's red half.
+    description: The glass level, 17 m from the centre, in the level layout's red half.
     objects:
       - red pylon
       - red cover 0
@@ -72,14 +72,14 @@ zones:
 objects:
   blue spawn:
     shape: {kind: circle, centre_px: [552.0, 496.0], radius_px: 54.4}
-    description: "Where blue's players enter the level, on the streets: two spawn points."
+    description: "Where blue's players enter the level, on the floor: two spawn points."
     layout_name: blue spawn
   blue stairs:
     shape: {kind: polygon, points_px: [[341.8, 495.3], [345.1, 450.6], [371.7, 452.6], [375.8, 453.1],
       [379.9, 453.6], [383.9, 454.1], [387.8, 454.6], [407.2, 457.1], [411.0, 457.6], [433.0, 460.5],
       [443.6, 461.9], [477.3, 466.4], [499.5, 469.4], [523.7, 472.7], [532.4, 473.9], [529.2, 505.5],
       [368.2, 497.3]]}
-    description: The staircase of 48 steps that rises from the streets beside blue's spawn.
+    description: The staircase of 48 steps that rises from the floor beside blue's spawn.
     layout_name: blue stairs 0 to 47
   blue pylon:
     shape: {kind: polygon, points_px: [[242.3, 1478.3], [261.7, 1478.3], [261.7, 1497.7], [242.3, 1497.7]]}
@@ -87,43 +87,43 @@ objects:
     layout_name: blue pylon, blue console
   blue block 0:
     shape: {kind: polygon, points_px: [[388.5, 344.2], [468.5, 325.8], [479.9, 377.2], [405.3, 394.3]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 0
   blue block 1:
     shape: {kind: polygon, points_px: [[389.5, 671.2], [409.4, 600.8], [477.7, 613.0], [465.7, 684.8]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 1
   blue block 2:
     shape: {kind: polygon, points_px: [[268.5, 441.2], [319.7, 379.2], [357.7, 410.0], [306.0, 470.6]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 2
   blue block 3:
     shape: {kind: polygon, points_px: [[292.9, 572.2], [349.7, 566.5], [357.6, 621.5], [297.4, 627.6]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 3
   blue block 4:
     shape: {kind: polygon, points_px: [[161.9, 307.9], [240.9, 280.7], [266.6, 346.2], [195.3, 370.3]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 4
   blue block 5:
     shape: {kind: polygon, points_px: [[150.3, 561.9], [174.8, 473.9], [212.6, 484.0], [188.9, 572.4]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 5
   blue block 6:
     shape: {kind: polygon, points_px: [[414.7, 191.5], [564.2, 201.0], [538.3, 268.4], [421.4, 260.9]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 6
   blue block 7:
     shape: {kind: polygon, points_px: [[398.3, 761.2], [485.1, 736.1], [551.6, 801.9], [443.3, 835.4]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 7
   blue block 8:
     shape: {kind: polygon, points_px: [[112.6, 688.2], [163.3, 646.2], [216.7, 685.6], [166.6, 731.7]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 8
   blue block 9:
     shape: {kind: polygon, points_px: [[164.9, 175.6], [301.9, 163.0], [301.8, 220.8], [194.7, 230.6]]}
-    description: A city block on the streets of blue's half, numbered as in the level layout.
+    description: A city block on the floor of blue's half, numbered as in the level layout.
     layout_name: blue block 9
   blue cover 0:
     shape: {kind: polygon, points_px: [[426.8, 1385.3], [480.6, 1379.8], [482.0, 1396.8], [429.2, 1402.2]]}
@@ -151,13 +151,13 @@ objects:
     layout_name: blue glass cover 5
   red spawn:
     shape: {kind: circle, centre_px: [1544.0, 496.0], radius_px: 54.4}
-    description: "Where red's players enter the level, on the streets: two spawn points."
+    description: "Where red's players enter the level, on the floor: two spawn points."
     layout_name: red spawn
   red stairs:
     shape: {kind: polygon, points_px: [[1333.8, 496.7], [1360.2, 494.7], [1521.2, 486.5], [1524.4, 518.1],
       [1515.7, 519.3], [1491.5, 522.6], [1469.3, 525.6], [1435.6, 530.1], [1425.0, 531.5], [1403.0, 534.4],
       [1399.2, 534.9], [1379.8, 537.4], [1375.9, 537.9], [1371.9, 538.4], [1363.7, 539.4], [1337.1, 541.4]]}
-    description: The staircase of 48 steps that rises from the streets beside red's spawn.
+    description: The staircase of 48 steps that rises from the floor beside red's spawn.
     layout_name: red stairs 0 to 47
   red pylon:
     shape: {kind: polygon, points_px: [[1234.3, 1478.3], [1253.7, 1478.3], [1253.7, 1497.7], [1234.3, 1497.7]]}
@@ -165,43 +165,43 @@ objects:
     layout_name: red pylon, red console
   red block 0:
     shape: {kind: polygon, points_px: [[1382.7, 614.8], [1457.3, 597.7], [1474.0, 647.8], [1394.1, 666.2]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 0
   red block 1:
     shape: {kind: polygon, points_px: [[1385.6, 379.0], [1397.6, 307.2], [1473.8, 320.8], [1453.9, 391.2]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 1
   red block 2:
     shape: {kind: polygon, points_px: [[1259.5, 582.0], [1311.2, 521.4], [1348.7, 550.8], [1297.5, 612.8]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 2
   red block 3:
     shape: {kind: polygon, points_px: [[1283.3, 370.5], [1343.4, 364.4], [1347.9, 419.8], [1291.1, 425.5]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 3
   red block 4:
     shape: {kind: polygon, points_px: [[1157.7, 645.8], [1229.0, 621.7], [1262.4, 684.1], [1183.4, 711.3]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 4
   red block 5:
     shape: {kind: polygon, points_px: [[1143.0, 508.0], [1166.6, 419.6], [1205.2, 430.1], [1180.7, 518.1]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 5
   red block 6:
     shape: {kind: polygon, points_px: [[1397.9, 791.0], [1423.8, 723.6], [1540.8, 731.1], [1547.5, 800.5]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 6
   red block 7:
     shape: {kind: polygon, points_px: [[1377.4, 190.1], [1485.7, 156.6], [1530.8, 230.8], [1444.0, 255.9]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 7
   red block 8:
     shape: {kind: polygon, points_px: [[1104.9, 306.4], [1155.0, 260.3], [1209.0, 303.8], [1158.3, 345.8]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 8
   red block 9:
     shape: {kind: polygon, points_px: [[1170.5, 829.0], [1170.6, 771.2], [1277.7, 761.4], [1307.5, 816.4]]}
-    description: A city block on the streets of red's half, numbered as in the level layout.
+    description: A city block on the floor of red's half, numbered as in the level layout.
     layout_name: red block 9
   red cover 0:
     shape: {kind: polygon, points_px: [[1419.1, 1579.2], [1472.0, 1573.8], [1474.4, 1590.7], [1420.6, 1596.2]]}
@@ -229,25 +229,25 @@ objects:
     layout_name: red glass cover 5
   lift 0:
     shape: {kind: circle, centre_px: [504.6, 369.7], radius_px: 17.2}
-    description: A lift in blue's half, from the streets up to the glass level.
+    description: A lift in blue's half, from the floor up to the glass level.
     layout_name: lift pad 0
   lift 1:
     shape: {kind: circle, centre_px: [504.6, 622.3], radius_px: 17.2}
-    description: A lift in blue's half, from the streets up to the glass level.
+    description: A lift in blue's half, from the floor up to the glass level.
     layout_name: lift pad 1
   lift 2:
     shape: {kind: circle, centre_px: [56.0, 496.0], radius_px: 17.2}
-    description: A lift from the streets up to the glass level, exactly on the line between the halves; it is listed in blue's half.
+    description: A lift from the floor up to the glass level, exactly on the line between the halves; it is listed in blue's half.
     layout_name: lift pad 2
   lift 3:
     shape: {kind: circle, centre_px: [1496.6, 622.3], radius_px: 17.2}
-    description: A lift in red's half, from the streets up to the glass level.
+    description: A lift in red's half, from the floor up to the glass level.
     layout_name: lift pad 3
   lift 4:
     shape: {kind: circle, centre_px: [1496.6, 369.7], radius_px: 17.2}
-    description: A lift in red's half, from the streets up to the glass level.
+    description: A lift in red's half, from the floor up to the glass level.
     layout_name: lift pad 4
   lift 5:
     shape: {kind: circle, centre_px: [1048.0, 496.0], radius_px: 17.2}
-    description: A lift from the streets up to the glass level, exactly on the line between the halves; it is listed in red's half.
+    description: A lift from the floor up to the glass level, exactly on the line between the halves; it is listed in red's half.
     layout_name: lift pad 5
