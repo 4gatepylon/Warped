@@ -1,9 +1,9 @@
 //! `menu.rs` is the in-game menu: its name with a `?` (help shows while the mouse is over it), the
 //! pages' names under it, and the page shown: the settings page, where a player
 //! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
-//! head bob, motion blur, how a hit looks, the wormhole tint, the Milky Way's brightness, the
-//! picture's brightness, contrast, saturation and gamma (W-51, basic visuals), and a row that saves
-//! them), the map page, whose
+//! head bob, motion blur, how a hit looks, the wormhole tint, the Milky Way's brightness, how far
+//! the minimap and the map page's circle reach, the picture's brightness, contrast, saturation
+//! and gamma (W-51, basic visuals), and a row that saves them), the map page, whose
 //! picture the window draws (`map_layout.rs`), the scores page, with each player's team, kills
 //! and deaths from the server, the credits page, with where the game's assets come from
 //! (`credits.rs`), the quit page, which leaves the level, and, when the caller supplies its lines
@@ -70,7 +70,7 @@ const PLAYER_WIDTH: usize = 16;
 const KILLS_WIDTH: usize = 6;
 const DEATHS_WIDTH: usize = 8;
 const LABEL_WIDTH: usize = 24;
-const NUMBERS: [(Number, &str, f64, f64, f64); 9] = [
+const NUMBERS: [(Number, &str, f64, f64, f64); 10] = [
     (
         Number::LookSpeed,
         "mouse look rad/px",
@@ -86,6 +86,7 @@ const NUMBERS: [(Number, &str, f64, f64, f64); 9] = [
     (Number::HitBlur, "hit blur px", 1.0, 0.0, 20.0),
     (Number::WormholeTint, "wormhole tint 0-1", 0.1, 0.0, 1.0),
     (Number::MilkyWay, "milky way 0-1", 0.1, 0.0, 1.0),
+    (Number::MinimapRange, "minimap range m", 10.0, 20.0, 2000.0),
 ];
 
 /// `Page` is one page of the menu.
@@ -124,6 +125,7 @@ enum Number {
     HitBlur,
     WormholeTint,
     MilkyWay,
+    MinimapRange,
     Visual(VisualsKnob),
 }
 
@@ -196,6 +198,7 @@ fn get_number(settings: &PerPlayerSettings, number: Number) -> f64 {
         Number::HitBlur => settings.hit_effects.blur_px,
         Number::WormholeTint => settings.view.wormhole_tint_frac,
         Number::MilkyWay => settings.view.milky_way_brightness_frac,
+        Number::MinimapRange => settings.minimap.range_m,
         Number::Visual(knob) => settings.visuals.get(knob),
     }
 }
@@ -214,6 +217,7 @@ fn get_number_slot(settings: &mut PerPlayerSettings, number: Number) -> &mut f64
         Number::HitBlur => &mut settings.hit_effects.blur_px,
         Number::WormholeTint => &mut settings.view.wormhole_tint_frac,
         Number::MilkyWay => &mut settings.view.milky_way_brightness_frac,
+        Number::MinimapRange => &mut settings.minimap.range_m,
         Number::Visual(knob) => settings.visuals.get_mut(knob),
     }
 }
@@ -575,6 +579,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Row kind | an action (rebound, or cancelled with Escape), a number (stepped, clamped), saving | `rows_rebind_step_and_save` |
     //! | Visuals row (W-51, basic visuals) | stepped up to its highest, down to its lowest, back to 1 | `visuals_rows_step_within_their_ranges` |
+    //! | Minimap range row | stepped up once, up to its highest, down to its lowest | `the_minimap_range_row_steps_within_its_range` |
     //! | Closing | Escape (the built-in open-menu control), another open-menu control; not the show-map control (`Tab`) | `escape_and_the_menu_key_close_it` |
     //! | Page | the first (SCORES, where the menu opens), turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
     //! | Arrows (W-150, arrow keys and clicks for menu pages) | left and right on a page without rows, on the settings page with the pages' names chosen (turn), with a row chosen (change the number, no turn); Down and Up into the rows, past the first and past the last row back to the names | `arrows_turn_pages_unless_a_row_is_chosen` |
@@ -1003,5 +1008,33 @@ mod tests {
                 "{knob:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_minimap_range_row_steps_within_its_range() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::E), &mut mine);
+        let (row, step, low, high): (Row, f64, f64, f64) = get_rows()
+            .into_iter()
+            .find_map(|row| match row {
+                Row::Number(Number::MinimapRange, _, step, low, high) => {
+                    Some((row, step, low, high))
+                }
+                _ => None,
+            })
+            .expect("a minimap range row");
+        move_to(&mut menu, &mut mine, row);
+        let start_m: f64 = mine.minimap.range_m;
+        menu.handle(Control::Key(Scancode::Right), &mut mine);
+        assert_eq!(mine.minimap.range_m, start_m + step);
+        let press_count: usize = ((high - low) / step) as usize + 2;
+        for _ in 0..press_count {
+            menu.handle(Control::Key(Scancode::Right), &mut mine);
+        }
+        assert_eq!(mine.minimap.range_m, high);
+        for _ in 0..press_count {
+            menu.handle(Control::Key(Scancode::Left), &mut mine);
+        }
+        assert_eq!(mine.minimap.range_m, low);
     }
 }
