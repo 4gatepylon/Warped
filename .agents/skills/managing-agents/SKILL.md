@@ -51,6 +51,9 @@ So every agent's work must be findable, pushed, and kept apart from every other 
   the PR's base in, and renumbers its decision and every reference to it if another agent took it first.
 - **Shared code:** tell each agent which shared files and structures others are changing (Rust and Metal structs,
   the network snapshot's bits, the checklist, `DECISIONS.md`), so it expects the conflicts and keeps everyone's work.
+- **Disk space:** every worktree builds its own copy of each crate (about 3 GB per Rust crate), so parallel agents
+  fill the disk fast. Brief every agent with the `disk-space` skill (`.agents/skills/disk-space/`), and remove an
+  agent's worktree once its PR is merged.
 
 ## Subagents you start
 
