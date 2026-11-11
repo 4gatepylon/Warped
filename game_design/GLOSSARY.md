@@ -105,15 +105,15 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 | **readouts** | The HUD's text lines of numbers, such as speed, height, or how fast the player's time runs near a black hole. | |
 | **main menu** | The app's first page: the games on the network to join, joining by an address, hosting, playing alone or against bots, what to play, player settings, credits, quit. | "title screen" |
 | **game menu** | The app's page around a game or match: its status, your team, rejoining, the game master's choice, game settings, player settings, leaving to the main menu. | |
-| **level page** | The page you play in. Its SWG has the scene render, the actual render of the level's world. | |
+| **game page** | The page you play in. Its SWG has the scene render, the actual render of the level's world. | The "game". |
 | **level menu** | The page `Esc` opens over the level page, with the sub-pages MATCH, SCORES, SETTINGS, MAP, CREDITS and QUIT. The player stands still while it is open, and the game goes on. | "the menu", "in-level menu", "in-game menu" |
 | **main map** | The picture of the whole level from above, as opposed to the minimap. It is a hidden part of the level page's SWG, shown while `Tab` is held, and the level menu's MAP sub-page shows it too. | "the map", "in-game map", "map page" |
 | **game settings** | The game master's settings of a game, a sub-page of the game menu. The file stays `server_settings.yaml`. | "server settings" |
 | **player settings** | A player's own keys and view, a sub-page of every menu. The file is `player_settings.yaml`. | |
-| **lobby** | The page of a level run alone, outside the app, where a player picks a team: it says CONNECTING, then CONNECTED with each team's head count. In the app, the team is chosen on the game menu. | "team screen" |
+| **level menu** | The page of a level run alone, outside the app, where a player picks a team: it says CONNECTING, then CONNECTED with each team's head count. In the app, the team is chosen on the game menu. | "team screen" or "lobby" |
 | **banner** | A message over the scene render: YOU DIED with a countdown, `<TEAM> TEAM WINS`, LOADING before a level's first frame, and the connection messages. | |
 | **window title** | The text in the window's title bar: the frame rate, the render time, the GPU's time and the render scale. | |
-| **tooltip** | The help the level menu's `?` shows while the mouse is over it. | |
+| **level menu tooltip** | The help the level menu's `?` shows while the mouse is over it. | |
 
 > NOTE: We may call things that appear over the level page "in-game", such as the "in-game menu" (the level menu) or
 > the "in-game map" (the main map, on `Tab`). That wording is not correct: a game is one that hasn't started. Read
