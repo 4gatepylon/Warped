@@ -1,0 +1,313 @@
+level: Dust
+root: Dust
+zones:
+  Dust:
+    shape: {kind: ellipse, centre_px: [992, 512], radii_px: [960.0, 480.0]}
+    description: The playable ellipse, 256 m long and 128 m wide.
+    zones:
+      - blue zone
+      - middle zone
+      - red zone
+  blue zone:
+    shape: {kind: polygon, points_px: [[32.0, 512.0], [35.7, 470.2], [46.6, 428.6], [64.7, 387.8], [89.9, 347.8],
+      [121.9, 309.1], [160.6, 272.0], [205.6, 236.7], [256.6, 203.5], [313.2, 172.6], [374.9, 144.3],
+      [441.4, 118.8], [512.0, 96.3], [586.3, 77.0], [632.0, 67.0], [632.0, 957.0], [586.3, 947.0], [512.0, 927.7],
+      [441.4, 905.2], [374.9, 879.7], [313.2, 851.4], [256.6, 820.5], [205.6, 787.3], [160.6, 752.0],
+      [121.9, 714.9], [89.9, 676.2], [64.7, 636.2], [46.6, 595.4], [35.7, 553.8]]}
+    description: "Blue's end of the level: everything more than 48 m from the middle on blue's side."
+    objects:
+      - blue spawn
+      - blue bunker
+      - blue left pylon
+      - blue mid pylon
+      - blue right pylon
+      - blue hesco wall 1
+      - blue hesco wall 2
+      - blue hesco wall 3
+      - blue hesco wall 4
+      - blue boulder
+      - blue pillar
+      - blue mesa
+      - blue mouth
+  middle zone:
+    shape: {kind: polygon, points_px: [[632.0, 67.0], [663.7, 60.9], [743.5, 48.4], [825.3, 39.3], [908.3, 33.8],
+      [992.0, 32.0], [1075.7, 33.8], [1158.7, 39.3], [1240.5, 48.4], [1320.3, 60.9], [1352.0, 67.0],
+      [1352.0, 957.0], [1320.3, 963.1], [1240.5, 975.6], [1158.7, 984.7], [1075.7, 990.2], [992.0, 992.0],
+      [908.3, 990.2], [825.3, 984.7], [743.5, 975.6], [663.7, 963.1], [632.0, 957.0]]}
+    description: The 96 m band across the middle of the level, between the team zones.
+    objects:
+      - blue-side field bunker
+      - red-side field bunker
+      - blue-side mesa
+      - red-side mesa
+      - top arch
+      - bottom arch
+      - ruin wall 1
+      - ruin wall 2
+      - ruin wall 3
+      - ruin wall 4
+      - ruin wall 5
+      - ruin wall 6
+      - ruin wall 7
+      - ruin wall 8
+      - pillar 1
+      - pillar 2
+      - pillar 3
+      - pillar 4
+      - pillar 5
+      - pillar 6
+      - pillar 7
+      - pillar 8
+      - boulder 1
+      - boulder 2
+      - boulder 3
+      - boulder 4
+      - boulder 5
+      - boulder 6
+  red zone:
+    shape: {kind: polygon, points_px: [[1352.0, 67.0], [1397.7, 77.0], [1472.0, 96.3], [1542.6, 118.8],
+      [1609.1, 144.3], [1670.8, 172.6], [1727.4, 203.5], [1778.4, 236.7], [1823.4, 272.0], [1862.1, 309.1],
+      [1894.1, 347.8], [1919.3, 387.8], [1937.4, 428.6], [1948.3, 470.2], [1952.0, 512.0], [1948.3, 553.8],
+      [1937.4, 595.4], [1919.3, 636.2], [1894.1, 676.2], [1862.1, 714.9], [1823.4, 752.0], [1778.4, 787.3],
+      [1727.4, 820.5], [1670.8, 851.4], [1609.1, 879.7], [1542.6, 905.2], [1472.0, 927.7], [1397.7, 947.0],
+      [1352.0, 957.0]]}
+    description: "Red's end of the level: everything more than 48 m from the middle on red's side."
+    objects:
+      - red spawn
+      - red bunker
+      - red left pylon
+      - red mid pylon
+      - red right pylon
+      - red hesco wall 1
+      - red hesco wall 2
+      - red hesco wall 3
+      - red hesco wall 4
+      - red boulder
+      - red pillar
+      - red mesa
+      - red mouth
+objects:
+  blue spawn:
+    shape: {kind: circle, centre_px: [212.0, 512.0], radius_px: 18.0}
+    description: Where blue's players enter the level.
+    layout_name: blue spawn
+  blue bunker:
+    shape: {kind: polygon, points_px: [[261.4, 460.6], [262.6, 383.0], [311.4, 383.0], [312.6, 460.6]]}
+    description: The concrete bunker beside blue's spawn.
+    layout_name: blue kazemat
+  blue left pylon:
+    shape: {kind: polygon, points_px: [[353.0, 327.1], [353.2, 306.8], [370.8, 306.8], [371.0, 327.1]]}
+    description: Blue's pylon on blue's left, as seen from blue's spawn facing red.
+    layout_name: blue pylon
+  blue mid pylon:
+    shape: {kind: polygon, points_px: [[291.9, 546.9], [312.1, 546.9], [312.0, 567.1], [292.0, 567.1]]}
+    description: Blue's pylon in the middle, as seen from blue's spawn facing red.
+    layout_name: blue pylon
+  blue right pylon:
+    shape: {kind: polygon, points_px: [[398.3, 726.9], [415.7, 726.9], [415.4, 747.2], [398.6, 747.2]]}
+    description: Blue's pylon on blue's right, as seen from blue's spawn facing red.
+    layout_name: blue pylon
+  blue hesco wall 1:
+    shape: {kind: polygon, points_px: [[236.6, 659.6], [247.4, 659.6], [247.3, 682.8], [247.2, 694.5],
+      [236.8, 694.5], [236.7, 682.8]]}
+    description: A row of 3 Hesco blocks, number 1 counting from blue's spawn outward.
+    layout_name: hesco block
+  blue hesco wall 2:
+    shape: {kind: polygon, points_px: [[532.2, 659.6], [534.4, 648.2], [538.9, 625.4], [549.8, 623.1],
+      [552.0, 634.5], [547.2, 657.3], [544.8, 668.7], [534.4, 671.0]]}
+    description: A row of 4 Hesco blocks, number 2 counting from blue's spawn outward.
+    layout_name: hesco block
+  blue hesco wall 3:
+    shape: {kind: polygon, points_px: [[551.3, 430.2], [551.5, 383.7], [562.5, 383.7], [562.7, 430.2]]}
+    description: A row of 4 Hesco blocks, number 3 counting from blue's spawn outward.
+    layout_name: hesco block
+  blue hesco wall 4:
+    shape: {kind: polygon, points_px: [[442.0, 189.3], [445.3, 178.7], [452.9, 183.1], [462.1, 204.6],
+      [458.9, 215.3], [450.8, 210.7], [446.4, 200.0]]}
+    description: A row of 3 Hesco blocks, number 4 counting from blue's spawn outward.
+    layout_name: hesco block
+  blue boulder:
+    shape: {kind: polygon, points_px: [[314.7, 217.3], [320.1, 191.0], [343.3, 198.8], [338.9, 225.5]]}
+    description: The boulder at the top of the blue zone.
+    layout_name: boulder
+  blue pillar:
+    shape: {kind: polygon, points_px: [[479.7, 556.2], [483.9, 540.1], [499.9, 544.3], [495.7, 560.4]]}
+    description: The sandstone pillar in front of blue's pylons.
+    layout_name: sandstone pillar
+  blue mesa:
+    shape: {kind: polygon, points_px: [[559.5, 787.1], [563.2, 732.8], [631.1, 745.2], [622.0, 798.4]]}
+    description: The sandstone mesa at the bottom edge of the blue zone.
+    layout_name: sandstone mesa
+  blue mouth:
+    shape: {kind: circle, centre_px: [617.2, 213.5], radius_px: 18.0}
+    description: The blue zone's mouth of the wormhole that leads to the red mouth.
+    layout_name: wormhole mouth A
+  red spawn:
+    shape: {kind: circle, centre_px: [1772.0, 512.0], radius_px: 18.0}
+    description: Where red's players enter the level.
+    layout_name: red spawn
+  red bunker:
+    shape: {kind: polygon, points_px: [[1671.4, 563.4], [1722.6, 563.4], [1721.4, 641.0], [1672.6, 641.0]]}
+    description: The concrete bunker beside red's spawn.
+    layout_name: red kazemat
+  red left pylon:
+    shape: {kind: polygon, points_px: [[1568.3, 297.0], [1568.6, 276.8], [1585.4, 276.8], [1585.7, 297.0]]}
+    description: Red's pylon on blue's left, as seen from blue's spawn facing red.
+    layout_name: red pylon
+  red mid pylon:
+    shape: {kind: polygon, points_px: [[1671.9, 477.1], [1672.0, 456.9], [1692.0, 456.9], [1692.1, 477.1]]}
+    description: Red's pylon in the middle, as seen from blue's spawn facing red.
+    layout_name: red pylon
+  red right pylon:
+    shape: {kind: polygon, points_px: [[1613.0, 696.9], [1631.0, 696.9], [1630.8, 717.2], [1613.2, 717.2]]}
+    description: Red's pylon on blue's right, as seen from blue's spawn facing red.
+    layout_name: red pylon
+  red hesco wall 1:
+    shape: {kind: polygon, points_px: [[1736.6, 364.4], [1736.7, 341.2], [1736.8, 329.5], [1747.2, 329.5],
+      [1747.3, 341.2], [1747.4, 364.4]]}
+    description: A row of 3 Hesco blocks, number 1 counting from red's spawn outward.
+    layout_name: hesco block
+  red hesco wall 2:
+    shape: {kind: polygon, points_px: [[1432.0, 389.5], [1436.8, 366.7], [1439.2, 355.3], [1449.6, 353.0],
+      [1451.8, 364.4], [1449.6, 375.8], [1445.1, 398.6], [1434.2, 400.9]]}
+    description: A row of 4 Hesco blocks, number 2 counting from red's spawn outward.
+    layout_name: hesco block
+  red hesco wall 3:
+    shape: {kind: polygon, points_px: [[1421.3, 593.8], [1432.7, 593.8], [1432.5, 640.3], [1421.5, 640.3]]}
+    description: A row of 4 Hesco blocks, number 3 counting from red's spawn outward.
+    layout_name: hesco block
+  red hesco wall 4:
+    shape: {kind: polygon, points_px: [[1521.9, 819.4], [1525.1, 808.7], [1533.2, 813.3], [1542.0, 834.7],
+      [1538.7, 845.3], [1531.1, 840.9]]}
+    description: A row of 3 Hesco blocks, number 4 counting from red's spawn outward.
+    layout_name: hesco block
+  red boulder:
+    shape: {kind: polygon, points_px: [[1640.7, 825.2], [1645.1, 798.5], [1669.3, 806.7], [1663.9, 833.0]]}
+    description: The boulder at the bottom of the red zone.
+    layout_name: boulder
+  red pillar:
+    shape: {kind: polygon, points_px: [[1484.1, 479.6], [1488.3, 463.6], [1504.3, 467.8], [1500.1, 483.9]]}
+    description: The sandstone pillar in front of red's pylons.
+    layout_name: sandstone pillar
+  red mesa:
+    shape: {kind: polygon, points_px: [[1352.9, 278.8], [1362.0, 225.6], [1424.5, 236.9], [1420.8, 291.2]]}
+    description: The sandstone mesa at the top edge of the red zone.
+    layout_name: sandstone mesa
+  red mouth:
+    shape: {kind: circle, centre_px: [1366.8, 810.5], radius_px: 18.0}
+    description: The red zone's mouth of the wormhole that leads to the blue mouth.
+    layout_name: wormhole mouth B
+  blue-side field bunker:
+    shape: {kind: polygon, points_px: [[699.1, 251.5], [807.8, 203.7], [832.0, 267.7], [792.2, 306.1],
+      [717.2, 335.8]]}
+    description: The field bunker on blue's side of the middle.
+    layout_name: blue field bunker
+  red-side field bunker:
+    shape: {kind: polygon, points_px: [[1152.0, 756.3], [1191.8, 717.9], [1266.8, 688.2], [1284.9, 772.5],
+      [1176.2, 820.3]]}
+    description: The field bunker on red's side of the middle.
+    layout_name: red field bunker
+  blue-side mesa:
+    shape: {kind: polygon, points_px: [[806.9, 567.4], [857.1, 528.7], [903.7, 592.6], [854.2, 630.2]]}
+    description: The sandstone mesa on blue's side of the centre.
+    layout_name: sandstone mesa
+  red-side mesa:
+    shape: {kind: polygon, points_px: [[1080.3, 431.4], [1129.8, 393.8], [1177.1, 456.6], [1126.9, 495.3]]}
+    description: The sandstone mesa on red's side of the centre.
+    layout_name: sandstone mesa
+  top arch:
+    shape: {kind: polygon, points_px: [[980.1, 361.4], [981.2, 287.4], [1002.8, 287.4], [1003.9, 361.4]]}
+    description: The sandstone arch halfway along, at the top of the main map.
+    layout_name: sandstone arch
+  bottom arch:
+    shape: {kind: polygon, points_px: [[980.1, 662.7], [1003.9, 662.7], [1002.8, 736.5], [981.2, 736.5]]}
+    description: The sandstone arch halfway along, at the bottom of the main map.
+    layout_name: sandstone arch
+  ruin wall 1:
+    shape: {kind: polygon, points_px: [[619.9, 342.8], [622.4, 337.0], [655.7, 353.8], [653.3, 359.7]]}
+    description: A broken wall, number 1 counting from blue's side to red's.
+    layout_name: ruin wall
+  ruin wall 2:
+    shape: {kind: polygon, points_px: [[703.6, 630.3], [723.9, 581.3], [729.4, 583.8], [708.9, 632.7]]}
+    description: A broken wall, number 2 counting from blue's side to red's.
+    layout_name: ruin wall
+  ruin wall 3:
+    shape: {kind: polygon, points_px: [[800.5, 438.1], [805.7, 434.0], [835.9, 473.7], [830.7, 477.8]]}
+    description: A broken wall, number 3 counting from blue's side to red's.
+    layout_name: ruin wall
+  ruin wall 4:
+    shape: {kind: polygon, points_px: [[896.6, 774.8], [899.1, 770.5], [920.0, 790.4], [917.5, 794.6]]}
+    description: A broken wall, number 4 counting from blue's side to red's.
+    layout_name: ruin wall
+  ruin wall 5:
+    shape: {kind: polygon, points_px: [[1064.0, 233.6], [1066.5, 229.4], [1087.4, 249.2], [1084.9, 253.5]]}
+    description: A broken wall, number 5 counting from blue's side to red's.
+    layout_name: ruin wall
+  ruin wall 6:
+    shape: {kind: polygon, points_px: [[1148.1, 550.3], [1153.3, 546.2], [1183.5, 585.9], [1178.3, 590.0]]}
+    description: A broken wall, number 6 counting from blue's side to red's.
+    layout_name: ruin wall
+  ruin wall 7:
+    shape: {kind: polygon, points_px: [[1254.6, 440.2], [1275.1, 391.3], [1280.4, 393.7], [1260.1, 442.7]]}
+    description: A broken wall, number 7 counting from blue's side to red's.
+    layout_name: ruin wall
+  ruin wall 8:
+    shape: {kind: polygon, points_px: [[1328.3, 670.2], [1330.7, 664.3], [1364.1, 681.2], [1361.6, 687.0]]}
+    description: A broken wall, number 8 counting from blue's side to red's.
+    layout_name: ruin wall
+  pillar 1:
+    shape: {kind: polygon, points_px: [[689.3, 493.0], [709.0, 490.9], [711.1, 510.6], [691.4, 512.7]]}
+    description: A sandstone pillar, number 1 counting from blue's side to red's.
+    layout_name: sandstone pillar
+  pillar 2:
+    shape: {kind: polygon, points_px: [[706.7, 362.7], [726.4, 361.7], [727.5, 383.0], [707.4, 384.0]]}
+    description: A sandstone pillar, number 2 counting from blue's side to red's.
+    layout_name: sandstone pillar
+  pillar 3:
+    shape: {kind: polygon, points_px: [[919.1, 425.7], [920.8, 410.6], [935.5, 412.3], [933.8, 427.5]]}
+    description: A sandstone pillar, number 3 counting from blue's side to red's.
+    layout_name: sandstone pillar
+  pillar 4:
+    shape: {kind: polygon, points_px: [[939.2, 808.2], [956.6, 804.9], [958.6, 828.0], [941.9, 831.2]]}
+    description: A sandstone pillar, number 4 counting from blue's side to red's.
+    layout_name: sandstone pillar
+  pillar 5:
+    shape: {kind: polygon, points_px: [[1025.4, 196.0], [1042.1, 192.8], [1044.9, 215.8], [1027.4, 219.1]]}
+    description: A sandstone pillar, number 5 counting from blue's side to red's.
+    layout_name: sandstone pillar
+  pillar 6:
+    shape: {kind: polygon, points_px: [[1048.5, 611.7], [1050.2, 596.5], [1064.9, 598.3], [1063.2, 613.4]]}
+    description: A sandstone pillar, number 6 counting from blue's side to red's.
+    layout_name: sandstone pillar
+  pillar 7:
+    shape: {kind: polygon, points_px: [[1256.5, 641.0], [1276.6, 640.0], [1277.3, 661.3], [1257.6, 662.3]]}
+    description: A sandstone pillar, number 7 counting from blue's side to red's.
+    layout_name: sandstone pillar
+  pillar 8:
+    shape: {kind: polygon, points_px: [[1272.9, 513.4], [1292.6, 511.3], [1294.7, 531.0], [1275.0, 533.1]]}
+    description: A sandstone pillar, number 8 counting from blue's side to red's.
+    layout_name: sandstone pillar
+  boulder 1:
+    shape: {kind: polygon, points_px: [[655.3, 862.6], [659.0, 833.6], [683.7, 841.3], [678.7, 869.9]]}
+    description: A boulder, number 1 counting from blue's side to red's.
+    layout_name: boulder
+  boulder 2:
+    shape: {kind: polygon, points_px: [[786.9, 625.3], [814.9, 622.4], [816.9, 646.8], [789.5, 649.6]]}
+    description: A boulder, number 2 counting from blue's side to red's.
+    layout_name: boulder
+  boulder 3:
+    shape: {kind: polygon, points_px: [[874.0, 270.8], [894.8, 266.7], [898.1, 287.7], [876.6, 292.0]]}
+    description: A boulder, number 3 counting from blue's side to red's.
+    layout_name: boulder
+  boulder 4:
+    shape: {kind: polygon, points_px: [[1085.9, 736.3], [1107.4, 732.0], [1110.0, 753.2], [1089.2, 757.3]]}
+    description: A boulder, number 4 counting from blue's side to red's.
+    layout_name: boulder
+  boulder 5:
+    shape: {kind: polygon, points_px: [[1167.1, 377.2], [1194.5, 374.4], [1197.1, 398.7], [1169.1, 401.6]]}
+    description: A boulder, number 5 counting from blue's side to red's.
+    layout_name: boulder
+  boulder 6:
+    shape: {kind: polygon, points_px: [[1300.3, 182.7], [1305.3, 154.1], [1328.7, 161.4], [1325.0, 190.4]]}
+    description: A boulder, number 6 counting from blue's side to red's.
+    layout_name: boulder
