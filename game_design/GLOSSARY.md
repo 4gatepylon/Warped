@@ -83,7 +83,8 @@ terms.
 ## Pages and SWGs on the window
 
 Everything the player sees is on the window. The window shows **pages**, and what is on one page is that page's
-**SWG**. This section has the terms, the pages tree, the page graph and the SWG model.
+**SWG**. This section has the terms, the pages tree, the page graph, the SWG model and each
+page's SWG.
 
 ### Terms
 
@@ -175,3 +176,17 @@ picture of the page that marks which row or key leads to which page.
 7. **Hidden parts.** A part of an SWG can be hidden until something shows it, as the main map is.
 8. **One SWG per page.** Each page has its own SWG. Leaving the level page for the game menu leaves one SWG for
    another.
+
+### The main menu's SWG
+
+```text
+main menu
+├── title                                       UIE
+├── games on this network: a row per game       UIEs
+├── rows                                        UIEs
+├── selected-row highlight                      UIE
+├── message                                     UIE, hidden until an action fails
+└── help line                                   UIE
+```
+
+![The main menu, with the row or key that leads to each page marked](pages/main_menu.png)
