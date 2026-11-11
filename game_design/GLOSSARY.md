@@ -83,7 +83,7 @@ terms.
 ## Pages and SWGs on the window
 
 Everything the player sees is on the window. The window shows **pages**, and what is on one page is that page's
-**SWG**. This section has the terms, the pages tree, the page graph, the SWG model and the level page's SWG.
+**SWG**. This section has the terms and the SWG model.
 
 ### Terms
 
@@ -119,46 +119,6 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 > the "in-game map" (the main map, on `Tab`). That wording is not correct: a game is one that hasn't started. Read
 > it as the official term, and never write it.
 
-### The pages tree
-
-The app's pages, each under the page it belongs to. The tree has only pages: what is on a page is its SWG, below.
-
-```text
-window
-├── main menu
-│   ├── join by address
-│   ├── player settings
-│   └── credits
-├── game menu
-│   ├── game settings
-│   └── player settings
-├── level page
-└── level menu
-    ├── MATCH
-    ├── SCORES
-    ├── SETTINGS
-    ├── MAP
-    ├── CREDITS
-    └── QUIT
-```
-
-### The page graph
-
-Which pages each page leads to, from the app's own navigation code (`demos/warped_mvp_rust/src/screens.rs`):
-
-| From | To |
-| --- | --- |
-| main menu | join by address, player settings, credits; game menu (join a game, start one, or go back to the one this app hosts) |
-| join by address | game menu (the game is joined); main menu (`Esc`) |
-| player settings | the page that opened it |
-| credits | main menu |
-| game menu | level page (a round is being played and you have a team, or Rejoin); game settings, player settings; main menu (`Esc`, or Leave) |
-| game settings | game menu |
-| level page | level menu (`Esc`); game menu (the round ends) |
-| level menu | level page (`Esc` resumes); game menu (its QUIT sub-page); its own sub-pages |
-
-`Esc` never quits the app: quitting is a row of the main menu.
-
 ### The SWG model
 
 > NOTE: The SWG is terminology and a mental model only. There is no SWG file and no SWG code, on purpose. Later we
@@ -178,19 +138,3 @@ Which pages each page leads to, from the app's own navigation code (`demos/warpe
 7. **Hidden parts.** A part of an SWG can be hidden until something shows it, as the main map is.
 8. **One SWG per page.** Each page has its own SWG. Leaving the level page for the game menu leaves one SWG for
    another.
-
-### The level page's SWG
-
-```text
-level page
-├── scene render                                             render
-├── HUD
-│   ├── minimap render                                       render
-│   ├── health bar, energy bar, ammo bar                     UIEs
-│   └── crosshair, console bar, pylon squares, readouts      UIEs
-├── banner                                                   UIE
-└── main map                                                 hidden until `Tab`
-```
-
-The 3D world itself (the bots, lasers, pylons, wormholes and the rest) is not in the SWG: the scene render is the
-picture of it. The menus' SWGs are rows of UIEs and are not drawn here.
