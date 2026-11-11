@@ -67,12 +67,14 @@ terms.
 
 | Say | Meaning | Might be called by the user |
 | --- | --- | --- |
-| **the app** | The official game as one program with one window (`warped`, or `Warped.app` on a Mac). | |
+| **the app** | The official game as one program with one window (`warped`, or `Warped.app` on a Mac). | Often called the `client` as well (as in server/client). |
 | **window** | The operating-system window of the app. The official game has exactly one; older demos opened one per level and one for the match. | |
-| **game server** | The headless program that hosts games and matches, and that players join. In the official game it is the program of `demos/warped_match_rust/`. | "match server" |
-| **level server** | The headless program a game server starts to run one round's level: its players, bots, shots and consoles. | |
+| **game server** | The headless program that hosts games and matches, and that players join. In the official game it is the program of `demos/warped_match_rust/`. | "match server" or "server" in the context of interactions in the world when using multiplayer. |
+| **level server** | The headless program a game server starts to run one round's level: its players, bots, shots and consoles. This may not exist in the future | |
 | **starter game** | The old 2D square game with its own `clients/starter/`, `game_server/` and `management_server/`. Historical, to be replaced soon. | "the 2D game" |
-| **management server** | The starter game's program that starts game servers and tracks who may join them. Historical. | |
+| **management server** | The starter game's program that starts game servers and tracks who may join them. A historical version exists, and a new version may be built in the future. | |
 | **cloud** | Game servers on Google Cloud, with a download page ([`infra/`](../infra/README.md)). | |
 | **demo** | A program built to test an idea. Older commits call each level and the match "demos". | |
 | **library** | A Rust crate that levels share, such as `warped_shared`. | |
+
+> NOTE: if any of this seems outdated, ask the user.
