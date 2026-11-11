@@ -54,7 +54,7 @@ terms.
 | **zone** | One region of a level's world: the blue zone, the middle zone or the red zone. City Sphere has only a blue zone and a red zone, and its world doc splits each by floor and glass level (the floor blue zone, the glass level red zone, ...). | |
 | **boundary plane** | The faint see-through wall in a team's colour at the edge of its zone, which stops neither players nor lasers. In City Sphere it is a dome over each team's pylon. | "zone plane", "zone wall" |
 | **route** | One way across the middle zone. | |
-| **floor**, **glass level** | City Sphere's two surfaces to walk on: the floor is the sphere's surface, 24 m from the centre, where the city's blocks stand; the glass level is the inner side of the glass shell, 17 m from the centre, which roofs the floor and holds the pylons. | "outer sphere", "first floor", "street" for the floor; "inner sphere", "second floor", "glass", "glass floor" for the glass level |
+| **floor**, **glass level** | City Sphere's two surfaces to walk on: the floor is the sphere's surface; the glass level is the inner side of the smaller glass shell that roofs the floor. Players stand on the glass level, as on the floor. **Glass**, used as a proper noun ("I am on glass"), is the official short form of the glass level. | "outer sphere", "first floor", "street" for the floor; "inner sphere", "second floor", "glass floor" for the glass level |
 | **level edge** | The soft edge of a level, where players slow down without end as they climb, so they never leave. | "map edge" |
 | **instance** | One particular copy of something that is defined once. Each hesco wall in a world is an instance of the hesco block structure, and a level being played in a round is an instance of that level. | |
 
