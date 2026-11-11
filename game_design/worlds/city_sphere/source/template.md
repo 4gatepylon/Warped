@@ -7,6 +7,8 @@ six lifts lead up to the glass level, and a glowing core hangs in the centre. Pl
 smallest level and is built for close quarters, with no warp objects and one pylon per team, on the glass level. Red's
 spawn and pylon are blue's reflected through the sphere's centre.
 
+> NOTE: often people will just say "glass" and "floor" instead of "the glass level" and vice versa. For example: "I am on glass and it looks like object X is too large." That sort of glass-as-a-proper-noun usage is the officially used short-hand.
+
 The level layout ([`common/maps/city_sphere/map.json`](../../../../common/maps/city_sphere/map.json)) splits the
 sphere into two zones, the blue half and the red half, with no middle zone. This doc splits each half again into the
 floor (24 m from the centre) and the glass level (17 m from the centre), so it has four zones: the floor blue zone, the
