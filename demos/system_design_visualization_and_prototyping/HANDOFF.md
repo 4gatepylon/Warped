@@ -74,7 +74,7 @@ you make:
 
 ## Where everything is
 
-- **Stack of 12 PRs** on `4gatepylon/Warped`, base `staging/user-4gatepylon`, bottom to top. Nothing is merged.
+- **Stack of PRs** on `4gatepylon/Warped`, base `staging/user-4gatepylon`, bottom to top. Nothing is merged.
 
   | PR | Branch | What |
   | --- | --- | --- |
@@ -90,7 +90,7 @@ you make:
   | 567 | `claude/game-design-picture-folders` | Where each design doc's pictures go |
   | 577 | `claude/window-design-mockups` | The window mock-up website |
   | 586 | `claude/prototype-accounts` | Part 1 of this prototype (despite the branch's name) |
-  | see below | `cursor/prototype-2-accounts-fe19` | Part 2: accounts, fake Google, fake Stripe |
+  | 594 | `cursor/prototype-2-accounts-fe19` | Part 2: accounts, fake Google, fake Stripe |
 
   Each later part is a branch `cursor/prototype-<n>-<what>-fe19` on the one before; `git log --oneline
   claude/prototype-accounts..` on the top branch, or the PRs' Stack lines, list them.
@@ -117,7 +117,8 @@ you make:
 - **After each part,** take screenshots of one common flow and attach them to the PR
   (`gh pr edit <n> --body-file body.md --attach <file>`). `make capture-flows` plays every flow in Chrome and
   screenshots it; add each new flow to `scripts/capture_flows.py` and a row to `VERIFY.md`.
-- **Each PR's Stack line** names the layers below and above. When you add a layer, update the line in every PR.
+- **Each PR's Stack line** names the layers below and above. When you add a layer, update the line of the PR
+  below it (the other PRs' layer counts are left as they were, to spare twelve edits per part).
 - Never merge into `staging/global` or `main`, and leave this stack unmerged too: the user wants to review it as a
   whole when they are back. Rebase it when `staging/user-4gatepylon` moves.
 - `AGENTS.md` must stay under 16 KiB. It is within a few bytes of that, so don't add to it.
