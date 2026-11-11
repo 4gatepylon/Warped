@@ -7,7 +7,7 @@ level's length: the blue zone is more than 20 m from the middle on blue's side, 
 side, and the middle zone lies between.
 
 The picture marks the game's map picture of Snow Planet (`demos/snow_planet_rust/map_pictures/snow_planet.png`), with
-blue on the left, so blue's left is the top of the picture and red's left is the bottom. Names follow the
+blue on the left, so left (blue's left) is the top of the picture. Names follow the
 [naming rules](README.md#naming-rules); the layout is
 [`common/maps/snow_planet/map.json`](../../common/maps/snow_planet/map.json).
 
@@ -30,7 +30,7 @@ Snow Planet
 └── red zone
     ├── red spawn
     ├── red left pylon, red right pylon
-    ├── red mid mound, red right mound
+    ├── red mid mound, red left mound
     ├── red left black hole, red right black hole
     └── red mouth
 ```
@@ -59,10 +59,10 @@ Snow Planet
 | Name | What it is | Name in the level layout |
 | --- | --- | --- |
 | **red spawn** | Where red's players enter the level. | red spawn |
-| **red left pylon**, **red right pylon** | Red's two pylons, left and right as seen from red's spawn facing blue. | red pylon |
+| **red left pylon**, **red right pylon** | Red's two pylons, left and right as seen from blue's spawn facing red. | red pylon |
 | **red mid mound** | The snow mound in front of red's spawn. | red snow mound |
-| **red right mound** | The snow mound behind red's right pylon. | red snow mound |
-| **red left black hole**, **red right black hole** | The two black holes at the edge of the red zone, left and right as seen from red's spawn. | black hole north-east, black hole south-east |
+| **red left mound** | The snow mound behind the red left pylon. | red snow mound |
+| **red left black hole**, **red right black hole** | The two black holes at the edge of the red zone, left and right as seen from blue's spawn. | black hole south-east, black hole north-east |
 | **red mouth** | The red zone's mouth of the wormhole that leads to the blue mouth. | wormhole mouth B |
 
 The layout's compass names for the black holes don't match the main map's top and bottom; the world names are the
