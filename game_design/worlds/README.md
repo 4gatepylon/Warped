@@ -9,6 +9,20 @@ pictures beside each file mark the objects with red circles and rectangles and t
 > moved, renamed or removed, or a zone changes), the agent making the change asks the user, or opens a PR, to update
 > the level's file and its pictures in the same change.
 
+## Source and generated files
+
+A level's doc and pictures are generated from one source of truth, level by level as each level moves to it. A level
+folder `<level>/` holds:
+
+- `source/`, written by people and agents: `map.png` (the game's map picture without labels), `world.yaml` (the
+  zones and objects, with their shapes in the picture's pixels) and `template.md` (the doc's prose, with slots).
+- `generated/`, written only by `make generate-world-docs`: `<level>.md`, the map picture, a picture of every object,
+  a picture of the zones, and one picture per zone.
+
+Never edit `generated/` by hand. `make check-world-docs` fails when it is out of date. How to make or change a level's
+source is in the [`level-creation-and-documentation`](../../.agents/skills/level-creation-and-documentation/SKILL.md)
+skill.
+
 ## Levels
 
 One file per level, in the map's order from blue to red:
