@@ -86,6 +86,7 @@ const RIFLE_ROUTE_TIMEOUT_S: f64 = 20.0;
 const RIFLE_ROUTE_RESPAWN_WAIT_S: f64 = 4.0;
 const TARGET_DISTANCE_M: f64 = 7.0;
 const CITY_MAP_LEGEND: &str = "The whole sphere, unrolled: you white, cyan holes to the street";
+const CITY_PAPER_MAP_LEGEND: &str = "The whole sphere, unrolled: cyan holes to the street";
 const MAP_STREET_COLOR: [u8; 4] = [70, 70, 78, 255];
 const MAP_BUILDING_COLOR: [u8; 4] = [140, 105, 85, 255];
 const MAP_COVER_COLOR: [u8; 4] = [150, 165, 190, 255];
@@ -2761,7 +2762,7 @@ fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
             height_frac: MENU_HEIGHT_FRAC,
             is_centered: false,
             dim_frac: HELD_MAP_DIM_FRAC,
-            picture: Some(make_map_picture(session)),
+            picture: Some(make_map_picture(session, true)),
         });
     }
     let menu: &menu::Menu = session.menu_and_map.get_menu()?;
@@ -2782,8 +2783,8 @@ fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
         _ if menu.is_help_shown() => None,
         menu::Page::Map => {
             lines.truncate(TAB_BAR_LINE + 1);
-            lines.push((CITY_MAP_LEGEND.to_string(), false));
-            Some(make_map_picture(session))
+            lines.push((CITY_PAPER_MAP_LEGEND.to_string(), false));
+            Some(make_map_picture(session, false))
         }
         menu::Page::Scores => {
             menu::get_own_team_lines(scoreboard).map(super::make_team_box_picture)
@@ -2975,10 +2976,14 @@ fn render_map_picture(arguments: &Arguments, renderer: &mut dyn Renderer) -> Res
     Ok(())
 }
 
-/// `make_map_picture` gives the menu's map page picture: the whole sphere unrolled (the
-/// rendered `assets/map_picture.png`, or else `make_map_base`'s drawing), with consoles as squares in their team's colour (dark once off), the other
-/// players as dots in their team's colour and this player in white, centred in the page's map area.
-fn make_map_picture(session: &CitySession) -> Picture {
+/// `make_map_picture` gives the main map's picture, centred in the page's map area: the whole
+/// sphere unrolled (the rendered `assets/map_picture.png`, or else `make_map_base`'s drawing), with
+/// consoles as squares in their team's colour. The satellite map (`is_live`, while the show-map
+/// control is held) darkens the consoles that are off and adds the other players as dots in their
+/// team's colour and this player in white; the paper map (the level menu's MAP sub-page) doesn't.
+///
+/// Example: `let picture = make_map_picture(&session, true);`
+fn make_map_picture(session: &CitySession, is_live: bool) -> Picture {
     let size_px: (usize, usize) = get_map_picture_px();
     let mut pixels: Vec<u8> = session
         .map_base
@@ -2999,7 +3004,7 @@ fn make_map_picture(session: &CitySession) -> Picture {
         }
     };
     for console in &session.world.consoles {
-        let is_off: bool = session.client.game.off_mask >> console.index & 1 == 1;
+        let is_off: bool = is_live && session.client.game.off_mask >> console.index & 1 == 1;
         let color: [f32; 4] = if is_off {
             MINIMAP_OFF_COLOR
         } else {
@@ -3015,7 +3020,7 @@ fn make_map_picture(session: &CitySession) -> Picture {
         .client
         .players
         .iter()
-        .filter(|p| Some(p.id) != session.client.id)
+        .filter(|p| is_live && Some(p.id) != session.client.id)
     {
         draw_square(
             player.frame.w_axis.truncate(),
@@ -3023,7 +3028,9 @@ fn make_map_picture(session: &CitySession) -> Picture {
             TEAM_COLORS[player.team as usize % 2],
         );
     }
-    draw_square(session.player.feet, MAP_SELF_HALF_PX, MINIMAP_SELF_COLOR);
+    if is_live {
+        draw_square(session.player.feet, MAP_SELF_HALF_PX, MINIMAP_SELF_COLOR);
+    }
     let size_mask_px: [i32; 2] =
         [size_px.0 as i32, size_px.1 as i32].map(|n| n / PICTURE_PX_PER_MASK_PX);
     let min_mask_px: [i32; 2] = [0, 1].map(|a| {

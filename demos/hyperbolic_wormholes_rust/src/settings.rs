@@ -39,7 +39,7 @@ pub use crate::play_settings::{
 #[allow(unused_imports)]
 pub use crate::play_settings::{HeadBobSettings, MinimapCorner};
 #[cfg(target_os = "macos")]
-pub use crate::play_settings::{HitEffectSettings, MinimapSettings, ViewSettings};
+pub use crate::play_settings::{HitEffectSettings, MainMapSettings, MinimapSettings, ViewSettings};
 #[cfg(target_os = "macos")]
 use warped_shared::visuals::VisualsSettings;
 
@@ -98,7 +98,7 @@ const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 7] = [
+const ADDED_PLAYER_KEYS: [&str; 8] = [
     "visuals",
     "keys.switch_view",
     "view.milky_way_brightness_frac",
@@ -106,6 +106,7 @@ const ADDED_PLAYER_KEYS: [&str; 7] = [
     "view.head_bob.gun_sprint_sway_m",
     "view.head_bob.rifle_walk_swing_rad",
     "view.head_bob.rifle_sprint_swing_rad",
+    "main_map",
 ];
 
 /// `Result` is this module's result type.
@@ -120,6 +121,7 @@ struct PlayerFile {
     view: ViewSettings,
     hit_effects: HitEffectSettings,
     minimap: MinimapSettings,
+    main_map: MainMapSettings,
     visuals: VisualsSettings,
 }
 
@@ -130,6 +132,7 @@ pub struct PerPlayerSettings {
     pub view: ViewSettings,
     pub hit_effects: HitEffectSettings,
     pub minimap: MinimapSettings,
+    pub main_map: MainMapSettings,
     pub visuals: VisualsSettings,
 }
 
@@ -408,7 +411,7 @@ impl PerPlayerSettings {
         let mut file: PlayerFile =
             serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
         key_bindings::upgrade_saved_names(&mut file.keys);
-        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
+        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap, "main_map": file.main_map});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         for (key, value_frac) in [
             ("view.wormhole_tint_frac", file.view.wormhole_tint_frac),
@@ -430,6 +433,7 @@ impl PerPlayerSettings {
             view: file.view,
             hit_effects: file.hit_effects,
             minimap: file.minimap,
+            main_map: file.main_map,
             visuals: file.visuals,
         })
     }
@@ -452,6 +456,7 @@ impl PerPlayerSettings {
             view: self.view.clone(),
             hit_effects: self.hit_effects.clone(),
             minimap: self.minimap.clone(),
+            main_map: self.main_map,
             visuals: self.visuals,
         };
         serde_yaml::to_string(&file).expect("player settings serialize to YAML")

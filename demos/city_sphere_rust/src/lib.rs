@@ -3994,7 +3994,7 @@ impl Session {
                 dim_frac: MENU_DIM_FRAC,
                 picture: match menu.get_page() {
                     _ if menu.is_help_shown() => None,
-                    menu::Page::Map => Some(self.make_map_picture()),
+                    menu::Page::Map => Some(self.make_paper_map_picture()),
                     menu::Page::Scores => {
                         menu::get_own_team_lines(scoreboard).map(make_team_box_picture)
                     }
@@ -4009,7 +4009,7 @@ impl Session {
                 height_frac: MENU_HEIGHT_FRAC,
                 is_centered: false,
                 dim_frac: HELD_MAP_DIM_FRAC,
-                picture: Some(self.make_map_picture()),
+                picture: Some(self.make_satellite_map_picture()),
             });
         }
         let [title, detail] = self.get_banner_lines()?;
@@ -4023,12 +4023,21 @@ impl Session {
         })
     }
 
-    /// `make_map_picture` gives the map page's picture: the whole map from above
-    /// (`map_layout.rs`) with this player on it and, in a game on a server, every other player in
-    /// the game, centred in the page's area for it.
+    /// `make_paper_map_picture` gives the level menu's MAP sub-page picture, the paper map: the
+    /// whole map from above (`map_layout.rs`), all of it clear and without any player.
     ///
-    /// Example: `let picture = self.make_map_picture();`
-    fn make_map_picture(&self) -> Picture {
+    /// Example: `let picture = self.make_paper_map_picture();`
+    fn make_paper_map_picture(&self) -> Picture {
+        self.place_map_picture(self.map_layout.get_pixels().to_vec())
+    }
+
+    /// `make_satellite_map_picture` gives the picture shown while the show-map control is held,
+    /// the satellite map: the whole map from above (`map_layout.rs`) with this player on it, the
+    /// fog of war farther than `main_map.fog_of_war_range_m` from them and, in a game on a server,
+    /// every other player in the game where they are now.
+    ///
+    /// Example: `let picture = self.make_satellite_map_picture();`
+    fn make_satellite_map_picture(&self) -> Picture {
         let feet: glam::DMat4 = match &self.voxel {
             Some(voxel) => voxel.player.get_feet_frame(&voxel.world),
             None => self.player.frame,
@@ -4037,6 +4046,19 @@ impl Session {
             Some(multiplayer) => get_points_and_teams(&multiplayer.client.players),
             None => Vec::new(),
         };
+        self.place_map_picture(self.map_layout.draw_players(
+            feet,
+            self.get_team(),
+            self.player_settings.main_map.fog_of_war_range_m,
+            &others,
+        ))
+    }
+
+    /// `place_map_picture` centres a picture of the whole map (`map_layout.rs`'s size) in the
+    /// page's area for it.
+    ///
+    /// Example: `let picture = self.place_map_picture(self.map_layout.get_pixels().to_vec());`
+    fn place_map_picture(&self, pixels: Vec<u8>) -> Picture {
         let size_px: (u32, u32) = self.map_layout.get_size_px();
         let size_mask_px: [i32; 2] =
             [size_px.0 as i32, size_px.1 as i32].map(|n| n / PICTURE_PX_PER_MASK_PX);
@@ -4045,12 +4067,7 @@ impl Session {
                 + (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a] - size_mask_px[a]) / 2
         });
         Picture {
-            pixels: self.map_layout.draw_players(
-                feet,
-                self.get_team(),
-                self.player_settings.minimap.range_m,
-                &others,
-            ),
+            pixels,
             size_px,
             min_mask_px,
             max_excl_mask_px: [0, 1].map(|a| min_mask_px[a] + size_mask_px[a]),

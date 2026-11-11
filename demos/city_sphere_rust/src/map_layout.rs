@@ -1,14 +1,14 @@
-//! `map_layout.rs` draws a whole map seen from above, for the menu's map page: a picture in the
+//! `map_layout.rs` draws a whole map seen from above, for the main map: a picture in the
 //! map's Fermi coordinates (`common/maps/README.md`), u to the right and v down, with the top of
 //! every structure and box in its material's colour (brighter the higher it stands), the ground's
 //! relief, everything shaded as if lit from the top left, the consoles, the black hole and wormhole
-//! mouths, the spawns, the team zones' edges, the playable boundary, and, on each frame, the player
-//! with a circle of what is within reach of them (the rest darker and blurred) and the other
-//! players as dots in their team's colour. It also lends the picture without labels, and where it
-//! lies, to the minimap.
+//! mouths, the spawns, the team zones' edges and the playable boundary. The paper map is that
+//! picture alone; the satellite map adds, on each frame, the player with a circle of what is within
+//! reach of them (the rest, the fog of war, darker and blurred) and the other players as dots in
+//! their team's colour. It also lends the picture without labels, and where it lies, to the minimap.
 //!
-//! Interface: `MapLayout` (`FromMap`, `draw_players`, `get_size_px`, `get_plain_pixels`,
-//! `get_placement`, `get_curvature_radius_m`).
+//! Interface: `MapLayout` (`FromMap`, `draw_players`, `get_size_px`, `get_pixels`,
+//! `get_plain_pixels`, `get_placement`, `get_curvature_radius_m`).
 //!
 //! Example: `let pixels = layout.draw_players(feet_frame, 0, 60.0, &others);`
 //!
@@ -268,6 +268,14 @@ impl MapLayout {
     /// Example: `let (width_px, height_px) = layout.get_size_px();`
     pub fn get_size_px(&self) -> (u32, u32) {
         self.size_px
+    }
+
+    /// `get_pixels` gives the picture with its labels and without players (RGBA, top row first),
+    /// the paper map.
+    ///
+    /// Example: `let pixels = layout.get_pixels();`
+    pub fn get_pixels(&self) -> &[u8] {
+        &self.pixels
     }
 
     /// `get_plain_pixels` gives the picture without its labels (RGBA, top row first), for the

@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::key_bindings::{self, KeyBindings};
-use crate::play_settings::{HitEffectSettings, MinimapSettings, ViewSettings};
+use crate::play_settings::{HitEffectSettings, MainMapSettings, MinimapSettings, ViewSettings};
 use crate::visuals::{VISUALS_ROWS, VisualsSettings};
 
 /// `Result` is this module's result type.
@@ -53,7 +53,7 @@ const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 7] = [
+const ADDED_PLAYER_KEYS: [&str; 8] = [
     "visuals",
     "keys.switch_view",
     "view.milky_way_brightness_frac",
@@ -61,6 +61,7 @@ const ADDED_PLAYER_KEYS: [&str; 7] = [
     "view.head_bob.gun_sprint_sway_m",
     "view.head_bob.rifle_walk_swing_rad",
     "view.head_bob.rifle_sprint_swing_rad",
+    "main_map",
 ];
 const AT_MOST_1_KEYS: [&str; 2] = ["view.wormhole_tint_frac", "view.milky_way_brightness_frac"];
 
@@ -133,6 +134,7 @@ struct PlayerFile {
     view: ViewSettings,
     hit_effects: HitEffectSettings,
     minimap: MinimapSettings,
+    main_map: MainMapSettings,
     visuals: VisualsSettings,
 }
 
@@ -142,6 +144,7 @@ pub struct PerPlayerSettings {
     pub view: ViewSettings,
     pub hit_effects: HitEffectSettings,
     pub minimap: MinimapSettings,
+    pub main_map: MainMapSettings,
     pub visuals: VisualsSettings,
 }
 
@@ -272,7 +275,7 @@ impl PerPlayerSettings {
         let mut file: PlayerFile = serde_json::from_value(value.clone())
             .map_err(|error| format!("settings {source}: {error}"))?;
         key_bindings::upgrade_saved_names(&mut file.keys);
-        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
+        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap, "main_map": file.main_map});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         for key in AT_MOST_1_KEYS {
             let value_frac: f64 = key
@@ -293,6 +296,7 @@ impl PerPlayerSettings {
             view: file.view,
             hit_effects: file.hit_effects,
             minimap: file.minimap,
+            main_map: file.main_map,
             visuals: file.visuals,
         })
     }
@@ -325,6 +329,7 @@ impl PerPlayerSettings {
             view: self.view.clone(),
             hit_effects: self.hit_effects.clone(),
             minimap: self.minimap.clone(),
+            main_map: self.main_map,
             visuals: self.visuals,
         };
         serde_json::to_value(&file).expect("player settings serialize to JSON")
