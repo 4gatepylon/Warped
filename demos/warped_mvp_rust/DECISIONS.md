@@ -8,10 +8,10 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   hands it the window, and SDL's renderer can't share a layer with Metal. A page is drawn again only
   when it changes, so the menus cost the GPU one copy per change. It keeps the match window's look.
   **Weigh in** if the menus should look richer (a real font, pictures behind them).
-- **Escape never quits.** In a level it opens the in-level menu, in the in-level menu it resumes, in
-  the game menu it goes to the main menu (the user's rule), on the main menu it does nothing.
-  Quitting is the main menu's or the in-level menu's Quit row, or closing the window.
-- **A hosted game outlives leaving its game menu**: leaving goes to the main menu and the match
+- **Escape never quits.** In a level it opens the level menu, in the level menu it resumes, in
+  the map menu it goes to the main menu (the user's rule), on the main menu it does nothing.
+  Quitting is the main menu's or the level menu's Quit row, or closing the window.
+- **A hosted game outlives leaving its map menu**: leaving goes to the main menu and the match
   server keeps running, with "Back to the game you host" and "Stop hosting" rows there, so an
   Escape too many never ends a game for everyone in it.
 - **The game master's choice is free play on one level, or the match**: choosing a level sets the
@@ -21,7 +21,7 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   intermission, so every player follows. The match's 30-minute clock keeps running during free play.
   **Weigh in** on both.
 - **"Hop into any map" from the main menu** is the same free play: the app hosts a match server and
-  sends it the chosen level, so a one-level game is still a match server with its game menu, beacon
+  sends it the chosen level, so a one-level game is still a match server with its map menu, beacon
   and bots.
 - **Playing alone runs a bot on the other team that sits out every round** (the match client's
   `--bot-round-winners`, naming the player's team for 255 rounds), because a round starts only when
@@ -42,15 +42,15 @@ Decisions made instead of the user while building `warped` (W-141, one window fo
   the levels. Dust's package is renamed `dust` (its binary keeps the name `hyperbolic-wormholes`),
   because Cargo can't put two packages named `hyperbolic-wormholes` (Dust and Lunar Surface) in one
   lockfile. The stand-in screen stays for a level without a library.
-- **Leaving a level keeps you out of its round** (the game menu's Rejoin brings you back), and a
-  level that fails shows its error on the game menu, so a broken level never traps the player.
+- **Leaving a level keeps you out of its round** (the map menu's Rejoin brings you back), and a
+  level that fails shows its error on the map menu, so a broken level never traps the player.
 - **Frame times inside the app are wall-clock frame intervals** (`warped --tour-levels`: from one
   frame's start to the next's, as the level asks the app once a frame), which include waiting for
   the display, not GPU time alone.
 - **Player settings moved to `warped_shared::player_settings`** (Lunar Surface's code, the
   reference, with W-140's key upgrade) so the app and the levels share one reader; the levels still
   use their own copies until they become libraries, which should switch them over. The app's page
-  edits every key binding and the in-level menu's nine numbers with the shared
+  edits every key binding and the level menu's nine numbers with the shared
   `settings_editor`, which the game master's settings page will use too.
 - **Game settings are sections by key, not by level definition** (W-158, per-map game settings):
   a key at least two levels' settings files have is in the shared section, laid over every level

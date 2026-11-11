@@ -411,7 +411,7 @@ The screens a player meets, in order:
   pop-up saying why, and the title screen comes back.
 - **Loading:** before the first frame, a black screen titled LOADING names what is loading (the surface textures,
   the shaders, each gun) over a bar like the console bar, filling as it goes.
-- **Lobby** (the team screen): it says CONNECTING until the server answers, then CONNECTED with how many players
+- **Lobby**: it says CONNECTING until the server answers, then CONNECTED with how many players
   each team has. `1` joins blue and `2` joins red; it then says JOINING THE GAME until the server lets the player
   in. A player can't shoot from the lobby.
 - **Connection banners:** when a window can't play on its server, a banner says why, and the terminal says what to
@@ -475,7 +475,7 @@ What a player sees while playing:
   - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
     and the libraries the game is built on.
   - QUIT: "Do you want to leave the game?"; `Return` or `Y` leaves it (a level run alone quits; the one-window app
-    goes back to its game menu), and `Esc` goes back to the game.
+    goes back to its map menu), and `Esc` goes back to the game.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the
   screen shakes (each player's own setting).
 - **Motion blur:** a slight one (each player's own setting).

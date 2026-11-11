@@ -118,16 +118,16 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 | **pylon squares** | The HUD's squares for the consoles of each team, with the **own-team box**, a box in the player's team colour around their own team's squares. | |
 | **readouts** | The HUD's text lines of numbers, such as speed, height, or how fast the player's time runs near a black hole. | |
 | **main menu** | The app's first page, where a player finds, joins or hosts a game. | "title screen" |
-| **game menu** | The app's page around a game or match, such as its status and the player's team. | |
+| **map menu** | The app's page around a game or match, with its map's levels, such as the game's status and the player's team. | "game menu" (which may also mean the level menu, so ask when the context doesn't settle which) |
 | **game page** | The page you play in. Its SWG has the scene render, the actual render of the level's world. | The "game". |
-| **level menu** | The page that opens over the level page when the player asks for the menu. Its parts, such as SCORES, are sub-pages. | "the menu", "in-level menu", "in-game menu", "game menu" (the official game menu is the app's page around a game, so ask when the context doesn't settle which) |
+| **level menu** | The page that opens over the level page when the player asks for the menu. Its parts, such as SCORES, are sub-pages. | "the menu", "in-level menu", "in-game menu", "game menu" (which may also mean the map menu, so ask when the context doesn't settle which) |
 | **main map** | The picture of the whole level from above, as opposed to the minimap. It comes in two kinds, the satellite map and the paper map. | "the map", "in-game map", "map page" |
 | **satellite map** | The main map that is live: it shows where the players are now, over the level page. | |
 | **paper map** | The main map that is not live, like a map on paper: no players are on it. | |
 | **fog of war** | The darker, blurred part of a main map: everything farther along the ground from the player than the **fog of war range** (`main_map.fog_of_war_range_m` in player settings). | "blurriness" |
 | **game settings** | The game master's settings of a game. The file stays `server_settings.yaml`. | "server settings" |
 | **player settings** | A player's own keys and view. The file is `player_settings.yaml`. | |
-| **level menu** | The page of a level run alone, outside the app, where a player picks a team. | "team screen" or "lobby" |
+| **lobby** | The page of a level run alone, outside the app, where a player picks a team. | "team screen" |
 | **banner** | A message over the scene render, such as YOU DIED or LOADING. | |
 | **window title** | The text in the window's title bar, such as the frame rate. | |
 | **level menu tooltip** | The help the level menu's `?` shows while the mouse is over it. | |
@@ -153,7 +153,7 @@ Everything the player sees is on the window. The window shows **pages**, and wha
    that the UIEs and renders of a group share a similar `z`: the HUD's leaves all have the same `z`, and the HUD is
    on top of the scene render.
 7. **Hidden parts.** A part of an SWG can be hidden until something shows it, as the satellite map is.
-8. **One SWG per page.** Each page has its own SWG. Leaving the level page for the game menu leaves one SWG for
+8. **One SWG per page.** Each page has its own SWG. Leaving the level page for the map menu leaves one SWG for
    another.
 
 ## World objects

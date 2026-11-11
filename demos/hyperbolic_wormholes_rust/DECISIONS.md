@@ -1286,7 +1286,7 @@ users will want to see where on the map they are pretty often". This replaces D8
     mouse.
   - **Quit:** the menu has a fifth page, QUIT, last, so `Esc` then `Q` reaches it from SCORES. `Return` or `Y` there
     leaves the level (`MenuOutcome::LeaveLevel`, then `PlayOutcome::LeaveLevel` from `handle_event`): a level run
-    alone quits, and the one-window app (W-141, one window for the whole game) will go back to its game menu. The
+    alone quits, and the one-window app (W-141, one window for the whole game) will go back to its map menu. The
     window's close button still quits at once.
   - **MATCH page:** inside the one-window app the menu also shows a MATCH page first, with the match's status as
     lines the app supplies (`Menu::set_match_lines`); a level run alone supplies none, so the page doesn't show.
@@ -1446,14 +1446,14 @@ users will want to see where on the map they are pretty often". This replaces D8
     `DEFAULT_PORT` if one announced itself, else the first heard, printing the others.
   - **Server log:** a join now prints the window's address as "their window's address", so it isn't mistaken for
     the server's port.
-  - **Shooting (W-78):** a player in a game on a server can shoot only once welcomed: not from the team screen,
+  - **Shooting (W-78):** a player in a game on a server can shoot only once welcomed: not from the lobby,
     while joining, or while out after a hit.
 - **Alternatives:**
   - a version number in the join message (part of W-58, another agent's);
   - a list of servers to pick from, when several announce themselves (more than this needed).
 - **Rationale:** you couldn't join with `1` or `2`, which turned out to be a join sent to a port no server listened
   on, and nothing said so. You asked to cover the cases where a server doesn't answer, and that you can't shoot
-  before leaving the team screen.
+  before leaving the lobby.
 
 ### D92. Playing is only on a game server
 

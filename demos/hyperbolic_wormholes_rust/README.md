@@ -41,7 +41,7 @@ make join-game SERVER=127.0.0.1
   is over it, and the pages' names are on the line under it, the open one in brackets. The left and right arrows
   (while no row of the settings page is chosen), `Q` and `E`, or a click on a page's name turn the menu's pages:
   SCORES, SETTINGS (above), MAP, CREDITS and QUIT (`Return` or `Y` leaves the
-  game; in the one-window app, back to its game menu). MAP is the whole map from above with you on it as a disk in
+  game; in the one-window app, back to its map menu). MAP is the whole map from above with you on it as a disk in
   your team's colour pointing the way you face: the ground's relief, structures brighter the higher they are,
   consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
   zones' edges (dashed) and the playable boundary. The map is drawn in its Fermi coordinates

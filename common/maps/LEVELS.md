@@ -73,7 +73,7 @@ One shared default, and per level only what differs:
    engines read are in it too, with neutral values: `space.curvature_per_map_curvature: 1.0` (the map's own
    curvature), `glass` with City Sphere's values.
 2. **The level's overrides:** `level.json`'s `server_settings`.
-3. **The game's settings:** what the game master sets in the game menu (held by the match server and sent to each
+3. **The game's settings:** what the game master sets in the map menu (held by the match server and sent to each
    level server it starts), or `--server-settings <file>` for a level server run alone: the same shape as the
    default, partial or whole, applied to every level. A level the game master changed on its own adds a fourth
    layer for that level only, of the same shape.
@@ -311,7 +311,7 @@ These would make levels simpler still, but change the game or settings files peo
 
 - **Speeds in m/s:** a map gives speeds and gravity, and settings multiply them (`walk_speed_per_map_speed`), so
   Dust and Snow Planet override the jump time only to cancel their maps' gravity (9.81 instead of 6 m/s²). Settings
-  in m/s and seconds (walk 10 m/s, jump 0.58 s) would need no map speeds and fewer overrides, and the game menu
+  in m/s and seconds (walk 10 m/s, jump 0.58 s) would need no map speeds and fewer overrides, and the map menu
   would show real speeds; Dust's jump would change by about 1e-5 s, and saved settings files would need converting.
 - **Gameplay numbers out of the map:** the blizzard's slow, damage and shot reach and the wind's laser bend are in
   the map, while City Sphere's reflections are in settings. In settings, the game master could tune them too.

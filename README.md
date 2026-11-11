@@ -10,7 +10,7 @@ players can place objects such as black holes that bend the space around them.
 
 The official game so far is [`demos/warped_mvp_rust/`](demos/warped_mvp_rust/README.md): the whole game in
 one window, with a main menu (games on the network, hosting, playing alone or against bots, the five-level
-match or any one level), a game menu, and each round's level. It lives under `demos/` for historical
+match or any one level), a map menu, and each round's level. It lives under `demos/` for historical
 reasons; it is the game, not an experiment.
 
 To play it, on a Mac with Rust installed through Homebrew:
