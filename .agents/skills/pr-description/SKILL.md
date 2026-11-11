@@ -187,5 +187,6 @@ Each agent puts its own name and link in the footer and keeps the lines it adds 
 | Claude Code | `[Claude Code](https://claude.com/claude-code)` | Commit trailer `Co-Authored-By: Claude <model> <noreply@anthropic.com>`, e.g. `Claude Opus 5.5` |
 | Codex | `[Codex](https://openai.com/codex)` | Commit trailer `Co-authored-by: Codex <noreply@openai.com>` |
 | Devin | `[Devin](https://devin.ai)` | `Link to Devin session: <url>` and `Requested by: @<user>` after the footer, where Devin appends them; commits authored by `Devin AI` (`devin-ai-integration[bot]`) |
+| Cursor | `[Cursor](https://cursor.com)` | Commits authored by `Cursor Agent` (`cursoragent@cursor.com`); any `Co-authored-by` trailer the session's commit hook adds |
 
 An agent that isn't in the table adds a row for itself in the same PR.

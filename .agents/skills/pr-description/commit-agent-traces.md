@@ -48,6 +48,7 @@ AGENT TRACES
 | Claude Code, cloud | the id in the session's URL | the session's URL | open the URL |
 | Codex | the session id that `codex resume` lists | `~/.codex/sessions/<year>/<month>/<day>/rollout-<time>-<trace id>.jsonl` | `codex resume <trace id>` |
 | Devin | the id in the `Link to Devin session` URL | that URL | open the URL |
+| Cursor, cloud | the agent id (`bc-...`) in the agent's URL | `https://cursor.com/agents/<trace id>` | open the URL |
 
 Checked on a desktop Claude Code session on 2026-11-10: the first row's variables and file exist, and its command
 printed that session's chat. The other rows come from the agents' documented behavior and were not checked on this
