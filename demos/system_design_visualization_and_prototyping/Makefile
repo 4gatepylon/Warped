@@ -4,6 +4,7 @@
 #     make help: list the targets.
 #     make run-prototype [PORT=<port>]: serve the prototype on this computer until Ctrl-C.
 #     make test: run the tests.
+#     make capture-flows: play every flow in Chrome, check each screen and screenshot it.
 #     make fmt: format and lint with ruff.
 #     make reset-artifacts YES_TO_RESET_ARTIFACTS=1 | INTERACTIVE=1: delete .artifacts/.
 #
@@ -16,12 +17,13 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (each run's database and com
   Recreating them means playing those runs again. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help run-prototype test fmt reset-artifacts
+.PHONY: help run-prototype test capture-flows fmt reset-artifacts
 
 help:
 	@echo "Targets:"
 	@echo "  make run-prototype     Serve the prototype at http://127.0.0.1:$(PORT)/ (PORT=$(PORT))"
 	@echo "  make test              Run the tests"
+	@echo "  make capture-flows     Play every flow in Chrome; screenshots in .artifacts/capture_flows/"
 	@echo "  make fmt               Format and lint the code with ruff"
 	@echo "  make reset-artifacts   Delete .artifacts/ (YES_TO_RESET_ARTIFACTS=1 or INTERACTIVE=1)"
 	@echo ""
@@ -32,6 +34,9 @@ run-prototype:
 
 test:
 	uv run pytest
+
+capture-flows:
+	uv run python scripts/capture_flows.py
 
 fmt:
 	$(RUFF) format .

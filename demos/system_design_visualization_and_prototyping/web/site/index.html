@@ -6,6 +6,7 @@
   - The bar under the simulation controls picks a page; buttons inside the mocked screen go where they would.
   - Live from the simulated backend: the status page, and the console's SETTINGS tab. The rest is made up until a
     later part of the prototype wires it.
+  - The fake Stripe sends the browser to `#paid` after a payment and to `#not-paid` when the player goes back.
   - The bar at the bottom keeps a like or dislike and a note per page; "All feedback" lists them to copy.
 
   Example: `make run-prototype`, then open http://127.0.0.1:8010/site/ in a browser.
@@ -95,6 +96,17 @@
   </div>
 </section>
 
+<section class="window" id="w-paid" data-title="Paid (back from Stripe)">
+  <div class="row"><h1>Thank you</h1><button class="btn small right" data-go="download">HOME</button></div>
+  <div class="box"><p>Your payment went through. Online play is unlocked on your account, for good.</p>
+    <p class="dim">Go back to the game: its Purchase window closes by itself.</p></div>
+</section>
+
+<section class="window" id="w-not-paid" data-title="Not paid (back from Stripe)">
+  <div class="row"><h1>No payment was made</h1><button class="btn small right" data-go="download">HOME</button></div>
+  <div class="box"><p>Nothing was charged. Pay from the game's Purchase window whenever you like.</p></div>
+</section>
+
 <section class="window" id="w-feedback" data-title="All feedback">
   <div class="row"><h1>All feedback</h1><button class="btn small right" data-go="download">HOME</button></div>
   <p class="dim">Kept in this browser only. Copy it and paste it into the chat.</p>
@@ -113,6 +125,7 @@
 </div>
 
 <script src="../shared/api.js"></script>
+<script src="../shared/session.js"></script>
 <script src="../shared/sim_controls.js"></script>
 <script src="../shared/windows.js"></script>
 <script src="site.js"></script>

@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  `index.html` stands in for Google's sign-in page (accounts.google.com): the game app sends the browser here with an
+  OpenID Connect authorize request, the player picks a made-up person, and the page sends the browser back to the app
+  with a one-time code.
+
+  Interface:
+  - URL query: the authorize request (`client_id`, `redirect_uri`, `response_type`, `scope`, `state`, `nonce`,
+    `code_challenge`, `code_challenge_method`), as the real page takes it.
+  - "Use another account" makes up one more person.
+
+  Example: click SIGN IN WITH GOOGLE in http://127.0.0.1:8010/game/, which opens this page.
+
+  Must know:
+  - Gotchas: `google.js` asks the fake Google (`/fake-google/api/`) to check the request and make the code. A wrong
+    request shows Google's error here, as the real page does, instead of going back to the app.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - Fake Google Accounts</title>
+<link rel="stylesheet" href="../shared/look.css">
+<link rel="stylesheet" href="../shared/provider.css">
+</head>
+<body>
+<div class="provider_page">
+  <div class="stand_in">STAND-IN FOR GOOGLE'S SIGN-IN PAGE. Nobody here is real, and no password is asked.</div>
+  <div class="card">
+    <div class="logo google"><span>Fake</span> <span>Goo</span><span>gle</span></div>
+    <h1>Choose an account</h1>
+    <p class="sub">to continue to <b>Warped</b></p>
+    <p class="error" id="google_error"></p>
+    <div id="identities"></div>
+    <details>
+      <summary class="choice">Use another account</summary>
+      <input class="field" id="new_name" placeholder="Full name" value="Henri Poincaré">
+      <input class="field" id="new_email" placeholder="Email" value="henri@example.com">
+      <button class="pay google" id="new_identity">NEXT</button>
+    </details>
+    <p class="fine">To continue, Google will share your name and email address with Warped.</p>
+  </div>
+</div>
+<script src="../shared/api.js"></script>
+<script src="../shared/session.js"></script>
+<script src="../shared/sim_controls.js"></script>
+<script src="google.js"></script>
+</body>
+</html>

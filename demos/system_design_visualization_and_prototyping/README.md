@@ -23,10 +23,15 @@ open http://127.0.0.1:8010/
 | `/game/` | The game app mock-up: the windows of the Mac app, to click through. |
 | `/site/` | The website mock-up: download, rankings, status and the superadmin console. |
 | `/system/` | The system view: components, the messages between them, machines, game servers, the database. |
+| `/fake-google/` | The stand-in for Google's sign-in page, which the app opens. |
+| `/fake-stripe/` | The stand-in for Stripe's payment page, which the app opens. |
 | `/docs` | The backend's API with its schemas, drawn by FastAPI. |
 
 The yellow band at the top of every page is the **simulation controls**. The real game will not have them: they
 skip the clock, set how many simulated players are online, and (in the system view) kill machines and game servers.
+Its second line acts on the account of this browser tab: "act as" any account without Google, add finished matches
+or time played, refund or dispute the purchase, send Stripe's last webhook again, and pick the country the
+connection comes from. Each tab is one computer, so two tabs show what one session per account does.
 
 ## What is simulated so far
 
@@ -35,26 +40,34 @@ component to another is written to the `message` table, which the system view dr
 
 | Component | In the prototype | In the real design |
 | --- | --- | --- |
-| Backend | admits matches under the caps, keeps the wait queue, takes results | the backend service |
+| Game app, browser | the pages `/game/`, `/fake-google/`, `/fake-stripe/` | the Mac app and the player's browser |
+| Backend | admits matches under the caps, keeps the wait queue, takes results; accounts, sessions, purchases (`accounts.py`, `purchases.py`) | the backend service |
+| Google (fake) | `identity_provider.py`: an OpenID Connect provider with made-up people, PKCE and RS256 ID tokens | Google's sign-in |
+| Stripe (fake) | `payment_provider.py`: checkout sessions, test cards, refunds, disputes, signed webhooks | Stripe |
+| Secret Manager | `secret_manager.py`: the keys the backend signs with and shares with Google and Stripe | Google Cloud Secret Manager |
 | Database | SQLite, one file per run | PostgreSQL |
 | Fleet manager | places game servers on machines, keeps spare slots, turns empty machines off | the same |
 | Cloud | boots pretend machines after a delay | a cloud provider |
 | Machines and game servers | rows with a state; a game server's match is a pretend one that lasts a while | real machines running the game server |
 | Simulated players | come online up to a target and ask for matches in tens | real players |
 
-Still to come, one part at a time: accounts with sign-in and payment, a stand-in 2D game with recordings and
-spectating, custom games, matchmaking, rating, fair play, friends and chat.
+Still to come, one part at a time: a stand-in 2D game with recordings and spectating, custom games, matchmaking,
+rating, fair play, friends and chat.
 
 ## Layout
 
-- `src/system_prototype/`: `world.py` (the simulated system), `rules.py` (the rules as plain functions), `store.py`
-  (the tables), `clock.py` (the clock that can skip), `http_api.py` (the routes), `serve.py` (the command).
+- `src/system_prototype/`: `world.py` (the simulated system), `bus.py` (the database and the message log every
+  component shares), `rules.py` and `account_rules.py` (the rules as plain functions), `store.py` (the tables),
+  `clock.py` (the clock that can skip), `http_api.py`, `account_routes.py` and `provider_routes.py` (the routes),
+  `serve.py` (the command), and one file per component named in the table above.
 - `web/`: the pages. `shared/` has the look, the window navigation, the API helper and the simulation controls.
 - `tests/`: unit tests, with the input partitionings they cover in each file's docstring.
+- `scripts/capture_flows.py`: plays each flow in Chrome on a new server, checks every screen and screenshots it.
 
 `make help` lists the commands. Each run of `make run-prototype` writes `.artifacts/serve/<run_id>/`, with its
 `command.txt` and its database, a new world each time; `uv run system-prototype --database-file <path>` carries on
-from a kept one. Screenshots of a flow go in `.artifacts/flow_screenshots/<run_id>/`.
+from a kept one. `make capture-flows` writes `.artifacts/capture_flows/<run_id>/<flow>/<step>.png`, with the
+server's database and log; it needs Google Chrome.
 
 ## Changing the pages
 

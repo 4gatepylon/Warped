@@ -3,6 +3,7 @@
 Interface:
     RuleError: Raised when a request breaks a rule.
     NotFoundError: Raised when a request names something that doesn't exist.
+    AuthError: Raised when a request's credentials are missing, wrong, expired or revoked.
     MachineLoad: How full one machine is.
     has_room_under_caps: Whether one more match fits under the caps.
     pick_machine: Which machine a new game server goes on.
@@ -37,6 +38,17 @@ class NotFoundError(LookupError):
 
     Example:
         >>> raise NotFoundError("There is no setting named max_matches.")
+    """
+
+
+class AuthError(Exception):
+    """`AuthError` says why a request's credentials don't let it in, which HTTP answers with 401.
+
+    Args:
+        message: What was wrong with the credentials.
+
+    Example:
+        >>> raise AuthError("This session was signed out because you signed in elsewhere.")
     """
 
 
