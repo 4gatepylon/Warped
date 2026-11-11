@@ -1,9 +1,9 @@
 # Worlds
 
 A level's **world** is its 3D game world: the place where its actual objects are, such as the ground, structures,
-pylons, warp objects and the sky ([glossary](../GLOSSARY.md#structure-of-play)). Each file here lists one level's
-world as a tree, a "bill of materials" of what exists now: its zones first, then every named object in each zone. Map
-pictures beside each file mark the objects with red circles and rectangles and their names.
+pylons, warp objects and the sky ([glossary](../GLOSSARY.md#structure-of-play)). Each level's doc lists its world as
+a tree, a "bill of materials" of what exists now: its zones first, then every named object in each zone. Map pictures
+beside each doc outline the objects in red and name them.
 
 > NOTE: These files describe the worlds as they are built now. If a level's features change (an object is added,
 > moved, renamed or removed, or a zone changes), the agent making the change asks the user, or opens a PR, to update
@@ -11,8 +11,7 @@ pictures beside each file mark the objects with red circles and rectangles and t
 
 ## Source and generated files
 
-A level's doc and pictures are generated from one source of truth, level by level as each level moves to it. A level
-folder `<level>/` holds:
+A level's doc and pictures are generated from one source of truth. A level folder `<level>/` holds:
 
 - `source/`, written by people and agents: `map.png` (the game's map picture without labels), `world.yaml` (the
   zones and objects, with their shapes in the picture's pixels) and `template.md` (the doc's prose, with slots).
@@ -25,13 +24,13 @@ skill.
 
 ## Levels
 
-One file per level, in the map's order from blue to red:
+One doc per level, in the map's order from blue to red:
 
-- [Dust](dust.md)
-- [Snow Planet](snow_planet.md)
-- [City Sphere](city_sphere.md)
-- [Dark Forest](dark_forest.md)
-- [Lunar Surface](lunar_surface.md)
+- [Dust](dust/generated/dust.md)
+- [Snow Planet](snow_planet/generated/snow_planet.md)
+- [City Sphere](city_sphere/generated/city_sphere.md)
+- [Dark Forest](dark_forest/generated/dark_forest.md)
+- [Lunar Surface](lunar_surface/generated/lunar_surface.md)
 
 ## Naming rules
 
@@ -47,7 +46,7 @@ mean.
 - **Repeated pieces.** A cluster of repeated pieces, such as a row of Hesco blocks, gets one name, and clusters are
   numbered from the team's spawn outward: "blue hesco wall 3".
 
-Each level's file gives every object's name in its level layout (`common/maps/<level>/map.json`) beside its world
+Each level's doc gives every object's name in its level layout (`common/maps/<level>/map.json`) beside its world
 name, so a name can be found in the data.
 
 > NOTE: When developing, left, mid and right are always from blue's perspective. Blue is the official team colour for
@@ -72,7 +71,8 @@ top, left is the right of the picture.
 
 ## The pictures
 
-- Four levels mark the game's own map picture from the repo. Lunar Surface has none yet (making one needs the engine,
-  which runs on a Mac), so its pictures are drawn from its level layout and say so on the image.
-- A level has at most 3 pictures, one per zone where one picture would hold too many names.
-- A thin red line joins a name to its mark when the name had to sit away from it.
+- Every level's `source/map.png` is the game's own map picture, without labels. Lunar Surface's is exported from its
+  level layout by the engine. Dust's and Dark Forest's are scaled up twice so the labels stay in proportion, and City
+  Sphere's is shifted so that each half of the sphere is in one piece.
+- The generator writes a picture of every object, a picture of the zones, and one picture per zone that shows the
+  whole map with everything outside the zone blurred and darkened.
