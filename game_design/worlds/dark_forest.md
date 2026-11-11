@@ -8,7 +8,7 @@ level's length: the blue zone is more than 24 m from the middle on blue's side, 
 side, and the middle zone lies between.
 
 The pictures mark the game's map picture of Dark Forest (`demos/dark_forest_rust/assets/map_picture.png`), with blue at
-the top. Blue faces down the picture, so blue's left is the right of a picture, and red's left is the left. Names
+the top. Blue faces down the picture, so left (blue's left) is the right of a picture. Names
 follow the [naming rules](README.md#naming-rules), with the exceptions at the end of this file; the layout is
 [`common/maps/dark_forest/map.json`](../../common/maps/dark_forest/map.json).
 
@@ -36,8 +36,8 @@ Dark Forest
 │   └── red rock 0, red rock 1
 └── red zone
     ├── red spawn
-    ├── red left pylon, red palisade
-    ├── red right pylon, red treehouse, red treehouse ladder
+    ├── red right pylon, red palisade
+    ├── red left pylon, red treehouse, red treehouse ladder
     ├── red home bridge
     ├── red home gate, mouth A; red home gate, mouth B
     ├── mid gate, red mouth
@@ -89,10 +89,10 @@ Dark Forest
 | Name | What it is | Name in the level layout |
 | --- | --- | --- |
 | **red spawn** | Where red's players enter the level. | red spawn (six spawn points) |
-| **red palisade** | The square fence around red's left pylon. | red palisade |
-| **red left pylon** | Red's pylon inside the palisade, on red's left. | red pylon 0 |
-| **red treehouse** | The treehouse on red's right, which holds red's right pylon. | red treehouse |
-| **red right pylon** | Red's pylon in the treehouse. | red pylon 1 |
+| **red palisade** | The square fence around the red right pylon. | red palisade |
+| **red right pylon** | Red's pylon inside the palisade, on blue's right. | red pylon 0 |
+| **red treehouse** | The treehouse on blue's left, which holds the red left pylon. | red treehouse |
+| **red left pylon** | Red's pylon in the treehouse. | red pylon 1 |
 | **red treehouse ladder** | The rope ladder up to the treehouse. | red treehouse ladder |
 | **red home bridge** | The bridge from the treehouse toward the middle, to the red middle deck. | red home bridge |
 | **red home gate, mouth A**, **red home gate, mouth B** | The two mouths of the wormhole inside the red zone. | gate 3 mouth 0, gate 3 mouth 1 |
