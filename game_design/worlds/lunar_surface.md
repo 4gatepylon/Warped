@@ -12,7 +12,7 @@ describes the level in full.
 > These pictures are drawn from the level layout instead, as squares, circles and Hesco blocks on a flat ellipse, and
 > say so on the image. Replace them with marked map pictures once the game can make one.
 
-The pictures show blue on the left, so blue's left is the top of a picture and red's left is the bottom. The blue and
+The pictures show blue on the left, so left (blue's left) is the top of a picture. The blue and
 red lines are the edges of the team zones, the large circle is how far the black hole bends light, and the triangles
 are the spawns. Names follow the [naming rules](README.md#naming-rules); the layout is
 [`common/maps/lunar_surface/map.json`](../../common/maps/lunar_surface/map.json).
@@ -80,14 +80,14 @@ Lunar Surface
 | --- | --- | --- |
 | **red spawn** | Where red's players enter the level. | red spawn |
 | **red hangar** | The bunker garage that red's spawn is in. | red spawn hangar |
-| **red left pylon**, **red mid pylon**, **red right pylon** | Red's three pylons, left to right as seen from red's spawn facing blue. | red pylon |
+| **red left pylon**, **red mid pylon**, **red right pylon** | Red's three pylons, left to right as seen from blue's spawn facing red. | red pylon |
 | **red hesco wall 1**, **red hesco wall 2** | The two rows of 8 Hesco blocks near the edge of the red zone. | hesco block |
-| **red landing pad** | The landing pad on red's left. | red landing pad |
+| **red landing pad** | The landing pad on blue's right. | red landing pad |
 | **red pad mouth** | The mouth of the wormhole on the landing pad, which leads to the ridge mouth. | wormhole mouth B |
-| **red habitat** | The habitat module on red's right, with glass windows. | red habitat module |
-| **red dome** | The dome on red's right, near the spawn. | red dome |
+| **red habitat** | The habitat module on blue's left, with glass windows. | red habitat module |
+| **red dome** | The dome on blue's left, near the spawn. | red dome |
 | **red walkway** | The walkway near red's spawn, with glass windows. | red walkway |
-| **red watchtower** | The watchtower on red's left, beside the landing pad. | red watchtower |
-| **red antenna** | The antenna near red's spawn, on red's left. | red antenna |
+| **red watchtower** | The watchtower on blue's right, beside the landing pad. | red watchtower |
+| **red antenna** | The antenna near red's spawn, on blue's right. | red antenna |
 | **red crates** | The stack of crates in front of red's mid pylon. | red crates |
-| **red solar array** | The solar array on red's right. | red solar array |
+| **red solar array** | The solar array on blue's left. | red solar array |
