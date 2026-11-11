@@ -81,11 +81,11 @@ Reused from other agents' captures of 2026-11-08, all real game windows or photo
 | Picture | Level | Capture | Commit |
 | --- | --- | --- | --- |
 | `hud_lunar.jpg`, `hud_lunar_bars.jpg`, `hud_lunar_minimap.jpg` | Lunar Surface | The W-126 audit's window frame, 2560×1600, joined to a local server on blue | `6c9a7e1` |
-| `hud_city.jpg`, `minimap_city.jpg` | City Sphere | #429's window captures (HUD after; minimap after, on the street, 2× zoom) | `30e568d` |
+| `hud_city.jpg`, `minimap_city.jpg` | City Sphere | #429's window captures (HUD after; minimap after, on the floor, 2× zoom) | `30e568d` |
 | `city_sniper_beam.jpg`, `city_rifle_beam.jpg` | City Sphere | #435's beam looks, after, 2× zoom | #435's head |
 | `city_throw_flight.jpg`, `city_throw_ring.jpg`, `city_throw_tint.jpg` | City Sphere | #435's `--route wormholes` window frames | #435's head |
 | `city_third_person.jpg` | City Sphere | #435's third person and flashlight frames | #435's head |
-| `city_ground_dust.jpg` | City Sphere | #435's frames of a sniper shot into the street | #435's head |
+| `city_ground_dust.jpg` | City Sphere | #435's frames of a sniper shot into the floor | #435's head |
 | `forest_hud.jpg`, `forest_hit.jpg`, `forest_console_bar.jpg`, `forest_you_died.jpg` | Dark Forest | #431's `--photo --photo-hud` frames (after) | `129bf20` and later |
 | `forest_lift_robot.jpg` | Dark Forest | #426's `lift` bench view, after | #426's head |
 | `forest_gate_robot.jpg` | Dark Forest | #426's photo through the centre gate, after | #426's head |

@@ -270,7 +270,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.92em
     <div class="panel"><h3>Black holes <span>· depth 1 and 2</span></h3><svg id="shot-hole-svg" viewBox="0 0 360 330"></svg>
       <p class="caption">One shooter fires a fan of lasers. Close passes curve around the hole, and the closest fall in. Wormholes carry shots to their other mouth.</p></div>
     <div class="panel"><h3>Inside a sphere <span>· City Sphere</span></h3><svg id="shot-sphere-svg" viewBox="0 0 360 330"></svg>
-      <p class="caption">Gravity pulls outward onto the sphere. Nothing bends light, so lasers fly straight. The glass floor stops shots but not sight.</p></div>
+      <p class="caption">Gravity pulls outward onto the sphere. Nothing bends light, so lasers fly straight. The glass level stops shots but not sight.</p></div>
     <div class="panel"><h3>Hyperbolic <span>· Dust, Lunar Surface</span></h3><svg id="shot-hyperbolic-svg" viewBox="0 0 360 330"></svg>
       <p class="caption">In the Poincaré disk, equal pillars shrink toward the edge, and two lasers fired side by side, in the same direction, spread apart.</p></div>
   </div>
@@ -559,7 +559,7 @@ function trace_photon(start, angle_rad, hole, r_s, bounds) {
 }
 
 /**
- * `draw_sphere_icon` draws the inside-a-sphere space: shell, glass floor and outward gravity.
+ * `draw_sphere_icon` draws the inside-a-sphere space: shell, glass level and outward gravity.
  * @param {Element} parent The element to draw in.
  * @param {number} cx The center x.
  * @param {number} cy The center y.
@@ -900,7 +900,7 @@ function draw_shot_hole() {
 }
 
 /**
- * `draw_shot_sphere` draws City Sphere in cross-section: straight shots, outward gravity and the glass floor.
+ * `draw_shot_sphere` draws City Sphere in cross-section: straight shots, outward gravity and the glass level.
  * @example draw_shot_sphere();
  */
 function draw_shot_sphere() {
@@ -936,9 +936,8 @@ function draw_shot_sphere() {
   draw_player(R_OUTER, SHOOTER_DEG, 'blue');
   draw_player(R_OUTER, TARGET_DEG, 'red');
   draw_player(R_GLASS, GLASS_PLAYER_DEG, 'red');
-  add_label(svg, CX, CY - 6, 'glass floor', { fill: GLASS_COLOR, 'font-size': 12 });
-  add_label(svg, CX, CY + 10, '(2nd floor)', { class: 'small' });
-  add_label(svg, CX + 112, CY + 150, 'outer floor', { class: 'small' });
+  add_label(svg, CX, CY - 6, 'glass level', { fill: GLASS_COLOR, 'font-size': 12 });
+  add_label(svg, CX + 112, CY + 150, 'floor', { class: 'small' });
   add_label(svg, CX + 128, CY - 120, 'gravity', { class: 'small' });
 }
 

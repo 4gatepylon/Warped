@@ -179,15 +179,16 @@ starts the clock again.
 
 ### City Sphere
 
-- Each team has one pylon, on top of the glass floor in an exposed spot with no cover around it.
+- Each team has one pylon, on the glass level in an exposed spot with no cover around it.
   The red spawn and pylon are blue's reflected through the sphere's center, so the two sides sit
   at antipodes.
 - Walls divide the space into close quarters.
-- City Sphere has two floors: the sphere's surface, and the surface of a smaller sphere with the
-  same center, which players walk up to. Gravity pulls outward on both floors.
-- The inner floor is glass and roofs the whole outer floor. Players on either floor see each other
-  through it but can't shoot through it.
-- City Sphere may change to one floor, or to a roof that is only partly glass.
+- City Sphere has two surfaces to walk on: the floor, the sphere's surface, and the glass level,
+  the surface of a smaller sphere with the same center, which players walk up to. Gravity pulls
+  outward on both.
+- The glass level is glass and roofs the whole floor. Players on the floor and on the glass level
+  see each other through it but can't shoot through it.
+- City Sphere may change to the floor alone, or to a roof that is only partly glass.
 
 ### Lunar Surface
 
@@ -487,7 +488,7 @@ What a player sees while playing:
   250 m/s, and each point of it fades soon after the front passes.
 - Bullet drop is a game setting, off by default (`shooting.drop_m_per_s_per_s`, W-157 (bullet drop, by game
   setting); the user: "add setting in game settings for bullet drop"): above 0, every shot's path curves down as a
-  ball thrown at the beam's speed would fall (toward the street in City Sphere), the drawn beam follows it, and
+  ball thrown at the beam's speed would fall (toward the floor in City Sphere), the drawn beam follows it, and
   every window traces it alike from the server's settings.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
@@ -506,7 +507,7 @@ anywhere in the level.
   `Q` does nothing until the pair is gone (death or destruction); a throw that fizzles can be
   thrown again.
 - **Flight:** a mouth is lobbed from the player's hand a little above the crosshair and curves down
-  under its own gravity. It drops to the floor below whatever it hits, and hovers there at eye
+  under its own gravity. It drops to the ground below whatever it hits, and hovers there at eye
   height, facing back the way it flew.
 - **Fizzling:** a throw fizzles if it hasn't landed within its flight time, or if it lands too close
   to a wall or another warp object (their reaches may not overlap).

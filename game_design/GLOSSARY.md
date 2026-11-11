@@ -15,6 +15,9 @@ terms.
   invent or guess a term.
 - **One meaning.** If two terms here seem to fit, or one term seems to mean two things, that is a mistake in this
   file. Ask the user, and fix it.
+- **Consistent with game design.** Every file in [`game_design/`](.) uses these terms. When a term here changes,
+  change the rest of `game_design/` to match in the same change; when you find a file there that disagrees with
+  this one, fix it or ask the user which is right.
 
 ## Sections
 
@@ -50,7 +53,8 @@ terms.
 | **spawn** | Where a team's players enter a level. | |
 | **zone** | One region of a level's world: the blue zone, the middle zone or the red zone. City Sphere has only a blue zone and a red zone. | |
 | **boundary plane** | The faint see-through wall in a team's colour at the edge of its zone, which stops neither players nor lasers. In City Sphere it is a dome over each team's pylon. | "zone plane", "zone wall" |
-| **route**, **floor** | One way across the middle zone; one walkable layer inside a level. | |
+| **route** | One way across the middle zone. | |
+| **floor**, **glass level** | City Sphere's two surfaces to walk on: the floor is the sphere's surface, 24 m from the centre, where the city's blocks stand; the glass level is the inner side of the glass shell, 17 m from the centre, which roofs the floor and holds the pylons. | "outer sphere", "first floor", "street" for the floor; "inner sphere", "second floor", "glass", "glass floor" for the glass level |
 | **level edge** | The soft edge of a level, where players slow down without end as they climb, so they never leave. | "map edge" |
 | **instance** | One particular copy of something that is defined once. Each hesco wall in a world is an instance of the hesco block structure, and a level being played in a round is an instance of that level. | |
 
