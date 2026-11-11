@@ -44,11 +44,11 @@ terms.
 | **round** | One play of one level during a match, which one team wins. | |
 | **level** | One playable space: Dust, Snow Planet, City Sphere, Dark Forest or Lunar Surface. Each level has its own world. | "map", "demo" |
 | **world** | A level's 3D game world: the place where its actual objects are, such as the ground, structures, pylons, warp objects and the sky. | "game world" |
-| **map** | The line of levels a match is played across: the blue levels, one purple level in the middle, then the red levels. The default map has five levels. | |
+| **map** | The line of levels a match is played across: the blue levels, one purple level in the middle, then the red levels. | |
 | **level layout** | The data that says where one level's world has its ground, structures, spawns, pylons, warp objects, lights and sky, in the portable format of [`common/maps/`](../common/maps/README.md). | "map", "map file" |
 | **map layout** | Several level layouts, plus the overall rules that join them into a map, such as which level leads to which. | |
 | **depth** | How far a level is from the purple level: 0 for purple, then 1, 2, ... outward. | |
-| **team** | Blue or red, about 5 players each. The purple level belongs to neither. | |
+| **team** | Blue or red. The purple level belongs to neither. | |
 | **wavefront**, **attacker**, **defender** | A team's next level to win on the other team's side; the team whose wavefront is being played; the team that owns the level being played. Not built yet. | |
 | **spawn** | Where a team's players enter a level. | |
 | **zone** | One region of a level's world: the blue zone, the middle zone or the red zone. City Sphere has only a blue zone and a red zone, and its world doc splits each by floor and glass level (the floor blue zone, the glass level red zone, ...). | |
@@ -109,19 +109,19 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 | **minimap render** | The render of the minimap. | |
 | **HUD** | Heads-up display: the information a player sees while walking normally, on top of the scene render. It holds the bars, the minimap, the crosshair, the console bar, the pylon squares and the readouts. The main map is not part of it. | |
 | **health bar**, **energy bar**, **ammo bar** | The HUD's bars, in the bottom left: health, sprint energy, and the ammo of the gun in hand. | "the bars" |
-| **minimap** | A disk in a corner of the HUD (top right by default) that shows the ground within the minimap's range (`minimap.range_m` in player settings, 60 m by default), with players as dots and shots as lines. | "mini map" |
+| **minimap** | A disk in a corner of the HUD that shows the ground within the minimap's range (`minimap.range_m` in player settings), with players as dots and shots as lines. | "mini map" |
 | **crosshair** | The mark in the middle of the HUD. Shots leave the eye toward it. | |
-| **console bar** | The bar below the crosshair that fills while the player holds `E` on a console. | |
+| **console bar** | The bar below the crosshair that fills while the player deactivates a console. | |
 | **pylon squares** | At the top centre of the HUD: one square per console of each team, an empty slot once it is turned off, and the **own-team box**, a box in the player's team colour around their own team's squares. | |
 | **readouts** | The HUD's text lines of numbers, such as speed, height, or how fast the player's time runs near a black hole. | |
 | **main menu** | The app's first page: the games on the network to join, joining by an address, hosting, playing alone or against bots, what to play, player settings, credits, quit. | "title screen" |
 | **game menu** | The app's page around a game or match: its status, your team, rejoining, the game master's choice, game settings, player settings, leaving to the main menu. | |
 | **game page** | The page you play in. Its SWG has the scene render, the actual render of the level's world. | The "game". |
-| **level menu** | The page `Esc` opens over the level page, with the sub-pages MATCH, SCORES, SETTINGS, MAP, CREDITS and QUIT. The player stands still while it is open, and the game goes on. | "the menu", "in-level menu", "in-game menu", "game menu" (the official game menu is the app's page around a game, so ask when the context doesn't settle which) |
+| **level menu** | The page that opens over the level page when the player asks for the menu, with the sub-pages MATCH, SCORES, SETTINGS, MAP, CREDITS and QUIT. The player stands still while it is open, and the game goes on. | "the menu", "in-level menu", "in-game menu", "game menu" (the official game menu is the app's page around a game, so ask when the context doesn't settle which) |
 | **main map** | The picture of the whole level from above, as opposed to the minimap. It comes in two kinds, the satellite map and the paper map. | "the map", "in-game map", "map page" |
-| **satellite map** | The main map shown while `Tab` is held, a hidden part of the level page's SWG. It is live: it shows where the players are now, and its fog of war starts at the player's fog of war range. | |
+| **satellite map** | The main map shown while its key is held, a hidden part of the level page's SWG. It is live: it shows where the players are now, and its fog of war starts at the player's fog of war range. | |
 | **paper map** | The main map on the level menu's MAP sub-page. It shows the whole level clear, with no fog of war, and is not live: no players are on it. | |
-| **fog of war** | The darker, blurred part of the satellite map, behind a white rim: everything farther along the ground from the player than the **fog of war range** (`main_map.fog_of_war_range_m` in player settings, 60 m by default). Other players still show in it. | "blurriness" |
+| **fog of war** | The darker, blurred part of the satellite map, behind a white rim: everything farther along the ground from the player than the **fog of war range** (`main_map.fog_of_war_range_m` in player settings). Other players still show in it. | "blurriness" |
 | **game settings** | The game master's settings of a game, a sub-page of the game menu. The file stays `server_settings.yaml`. | "server settings" |
 | **player settings** | A player's own keys and view, a sub-page of every menu. The file is `player_settings.yaml`. | |
 | **level menu** | The page of a level run alone, outside the app, where a player picks a team: it says CONNECTING, then CONNECTED with each team's head count. In the app, the team is chosen on the game menu. | "team screen" or "lobby" |
@@ -130,7 +130,7 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 | **level menu tooltip** | The help the level menu's `?` shows while the mouse is over it. | |
 
 > NOTE: We may call things that appear over the level page "in-game", such as the "in-game menu" (the level menu) or
-> the "in-game map" (the satellite map, on `Tab`). That wording is not correct: a game is one that hasn't started. Read
+> the "in-game map" (the satellite map). That wording is not correct: a game is one that hasn't started. Read
 > it as the official term, and never write it.
 
 ### The SWG model
@@ -161,19 +161,19 @@ entity.
 | Say | Meaning | Might be called by the user |
 | --- | --- | --- |
 | **object**, **structure** | The same thing: anything placed in a world, such as a wall, a rock, a pylon or a building. Every object in a world has a name that is unique in that world. | "thing", "building" |
-| **pylon** | One of a team's 1 to 3 objectives in a level, near its spawn, made of one or more consoles. While its console is on, a pylon sends up a **pylon beam**, a column of light in its team's colour. | "flag" |
-| **console** | One part of a pylon. The opposing team deactivates consoles by holding `E` on them, and wins the level when all are off. | |
+| **pylon** | One of a team's objectives in a level, near its spawn, made of one or more consoles. While its console is on, a pylon sends up a **pylon beam**, a column of light in its team's colour. | "flag" |
+| **console** | One part of a pylon. The opposing team deactivates consoles, and wins the level when all are off. | |
 | **warp object** | A black hole or a wormhole. Level designers place them, and each player throws a pair of wormhole mouths. | |
 | **black hole** | A warp object that bends light and lasers, slows time near it, and sends a player who falls in back to their spawn. | |
 | **wormhole** | Two linked mouths: what goes into one comes out of the other, bent on the way like light. | |
 | **mouth** | One end of a wormhole. | "wormhole" |
-| **thrown wormhole** | The pair of mouths a player throws with `Q`: a purple mouth, then a green one, once per level. | |
+| **thrown wormhole** | The pair of mouths a player throws: a purple mouth, then a green one, once per level. | |
 | **fixed wormhole** | A wormhole a level designer placed. | |
 | **laser** | The light ray a shot draws, from the gun's tip, in the shooter's team colour. | "beam" |
 | **shot** | One firing, with its path and what it hits. | |
 | **beam noise** | The flicker of random pixels of a laser. | "speckle" |
 | **shot noise** | The small random angle by which a shot strays from the crosshair. | |
-| **sniper rifle**, **rifle** | The two weapons every player carries (`1` and `2`). The rifle looks like an energy revolver. | "revolver" |
+| **sniper rifle**, **rifle** | The two weapons every player carries. The rifle looks like an energy revolver. | "revolver" |
 | **team colour** | Blue or red, on bot sprites, lasers, pylon beams, boundary planes and the minimap's dots. A player's thrown mouths are purple and green. | |
 | **shimmer** | The slight wavering of what a player sees through a boundary plane, until they cross it. | "haze" |
 | **edge stretch** | What a player sees as they slow down at the level edge (Zeno's paradox): the view stretches out from the middle of the screen, more and more as they slow. Its strength is the player setting `view.edge_stretch_frac`. | "Zeno's paradox", "getting Zeno's-paradoxed" |
@@ -190,14 +190,14 @@ its named objects and marked map pictures. An object's name there is its officia
 
 | Say | Meaning | Might be called by the user |
 | --- | --- | --- |
-| **walk**, **sprint**, **crouch**, **jump** | The ways a player moves on the ground. Sprinting (`Shift`) is twice as fast as walking and uses energy, crouching (`Ctrl`) lowers the eye and halves the walking speed, and a jump (`Space`) gets a player onto a 1 m block. | "run" for sprint, "jog" for walk |
-| **aim** | Holding the right mouse button: the view zooms in, more with the sniper rifle, and turns more slowly. | |
-| **first person**, **third person** | The two views `V` switches between: from the player's eye, and from slightly behind and above the player's bot sprite. In both, shots leave the eye toward the crosshair. | "third-person view" |
+| **walk**, **sprint**, **crouch**, **jump** | The ways a player moves on the ground. Sprinting is faster than walking and uses energy, crouching lowers the eye and slows the player, and a jump gets a player onto a low block. | "run" for sprint, "jog" for walk |
+| **aim** | Holding the aim button: the view zooms in, more with the sniper rifle, and turns more slowly. | |
+| **first person**, **third person** | The two views a player switches between: from the player's eye, and from slightly behind and above the player's bot sprite. In both, shots leave the eye toward the crosshair. | "third-person view" |
 | **head bob** | The view moving up and down with each step. | "head bobbing" |
 | **gun sway** | The gun in hand swinging with each step. | "the way the gun moves" |
-| **flashlight** | A cone of light from the player's eye while `F` is held. Other players don't see it yet. | |
-| **deactivate** | To turn a console off: hold `E` for 10 s while aiming at it from within 3 m. Letting go, or aiming away, resets its progress. | "capture", "disable" |
-| **throw** | To send out one of the player's two wormhole mouths with `Q`. A throw that doesn't land within its flight time, or lands too close to a wall or another warp object, **fizzles**, and can be thrown again. | |
+| **flashlight** | A cone of light from the player's eye while its key is held. Other players don't see it yet. | |
+| **deactivate** | To turn a console off by holding a key while aiming at it from close by. Letting go, or aiming away, resets its progress. | "capture", "disable" |
+| **throw** | To send out one of the player's two wormhole mouths. A throw that doesn't land within its flight time, or lands too close to a wall or another warp object, **fizzles**, and can be thrown again. | |
 
 ## Space and physics
 
@@ -209,7 +209,7 @@ Space and physics terms are subject to change. If any agent notices discrepancie
 | --- | --- | --- |
 | **space** | The geometry of a level's world: hyperbolic (Dust, Lunar Surface), inside a sphere (City Sphere), or flat with two looping axes, T² × ℝ (Snow Planet and Dark Forest, which don't loop yet). | |
 | **curvature type** | Which way a level's space is curved: hyperbolic, spherical, or flat (Euclidean). It is `space.kind` in a level layout. | "curvature" |
-| **curvature amount** | How strongly a level's space is curved, given by its **curvature radius** in meters: the smaller the radius, the stronger the curvature. It is `space.curvature_radius_m` in a level layout, and the game setting `space.curvature_per_map_curvature` can curve a level more than its layout (Lunar Surface's 40 m plays as 26.7 m). Flat space has none. | "curvature" |
+| **curvature amount** | How strongly a level's space is curved, given by its **curvature radius** in meters: the smaller the radius, the stronger the curvature. It is `space.curvature_radius_m` in a level layout, and the game setting `space.curvature_per_map_curvature` can curve a level more than its layout. Flat space has none. | "curvature" |
 | **gravity** | What pulls players onto the ground, or outward onto the sphere in City Sphere. | |
 | **pull** | The acceleration that draws a player along the ground toward a black hole or a mouth. It builds a **drift**, a velocity added to the player's walk. | "gravity" toward a warp object |
 | **time dilation** | Time running slower for a player near a black hole: their movement, energy, console holds and guns slow down. | |
@@ -221,7 +221,7 @@ Space and physics terms are subject to change. If any agent notices discrepancie
 | --- | --- | --- |
 | **voxel level** | A level drawn from blocks by the levels' shared code: Lunar Surface, Dust, Snow Planet and City Sphere. Dark Forest is built on the `fps_demo` engine instead. | |
 | **model**, **texture** | The files a sprite is made from: a 3D shape, and the picture on a surface. The CREDITS sub-page says where each comes from. | |
-| **render scale** | The share of the window's resolution a level's picture is drawn at. `-` and `=` lower and raise it, and the game can adjust it to hold the frame rate. | "render resolution" |
+| **render scale** | The share of the window's resolution a level's picture is drawn at. The player can lower and raise it, and the game can adjust it to hold the frame rate. | "render resolution" |
 | **frame rate**, **GPU time**, **render time** | How many pictures a second the game draws, and how long the GPU and the whole renderer take for one. The window title shows all three. | |
 | **bench view** | A fixed view of a level used to measure GPU time, such as Lunar Surface's `wormhole_exit`. | |
 | **Mac app**, **bundle** | `Warped.app`, the app packaged for macOS, and the zip of it that players download. | |
