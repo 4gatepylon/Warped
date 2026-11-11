@@ -8,6 +8,12 @@ to that folder for Claude Code, so add new skills under `.agents/skills/`.
 Keep this file under 16 KiB, because Devin reads only the first 16 KiB of an `AGENTS.md`. A rule
 that applies only to some kinds of work goes in a skill, and this file points to it.
 
+## Glossary
+
+Before you work on the game, read [`game_design/GLOSSARY.md`](game_design/GLOSSARY.md). Every agent MUST use its
+terms exactly (a `game` is not a `match`). If you need a term it lacks, or aren't sure which fits, ask the user
+a precise question; never invent or guess a term.
+
 ## Pull requests
 
 - Keep each PR small enough to review: at most 200 non-blank lines of hand-written code (source,
@@ -41,8 +47,7 @@ For experiments and benchmarks (anything that compares options or measures how w
 works, such as two physics integrators or the game server's time per tick), let the user make the
 important decisions: ask rather than choose. Whatever you do decide, list in the PR with a short
 rationale. Follow the `experiment-decisions` skill (`.agents/skills/experiment-decisions/`) for
-when to ask, the template, and where the list goes (PR description or a per-experiment
-`DECISIONS.md`).
+when to ask, the template, and where the list goes.
 
 ## Uncommitted files
 
@@ -211,9 +216,9 @@ partial data.
 
 ### Why
 
-These practices aim for fewer bugs, code that reads quickly, and short code. They get there by
-keeping code standard, informative and correct. When something you write isn't covered by a rule
-here, ask the user whether to set one, so that conventions don't drift apart.
+These practices aim for fewer bugs, code that reads quickly, and short code, by keeping code
+standard, informative and correct. When something isn't covered by a rule here, ask the user
+whether to set one, so that conventions don't drift apart.
 
 ## Unit tests
 
@@ -246,10 +251,7 @@ Change what outlives one build (saved player settings, server settings, what the
 ## Changes from others
 
 At the start of every response, check whether anyone else changed `staging/global` and tell the user at once who did
-what and whether it breaks anything: `git fetch -q origin staging/global && git log --format='%h %an: %s'
-refs/worktree/last-seen-staging..origin/staging/global`, then
-`git update-ref refs/worktree/last-seen-staging origin/staging/global`.
-Details, and when to ask the user who an author is, are in the `compatible-changes` skill.
+what and whether it breaks anything (the `compatible-changes` skill has the commands).
 
 ## Game design
 
@@ -259,9 +261,9 @@ levels), whether `game_design/DESIGN.md` describes the change, and anything else
 
 ## Machine-specific workarounds
 
-This repo is used from several machines, so don't write a workaround for one machine (e.g. a
-broken `gh` command) as if it held everywhere. In `AGENTS.md` files and skills, write it as a
-condition, a one-line note on where it was seen, and the fix. Keep it to a line or two:
+This repo is used from several machines. In `AGENTS.md` files and skills, write a workaround for one
+machine (e.g. a broken `gh` command) as a condition, a one-line note on where it was seen, and the
+fix, never as if it held everywhere. Keep it to a line or two:
 
 > If `gh pr edit` fails with a Projects (classic) error (seen once with gh 2.55 on a Linux machine,
 > 2026-10-30), set the body with `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f body=...`.
