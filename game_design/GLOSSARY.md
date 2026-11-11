@@ -22,6 +22,7 @@ terms.
 - [Structure of play](#structure-of-play)
 - [People and entities](#people-and-entities)
 - [Programs and places](#programs-and-places)
+- [Pages and SWGs on the window](#pages-and-swgs-on-the-window)
 
 ## Structure of play
 
@@ -68,7 +69,7 @@ terms.
 | Say | Meaning | Might be called by the user |
 | --- | --- | --- |
 | **the app** | The official game as one program with one window (`warped`, or `Warped.app` on a Mac). | Often called the `client` as well (as in server/client). |
-| **window** | The operating-system window of the app. The official game has exactly one; older demos opened one per level and one for the match. | |
+| **window** | The operating-system window of the app. The official game has exactly one; older demos opened one per level and one for the match. The window is made up of pages (see [Pages and SWGs on the window](#pages-and-swgs-on-the-window)). | |
 | **game server** | The headless program that hosts games and matches, and that players join. In the official game it is the program of `demos/warped_match_rust/`. | "match server" or "server" in the context of interactions in the world when using multiplayer. |
 | **level server** | The headless program a game server starts to run one round's level: its players, bots, shots and consoles. This may not exist in the future | |
 | **starter game** | The old 2D square game with its own `clients/starter/`, `game_server/` and `management_server/`. Historical, to be replaced soon. | "the 2D game" |
@@ -78,3 +79,62 @@ terms.
 | **library** | A Rust crate that levels share, such as `warped_shared`. | |
 
 > NOTE: if any of this seems outdated, ask the user.
+
+## Pages and SWGs on the window
+
+Everything the player sees is on the window. The window shows **pages**, and what is on one page is that page's
+**SWG**. This section has the terms and the SWG model.
+
+### Terms
+
+| Say | Meaning | Might be called by the user |
+| --- | --- | --- |
+| **page** | Like a web page: one whole thing the window shows, such as the level page or a menu. Every menu is a page. A **sub-page** is a page inside another, such as the level menu's SCORES. | "screen" |
+| **scene window graph (SWG)** | Pronounced "swig". A conceptual model of what is on a page: everything the player sees that is not part of the 3D world, as a tree like a web page's DOM. | |
+| **render** | As a noun: a leaf of an SWG where the SWG stops and a "pure" graphical thing starts. As a verb: to show something on the screen, nothing more. | |
+| **UIE** | A UI element, pronounced "ooh-wee": a leaf of an SWG that is a piece of the interface itself, such as a bar. | |
+| **scene** | What a level's world looks like from the player's eye, or from behind and above in third person. | "level view" |
+| **scene render** | The render of the scene: the rasterized representation of the match at the time of play, as you are playing it. | |
+| **minimap render** | The render of the minimap. | |
+| **HUD** | Heads-up display: the information a player sees while walking normally, on top of the scene render. It holds the bars, the minimap, the crosshair, the console bar, the pylon squares and the readouts. The main map is not part of it. | |
+| **health bar**, **energy bar**, **ammo bar** | The HUD's bars, in the bottom left: health, sprint energy, and the ammo of the gun in hand. | "the bars" |
+| **minimap** | A disk in a corner of the HUD (top right by default) that shows the ground within 60 m, with players as dots and shots as lines. | "mini map" |
+| **crosshair** | The mark in the middle of the HUD. Shots leave the eye toward it. | |
+| **console bar** | The bar below the crosshair that fills while the player holds `E` on a console. | |
+| **pylon squares** | At the top centre of the HUD: one square per console of each team, an empty slot once it is turned off, and the **own-team box**, a box in the player's team colour around their own team's squares. | |
+| **readouts** | The HUD's text lines of numbers, such as speed, height, or how fast the player's time runs near a black hole. | |
+| **main menu** | The app's first page: the games on the network to join, joining by an address, hosting, playing alone or against bots, what to play, player settings, credits, quit. | "title screen" |
+| **game menu** | The app's page around a game or match: its status, your team, rejoining, the game master's choice, game settings, player settings, leaving to the main menu. | |
+| **game page** | The page you play in. Its SWG has the scene render, the actual render of the level's world. | The "game". |
+| **level menu** | The page `Esc` opens over the level page, with the sub-pages MATCH, SCORES, SETTINGS, MAP, CREDITS and QUIT. The player stands still while it is open, and the game goes on. | "the menu", "in-level menu", "in-game menu" |
+| **main map** | The picture of the whole level from above, as opposed to the minimap. It is a hidden part of the level page's SWG, shown while `Tab` is held, and the level menu's MAP sub-page shows it too. | "the map", "in-game map", "map page" |
+| **game settings** | The game master's settings of a game, a sub-page of the game menu. The file stays `server_settings.yaml`. | "server settings" |
+| **player settings** | A player's own keys and view, a sub-page of every menu. The file is `player_settings.yaml`. | |
+| **level menu** | The page of a level run alone, outside the app, where a player picks a team: it says CONNECTING, then CONNECTED with each team's head count. In the app, the team is chosen on the game menu. | "team screen" or "lobby" |
+| **banner** | A message over the scene render: YOU DIED with a countdown, `<TEAM> TEAM WINS`, LOADING before a level's first frame, and the connection messages. | |
+| **window title** | The text in the window's title bar: the frame rate, the render time, the GPU's time and the render scale. | |
+| **level menu tooltip** | The help the level menu's `?` shows while the mouse is over it. | |
+
+> NOTE: We may call things that appear over the level page "in-game", such as the "in-game menu" (the level menu) or
+> the "in-game map" (the main map, on `Tab`). That wording is not correct: a game is one that hasn't started. Read
+> it as the official term, and never write it.
+
+### The SWG model
+
+> NOTE: The SWG is terminology and a mental model only. There is no SWG file and no SWG code, on purpose. Later we
+> may define SWGs more formally, with an SWG language, YAML or another format. Until the user asks for that, don't
+> create one.
+
+1. **What it holds.** Everything on a page that is visualized and is not part of the 3D world is part of the page's
+   SWG.
+2. **A tree.** An SWG is a tree of nodes, as a web page's DOM is.
+3. **Only leaves are rendered.** Leaf nodes are shown on the screen, and every other node groups its children.
+4. **A leaf is a render or a UIE.** Always one of the two.
+5. **Offsets.** Conceptually, each leaf has an offset from its parent along the `z` axis (depth) as well as the `x`
+   and `y` axes. They could be relative or absolute coordinates, as in CSS, but we don't handle that yet.
+6. **Shared depth, by design.** Nodes can have any such offsets, but it is almost always recommended, and designed,
+   that the UIEs and renders of a group share a similar `z`: the HUD's leaves all have the same `z`, and the HUD is
+   on top of the scene render.
+7. **Hidden parts.** A part of an SWG can be hidden until something shows it, as the main map is.
+8. **One SWG per page.** Each page has its own SWG. Leaving the level page for the game menu leaves one SWG for
+   another.
