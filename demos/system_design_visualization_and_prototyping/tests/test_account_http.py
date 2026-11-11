@@ -11,6 +11,7 @@ Partitionings and the tests that cover each part:
 | token endpoint form | wrong grant, a used code | `test_token_endpoint_answers_as_google` |
 | webhook | right signature | `test_the_whole_flow_over_http` |
 | | forged | `test_forged_webhook_is_401` |
+| system view | a secret's table, a provider's table | `test_system_view_hides_secrets` |
 """
 
 from pathlib import Path
@@ -153,3 +154,18 @@ def test_forged_webhook_is_401(tmp_path: Path) -> None:
         )
         assert forged.status_code == 401
         assert client.get("/fake-google/jwks").json()["keys"][0]["alg"] == "RS256"
+
+
+def test_system_view_hides_secrets(tmp_path: Path) -> None:
+    """`test_system_view_hides_secrets` checks that secrets and private keys stay hidden."""
+    with _make_client(tmp_path) as client:
+        tables: dict = {
+            table["name"]: table for table in client.get("/api/simulation/system").json()["tables"]
+        }
+        assert {row["value"] for row in tables["secret"]["rows"]} == {"(hidden)"}
+        assert tables["google_signing_key"]["rows"][0]["private_key_pem"] == "(hidden)"
+        assert (tables["secret"]["owner"], tables["stripe_event"]["owner"]) == (
+            "secret_manager",
+            "payment_provider",
+        )
+        assert tables["account"]["owner"] == "database"

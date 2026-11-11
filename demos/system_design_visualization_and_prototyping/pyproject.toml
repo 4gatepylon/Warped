@@ -3,7 +3,8 @@
 # Interface:
 #     system_prototype package: src/system_prototype/.
 #     system-prototype command: serves the prototype (src/system_prototype/serve.py).
-#     dev dependency group: httpx2 (for FastAPI's test client), pytest and ruff.
+#     dev dependency group: httpx2 (for FastAPI's test client), playwright (for
+#         scripts/capture_flows.py), pytest and ruff.
 #
 # Example:
 #     uv run pytest

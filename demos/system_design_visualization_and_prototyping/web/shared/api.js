@@ -3,8 +3,8 @@
  * `api.js` lets the prototype's pages call its local backend and show its clock.
  *
  * Interface:
- * - `call_api(method, path, body)` returns the parsed JSON answer, and throws an `Error` whose message is the
- *   backend's `detail` when the answer isn't a success.
+ * - `call_api(method, path, body, headers)` returns the parsed JSON answer, and throws an `Error` whose message is
+ *   the backend's `detail` when the answer isn't a success. `body` and `headers` may be left out.
  * - `format_clock(now_s)` writes the simulated time as "day 3, 14:05:09".
  * - `escape_html(text)` makes any value safe to put into HTML.
  *
@@ -20,8 +20,8 @@ const SECONDS_PER_MINUTE = 60;
  *
  * @example await call_api('PUT', '/api/settings/max_match_count', { value: 50 });
  */
-async function call_api(method, path, body) {
-  const options = { method, headers: { 'Content-Type': 'application/json' } };
+async function call_api(method, path, body, headers = {}) {
+  const options = { method, headers: { 'Content-Type': 'application/json', ...headers } };
   if (body !== undefined) {
     options.body = JSON.stringify(body);
   }

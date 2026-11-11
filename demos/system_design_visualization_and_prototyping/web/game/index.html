@@ -4,6 +4,9 @@
   they can be clicked through and judged before anyone builds them. The players, games and numbers in a window are
   made up until a part of the prototype wires that window to the simulated backend.
 
+  Live from the simulated backend (`account.js`): signing in with the fake Google, the first-time form, the name,
+  icon and free allowance on Home, the Purchase window with the fake Stripe, and Settings, Account.
+
   Interface:
   - The bar at the top picks a window, the role to view it as, and whether the account has the purchase.
   - Buttons inside the mocked screen go where they would in the app.
@@ -14,6 +17,7 @@
 
   Must know:
   - Gotchas: each window is a `section` with the id `w-<name>`; `../shared/windows.js` explains the `data-` attributes.
+    A browser tab is one computer: its session is in `sessionStorage` (`../shared/session.js`).
 -->
 <html lang="en">
 <head>
@@ -37,6 +41,7 @@
     <option value="unpaid">used up its free allowance</option>
   </select></label>
   <button class="btn small" data-go="feedback">ALL FEEDBACK</button>
+  <span id="session_line" class="dim"></span>
 </div>
 
 <div id="stage"><div id="screen">
@@ -47,29 +52,32 @@
   <div class="cols">
     <div class="box">
       <h2>Returning player</h2>
-      <p><button class="btn main" data-go="home">SIGN IN WITH GOOGLE</button></p>
+      <p><button class="btn main" data-act="sign_in_with_google">SIGN IN WITH GOOGLE</button></p>
       <p class="dim">Opens your browser and comes back signed in.</p>
+      <p class="red" id="signin_reason"></p>
       <p><button class="btn" data-go="local">LOCAL GAMES, WITHOUT SIGNING IN</button></p>
     </div>
     <div class="box">
       <h2>First time</h2>
-      <div class="row">Birth date <input size="12" placeholder="YYYY-MM-DD"> <span class="dim">13 or older</span></div>
-      <div class="row">Display name <input size="16" value="starling"> <span class="blue">free</span></div>
-      <div class="row">Icon <span class="icon"></span> <span class="icon b"></span> <span class="icon r"></span>
-        <span class="icon w"></span> <span class="dim">pick one</span></div>
-      <div class="row"><input type="checkbox"> I accept the terms, the privacy policy and the code of conduct</div>
-      <p><button class="btn" data-go="home">CREATE ACCOUNT</button></p>
+      <p class="dim" id="signup_who">Opens after your first sign-in with Google.</p>
+      <div class="row">Birth date <input id="signup_birth" type="date" value="2000-01-01"> <span class="dim">13 or older</span></div>
+      <div class="row">Display name <input id="signup_name" size="16" value="starling"> <span id="signup_name_check"></span></div>
+      <div class="row">Icon <span id="signup_icons"></span></div>
+      <div class="row"><input id="signup_terms" type="checkbox"> I accept the terms, the privacy policy and the code of conduct</div>
+      <p><button class="btn" data-act="sign_up">CREATE ACCOUNT</button></p>
+      <p class="red" id="signup_error"></p>
     </div>
   </div>
 </section>
 
 <section class="window" id="w-home" data-title="Home" data-side>
   <div class="row"><h1>Warped</h1>
-    <span class="right"><span class="icon"></span> starling <span class="tag warn">GOLD</span></span>
+    <span class="right"><span class="icon" data-live="icon"></span> <span data-live="display_name">starling</span> <span class="tag warn">GOLD</span></span>
     <button class="btn small" data-go="profile">PROFILE</button>
     <button class="btn small" data-go="inbox">INBOX 2</button>
     <button class="btn small" data-go="settings">SETTINGS</button></div>
   <div class="box"><span class="warn">ANNOUNCEMENT</span> Friday 8 pm Eastern: everyone in the queue. Bring a party.</div>
+  <p id="home_access" class="dim"></p>
   <p><button class="btn main" data-go="play">PLAY</button> <span class="dim">Ranked, five against five.</span></p>
   <p><button class="btn main" data-go="custom">CUSTOM GAMES</button> <span class="dim">Join or start a game.</span></p>
   <p><button class="btn main" data-go="maps">SAVED MAPS</button> <span class="dim">Levels and settings to start games from.</span></p>
@@ -84,8 +92,9 @@
     <p>You have used your free allowance: 1 match or 30 minutes.</p>
     <p class="big">$13.37 <span class="dim">once</span></p>
     <p>Unlocks ranked matches, custom games and tournament games on this account, for good.</p>
-    <p><button class="btn main">PAY IN THE BROWSER</button></p>
+    <p><button class="btn main" data-act="start_checkout">PAY IN THE BROWSER</button></p>
     <p class="dim">This window closes by itself when the payment is confirmed.</p>
+    <p class="red" id="purchase_error"></p>
   </div>
   <p><button class="btn" data-go="local">LOCAL GAMES ARE FREE</button> <button class="btn" data-go="home">HOME</button></p>
 </section>
@@ -431,16 +440,18 @@
       <div class="row">Voice volume <input size="4" value="80"> %</div>
       <div class="row">Hide offensive words in chat <input type="checkbox" checked></div></div>
     <div data-pane="account">
-      <div class="row">Display name <input size="16" value="starling"> <span class="dim">next change in 12 days</span></div>
-      <div class="row">Icon <span class="icon"></span> <button class="btn small">CHANGE</button></div>
+      <div class="row">Display name <input id="settings_name" size="16" value="starling">
+        <button class="btn small" data-act="change_name">SAVE NAME</button> <span class="dim" id="settings_name_wait">next change in 12 days</span></div>
+      <div class="row">Icon <span id="settings_icons"><span class="icon"></span></span></div>
+      <p class="red" id="settings_error"></p>
       <h3>Privacy</h3>
       <div class="row">Friend requests from <select><option>everyone</option><option>friends of friends</option><option>nobody</option></select></div>
       <div class="row">Direct messages from <select><option>friends</option><option>nobody</option></select></div>
       <div class="row">Invitations from <select><option>everyone</option><option>friends</option><option>nobody</option></select></div>
       <div class="row">Statistics and match history seen by <select><option>everyone</option><option>friends</option><option>only me</option></select></div>
       <div class="row">Presence <select><option>shown to friends</option><option>always offline</option></select></div>
-      <p><button class="btn small" data-go="signin">SIGN OUT</button> <button class="btn small">SIGN OUT EVERYWHERE</button>
-        <button class="btn small danger">DELETE ACCOUNT</button></p></div>
+      <p><button class="btn small" data-act="sign_out">SIGN OUT</button> <button class="btn small" data-act="sign_out_everywhere">SIGN OUT EVERYWHERE</button>
+        <button class="btn small danger" data-open="delete">DELETE ACCOUNT</button></p></div>
   </div>
 </section>
 
@@ -487,6 +498,13 @@
   <p class="dim">7 of 10 ready. Not answering gives a short cooldown.</p>
 </div></div>
 
+<div class="modal" id="m-delete"><div class="box">
+  <h2>Delete your account?</h2>
+  <p>Your name and icon go at once, and you are signed out everywhere.</p>
+  <p class="dim">Your purchase can't be moved to a new account, and a new account gets no new free allowance.</p>
+  <p><button class="btn danger" data-act="delete_account">DELETE FOREVER</button> <button class="btn" data-close>KEEP IT</button></p>
+</div></div>
+
 <div class="modal" id="m-rejoin"><div class="box">
   <h2>You dropped out of a ranked match</h2>
   <p class="big">2:14 <span class="dim">left to rejoin</span></p>
@@ -504,7 +522,9 @@
 </div>
 
 <script src="../shared/api.js"></script>
+<script src="../shared/session.js"></script>
 <script src="../shared/sim_controls.js"></script>
 <script src="../shared/windows.js"></script>
+<script src="account.js"></script>
 </body>
 </html>

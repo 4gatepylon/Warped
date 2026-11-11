@@ -27,7 +27,7 @@ from .secret_manager import SecretManager
 
 CENTS_PER_DOLLAR: int = 100
 SUCCESS_URL: str = "/site/#paid"
-CANCEL_URL: str = "/game/#purchase"
+CANCEL_URL: str = "/site/#not-paid"
 _LOCKING_EVENTS: dict[str, str] = {
     "charge.refunded": "refunded",
     "charge.dispute.created": "disputed",

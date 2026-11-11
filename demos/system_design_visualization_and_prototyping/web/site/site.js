@@ -22,7 +22,8 @@ function draw_status(system) {
     ? `<div class="row">${escape_html(name)} <span class="blue right">up, ${ready_by_region[name]} machines</span></div>`
     : `<div class="row">${escape_html(name)} <span class="warn right">starting</span></div>`));
   document.getElementById('status_services').innerHTML =
-    `<div class="row">Sign-in <span class="dim right">arrives with a later part</span></div>${region_rows.join('')}`;
+    `<div class="row">Sign-in with Google <span class="blue right">up</span></div>
+     <div class="row">Payments <span class="blue right">up</span></div>${region_rows.join('')}`;
   const { caps } = system;
   document.getElementById('status_caps').innerHTML =
     `<div class="row">Matches <span class="right">${caps.match_count} of ${caps.max_match_count}</span></div>

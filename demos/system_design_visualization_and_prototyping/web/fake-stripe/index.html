@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  `index.html` stands in for Stripe Checkout (checkout.stripe.com): the page in the browser where a player pays the
+  one-time price of online play.
+
+  Interface:
+  - URL query: `session=<checkout session ID>`, which the backend got from Stripe and the game app opened.
+  - PAY charges the card typed in. Only Stripe's two test cards work: 4242 4242 4242 4242 pays, and
+    4000 0000 0000 0002 is declined. After paying, the page goes to the website's "paid" page.
+
+  Example: click PAY IN THE BROWSER in the game app's Purchase window, which opens this page in a new tab.
+
+  Must know:
+  - Gotchas: paying makes the fake Stripe send a signed webhook to the backend at once, which unlocks online play.
+    The game app learns of it by asking the backend, not from this page.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pay Warped - Fake Stripe Checkout</title>
+<link rel="stylesheet" href="../shared/look.css">
+<link rel="stylesheet" href="../shared/provider.css">
+</head>
+<body>
+<div class="provider_page">
+  <div class="stand_in">STAND-IN FOR STRIPE CHECKOUT. No money moves; only Stripe's test cards work.</div>
+  <div class="card">
+    <div class="logo stripe">fake stripe</div>
+    <p class="sub">Warped: online play, for good</p>
+    <p class="amount" id="checkout_amount"></p>
+    <label>Card number <input class="field" id="card_number" placeholder="4242 4242 4242 4242" autocomplete="off"></label>
+    <div class="cols"><label>Expiry <input class="field" value="12 / 34"></label>
+      <label>CVC <input class="field" value="123"></label></div>
+    <button class="pay" id="pay">PAY</button>
+    <p class="error" id="checkout_error"></p>
+    <p class="fine">Test cards: 4242 4242 4242 4242 pays; 4000 0000 0000 0002 is declined.</p>
+    <p class="fine"><a id="checkout_cancel" href="#">Back without paying</a></p>
+  </div>
+</div>
+<script src="../shared/api.js"></script>
+<script src="../shared/session.js"></script>
+<script src="../shared/sim_controls.js"></script>
+<script src="stripe.js"></script>
+</body>
+</html>

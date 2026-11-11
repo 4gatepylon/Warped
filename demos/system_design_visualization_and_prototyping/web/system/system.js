@@ -16,15 +16,21 @@ const ARROW_PX = 9;
 const LANE_SHIFT_PX = 9;
 const COUNT_PLACE_FRAC = 0.3;
 const NODES = {
-  simulated_players: { x: 110, y: 70, label: 'Simulated players' },
-  website: { x: 110, y: 250, label: 'Website' },
-  backend: { x: 400, y: 160, label: 'Backend' },
-  database: { x: 400, y: 320, label: 'Database' },
-  fleet_manager: { x: 680, y: 160, label: 'Fleet manager' },
-  cloud: { x: 930, y: 60, label: 'Cloud' },
-  machine: { x: 930, y: 190, label: 'Machines' },
-  game_server: { x: 680, y: 320, label: 'Game servers' },
+  game_app: { x: 110, y: 50, label: 'Game app, browser' },
+  identity_provider: { x: 340, y: 40, label: 'Google (fake)' },
+  payment_provider: { x: 620, y: 110, label: 'Stripe (fake)' },
+  simulated_players: { x: 110, y: 200, label: 'Simulated players' },
+  website: { x: 110, y: 350, label: 'Website' },
+  backend: { x: 400, y: 220, label: 'Backend' },
+  database: { x: 280, y: 400, label: 'Database' },
+  secret_manager: { x: 520, y: 400, label: 'Secret Manager' },
+  fleet_manager: { x: 700, y: 230, label: 'Fleet manager' },
+  cloud: { x: 930, y: 120, label: 'Cloud' },
+  machine: { x: 930, y: 300, label: 'Machines' },
+  game_server: { x: 760, y: 400, label: 'Game servers' },
 };
+const TABLE_OWNER_LABELS = { ...Object.fromEntries(Object.entries(NODES).map(([name, node]) => [name, node.label])),
+  simulation: 'The simulation only' };
 
 /**
  * `draw_link` returns the SVG of one arrow from the link's sender to its receiver, with its message count.
@@ -139,10 +145,12 @@ function draw_system(system) {
     message: message.what,
     about: message.detail,
   })));
-  document.getElementById('tables').innerHTML = system.tables.map((table) => `<div class="box">
+  const owners = [...new Set(system.tables.map((table) => table.owner))];
+  document.getElementById('tables').innerHTML = owners.map((owner) => `<h3>Kept by: ${TABLE_OWNER_LABELS[owner]}</h3>
+    ${system.tables.filter((table) => table.owner === owner).map((table) => `<div class="box">
     <div class="row"><b>${escape_html(table.name)}</b><span class="dim">${table.row_count} rows</span></div>
     <pre>${escape_html(table.sql)}</pre>
-    <div class="scroll"><table>${draw_rows(table.rows)}</table></div></div>`).join('');
+    <div class="scroll"><table>${draw_rows(table.rows)}</table></div></div>`).join('')}`).join('');
 }
 
 document.addEventListener('system_refreshed', (event) => draw_system(event.detail));

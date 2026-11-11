@@ -53,6 +53,18 @@ SECONDS_PER_MINUTE: int = 60
 SECONDS_PER_HOUR: int = 3600
 PERCENT: int = 100
 _ACTIVE_SERVER_STATES: str = "('starting', 'running')"
+_TABLE_OWNERS_BY_PREFIX: dict[str, str] = {
+    "google_": "identity_provider",
+    "stripe_": "payment_provider",
+    "secret": "secret_manager",
+    "sim_": "simulation",
+    "message": "simulation",
+}
+_HIDDEN_COLUMNS_BY_TABLE: dict[str, str] = {
+    "secret": "value",
+    "google_signing_key": "private_key_pem",
+}
+_HIDDEN_VALUE: str = "(hidden)"
 _OPEN_REQUEST_STATES: str = "('waiting_for_server', 'placed')"
 
 
@@ -295,6 +307,10 @@ class World:
             table["rows"] = self._read(
                 f"SELECT * FROM {name} ORDER BY rowid DESC LIMIT {TABLE_ROW_LIMIT}"
             )
+            table["owner"] = _read_table_owner(name)
+            if name in _HIDDEN_COLUMNS_BY_TABLE:
+                for row in table["rows"]:
+                    row[_HIDDEN_COLUMNS_BY_TABLE[name]] = _HIDDEN_VALUE
         return {
             **self.describeStatus(),
             "settings": self.listSettings(),
@@ -652,3 +668,16 @@ class World:
                 self._send(
                     now_s, "fleet_manager", "cloud", "turn machine off", machine["machine_id"]
                 )
+
+
+def _read_table_owner(table_name: str) -> str:
+    """`_read_table_owner` names the component that keeps a table: a provider's, or the database's.
+
+    Example:
+        >>> _read_table_owner("stripe_event")
+        'payment_provider'
+    """
+    for prefix, owner in _TABLE_OWNERS_BY_PREFIX.items():
+        if table_name.startswith(prefix):
+            return owner
+    return "database"
