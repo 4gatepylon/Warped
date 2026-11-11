@@ -412,17 +412,22 @@ impl App {
             .is_some_and(GameSettingsPage::has_unsaved_changes)
     }
 
-    /// `step_game_setting` raises the number of the open game settings page's row `row_key`
-    /// (`shared.<key>` or `level_<index>.<key>`) by one step, as the Right arrow does; it fails
-    /// if the page isn't open or has no such row.
+    /// `step_game_setting` changes the number of the open game settings page's row `row_key`
+    /// (`shared.<key>` or `level_<index>.<key>`) by one step, up as the Right arrow does when
+    /// `is_up`, else down as the Left arrow does; it fails if the page isn't open or has no such
+    /// row.
     ///
-    /// Example: `app.step_game_setting("shared.respawn.start_s")?;`
-    pub fn step_game_setting(&mut self, row_key: &str) -> Result<(), String> {
+    /// Example: `app.step_game_setting("shared.respawn.start_s", true)?;`
+    pub fn step_game_setting(&mut self, row_key: &str, is_up: bool) -> Result<(), String> {
         self.game_settings_page
             .as_mut()
             .ok_or("the game settings page isn't open")?
             .select(row_key)?;
-        self.handle_game_settings(MenuInput::Right);
+        self.handle_game_settings(if is_up {
+            MenuInput::Right
+        } else {
+            MenuInput::Left
+        });
         Ok(())
     }
 
