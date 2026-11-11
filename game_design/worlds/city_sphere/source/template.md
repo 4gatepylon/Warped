@@ -8,8 +8,9 @@ smallest level and is built for close quarters, with no warp objects and one pyl
 spawn and pylon are blue's reflected through the sphere's centre.
 
 The level layout ([`common/maps/city_sphere/map.json`](../../../../common/maps/city_sphere/map.json)) splits the
-sphere into two zones, the blue half and the red half, with no middle zone. Names follow the
-[naming rules](../../README.md#naming-rules).
+sphere into two zones, the blue half and the red half, with no middle zone. This doc splits each half again by floor,
+so it has four zones: the outer sphere (the streets, 24 m from the centre) and the inner sphere (the glass level, 17 m
+from the centre), each with a blue zone and a red zone. Names follow the [naming rules](../../README.md#naming-rules).
 
 > NOTE: In the game, City Sphere's team areas are domes over the two pylons on the glass level, and everything else
 > is the middle ([`DESIGN.md`](../../../DESIGN.md#zones-and-routes)). The zones here are the level layout's two halves,
@@ -17,7 +18,9 @@ sphere into two zones, the blue half and the red half, with no middle zone. Name
 
 The pictures are the game's map picture of City Sphere (`demos/city_sphere_rust/assets/map_picture.png`), an unwrapped
 view of the whole sphere like a world map: longitude across, latitude up and down. It is scaled up twice and shifted so
-that each half is in one piece, blue's on the left and red's on the right, with a strip repeated at each side.
+that each half is in one piece, blue's on the left and red's on the right, with a strip repeated at each side. The
+picture appears twice, one copy above the other: objects on the outer sphere are marked on the top copy, and objects on
+the inner sphere on the bottom copy.
 
 {{map_zones}}
 
@@ -31,4 +34,5 @@ that each half is in one piece, blue's on the left and red's on the right, with 
 
 City Sphere's blocks and covers keep the level layout's numbers rather than being numbered from the spawn outward, and
 its lifts have no team in their names, as in the level layout. Lifts 2 and 5 stand exactly on the line between the
-halves; lift 2 is listed in the blue zone and lift 5 in the red zone.
+halves; lift 2 is listed in the outer sphere blue zone and lift 5 in the outer sphere red zone. Each lift is listed on
+the outer sphere, where its pad is, though it also reaches the inner sphere.
