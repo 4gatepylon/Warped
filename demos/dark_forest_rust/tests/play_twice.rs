@@ -1,5 +1,5 @@
 //! `play_twice` checks that the forest can be played twice in one process, as the one-window app
-//! does when the player goes back to the game menu and joins again: each play is set up in the
+//! does when the player goes back to the map menu and joins again: each play is set up in the
 //! same window, left from the menu's QUIT page (`Esc`, `Q`, `Return`) with `LevelEnd::LeaveLevel`,
 //! and gives back the GPU memory it took. It runs on the main thread (`harness = false`, since
 //! SDL's video must), in a hidden window, and needs the GPU and the downloaded textures, so it

@@ -1,9 +1,9 @@
-//! `game_menu.rs` is the game's own screens between the main menu and a level: the game menu
+//! `game_menu.rs` is the game's own screens between the main menu and a level: the map menu
 //! (the match's status from the shared progression page, the player's team, switching team,
 //! rejoining the round, the game master's choice of what to play, the game master's settings,
 //! the player's settings, leaving), the
-//! in-level menu (Escape in a level: the same match status, resuming, settings, exiting to the
-//! game menu, quitting), and the level's stand-in until the levels are libraries (W-141, one
+//! level menu (Escape in a level: the same match status, resuming, settings, exiting to the
+//! map menu, quitting), and the level's stand-in until the levels are libraries (W-141, one
 //! window for the whole game). They keep no window state.
 //!
 //! Interface: `GameMenu` (`New`, `get_rows`, `handle`, `get_shapes`), `GameRow`, `GameAction`,
@@ -14,7 +14,7 @@
 //!
 //! Must know:
 //! - Gotchas: the match status is `warped_shared::match_menu`'s page, the one the match window
-//!   and the levels' in-level menus show; its `Thumbnail` shapes index the levels' map pictures.
+//!   and the levels' level menus show; its `Thumbnail` shapes index the levels' map pictures.
 
 use warped_shared::match_menu::{PAGE_SIZE, TEAM_RGB, get_progression_shapes_with_footer};
 use warped_shared::match_protocol::{MatchView, Phase};
@@ -42,7 +42,7 @@ pub fn get_round(view: &MatchView) -> Option<(usize, usize)> {
     }
 }
 
-/// `GameRow` is one row of the game menu.
+/// `GameRow` is one row of the map menu.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameRow {
     PickTeam(Team),
@@ -54,7 +54,7 @@ pub enum GameRow {
     Leave,
 }
 
-/// `GameAction` is what the app does after an input on the game menu: nothing, play for a team,
+/// `GameAction` is what the app does after an input on the map menu: nothing, play for a team,
 /// rejoin the round being played, ask the match server to play `choice` (a level's index, or
 /// `None` for the match), open the game master's settings or the player's, or leave to the main
 /// menu.
@@ -69,7 +69,7 @@ pub enum GameAction {
     Leave,
 }
 
-/// `GameMenu` is the game menu's state: the selected row, the game master's choice (0 for the
+/// `GameMenu` is the map menu's state: the selected row, the game master's choice (0 for the
 /// match, else a level's index plus 1), and a message.
 pub struct GameMenu {
     selected: usize,
@@ -236,7 +236,7 @@ impl GameMenu {
         MenuRow { text, is_enabled }
     }
 
-    /// `get_shapes` gives the game menu's page for a player on `team` at `server_label`: the
+    /// `get_shapes` gives the map menu's page for a player on `team` at `server_label`: the
     /// match's status, then the rows and the message, and the page's size.
     ///
     /// Example: `let (shapes, size) = game_menu.get_shapes(&rows, Some(Team::Blue), Some(&view), "127.0.0.1:47850");`
@@ -264,8 +264,8 @@ impl GameMenu {
     }
 }
 
-/// `LevelMenuAction` is what the app does after an input on the in-level menu: nothing, resume
-/// the level, open the player's settings, exit to the game menu, or quit the app.
+/// `LevelMenuAction` is what the app does after an input on the level menu: nothing, resume
+/// the level, open the player's settings, exit to the map menu, or quit the app.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LevelMenuAction {
     Stay,
@@ -281,11 +281,11 @@ const LEVEL_MENU_ROWS: [(LevelMenuAction, &str); 4] = [
         LevelMenuAction::OpenPlayerSettings,
         "Player settings (keys, mouse, look)",
     ),
-    (LevelMenuAction::ExitToGameMenu, "Exit to the game menu"),
+    (LevelMenuAction::ExitToGameMenu, "Exit to the map menu"),
     (LevelMenuAction::Quit, "Quit Warped"),
 ];
 
-/// `LevelMenu` is the in-level menu's state: the selected row.
+/// `LevelMenu` is the level menu's state: the selected row.
 pub struct LevelMenu {
     selected: usize,
 }
@@ -311,7 +311,7 @@ impl LevelMenu {
         }
     }
 
-    /// `get_shapes` gives the in-level menu: the match's status with the menu's rows under it.
+    /// `get_shapes` gives the level menu: the match's status with the menu's rows under it.
     ///
     /// Example: `let (shapes, size) = level_menu.get_shapes(Some(&view), Some(Team::Blue));`
     pub fn get_shapes(
@@ -389,7 +389,7 @@ mod tests {
     //! | Rejoin | a round being played, none | `rejoining_needs_a_round` |
     //! | Game master's choice | the match, every level of the view (both ways, wrapping), no view yet | `the_game_master_can_choose_every_level` |
     //! | Other rows and Escape | settings, game settings, leave, Escape | `the_other_rows_and_escape` |
-    //! | In-level menu | resume, settings, exit, quit, Escape resumes | `the_in_level_menu_resumes_exits_or_quits` |
+    //! | Level menu | resume, settings, exit, quit, Escape resumes | `the_in_level_menu_resumes_exits_or_quits` |
     //! | Pages | status with a view, without one, the level's stand-in with and without the map | `pages_show_the_match_status` |
 
     use super::*;

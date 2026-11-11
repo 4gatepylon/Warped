@@ -106,7 +106,7 @@ fn get_join_args(join: &LevelJoin) -> Result<Args, Box<dyn Error>> {
 }
 
 /// `play_level` plays `join` in the app's `window` until the match's round ends, the player
-/// leaves for the game menu (the menu's QUIT page) or closes the window, and says which; it frees
+/// leaves for the map menu (the menu's QUIT page) or closes the window, and says which; it frees
 /// its GPU resources and gives the window back as it found it before it returns. It fails if the
 /// join's flags are wrong, the map or assets are missing, the server can't be reached, or a
 /// client flag ended the game on its own (such as `--exit-after-s`).

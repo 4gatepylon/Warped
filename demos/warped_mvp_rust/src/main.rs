@@ -1,6 +1,6 @@
 //! `warped` is Warped's one-window app (W-141, one window for the whole game): one SDL3 window
 //! with a Metal layer, the main menu (games on the network, joining, hosting, playing alone or
-//! against bots, the match or any one level, player settings, credits), the game menu (the
+//! against bots, the match or any one level, player settings, credits), the map menu (the
 //! match's status, teams, rejoining, the game master's choice) and the levels, which will draw
 //! into the same window once they are libraries (`warped_shared::app`). Servers and bots are
 //! headless child processes (`children.rs`); no second window opens.

@@ -1,6 +1,6 @@
 //! `tour_run.rs` drives `warped --tour-levels`: it plays alone or with bots and asks the match
 //! server for each toured level in turn (free play), lets each run its `Tour` in the app's window (settle, time
-//! its frames, open the menu, leave), saves the game menu after each level, writes every
+//! its frames, open the menu, leave), saves the map menu after each level, writes every
 //! level's frame times to its run folder, and opens the game master's settings page to check that
 //! the match server's settings show there, before quitting.
 //!
@@ -78,7 +78,7 @@ impl TourRun {
         })
     }
 
-    /// `before_frame` asks the match server for the next level while the game menu shows.
+    /// `before_frame` asks the match server for the next level while the map menu shows.
     ///
     /// Example: `tour_run.before_frame(&mut app);`
     pub fn before_frame(&self, app: &mut App) {
@@ -94,7 +94,7 @@ impl TourRun {
         Tour::New(SETTLE_S, TIME_S, STEP_S)
     }
 
-    /// `after_level` records `level_name`'s frame times from `tour`, saves the game menu as it
+    /// `after_level` records `level_name`'s frame times from `tour`, saves the map menu as it
     /// shows after the level, and moves to the next level.
     ///
     /// Example: `tour_run.after_level(&app, "Dust", &tour)?;`

@@ -3,7 +3,7 @@
 //! round history and the match's result. It keeps no window state: the window draws its lines.
 //!
 //! Interface: `get_progression_lines`, `MAX_LINE_COUNT` (the terminal's page),
-//! `get_match_lines` (the in-level menu's MATCH page), `get_progression_shapes`,
+//! `get_match_lines` (the level menu's MATCH page), `get_progression_shapes`,
 //! `get_progression_shapes_with_footer`, `get_click_target` and `PageClick` (a click chooses a
 //! level or the match), `Shape` (from `page.rs`),
 //! `PAGE_SIZE`, `HUD_RGB`, `HIGHLIGHT_RGB`, `DIM_RGB`, `TEAM_RGB` (the window's page).
@@ -307,12 +307,12 @@ pub fn get_progression_lines(view: &MatchView, team: Option<Team>) -> Vec<(Strin
     lines
 }
 
-/// `MATCH_PAGE_MAX_CHAR_COUNT` and `MATCH_PAGE_MAX_LINE_COUNT` are the in-level menu's MATCH page's
+/// `MATCH_PAGE_MAX_CHAR_COUNT` and `MATCH_PAGE_MAX_LINE_COUNT` are the level menu's MATCH page's
 /// size (`Menu::set_match_lines`), in characters and lines.
 pub const MATCH_PAGE_MAX_CHAR_COUNT: usize = 64;
 pub const MATCH_PAGE_MAX_LINE_COUNT: usize = 22;
 
-/// `get_match_lines` gives the in-level menu's MATCH page for a player of `team`: the progression
+/// `get_match_lines` gives the level menu's MATCH page for a player of `team`: the progression
 /// page's lines (`get_progression_lines`), each cut to `MATCH_PAGE_MAX_CHAR_COUNT` characters,
 /// at most `MATCH_PAGE_MAX_LINE_COUNT` of them.
 ///
@@ -762,7 +762,7 @@ mod tests {
     //! | Window page bounds | every shape inside `PAGE_SIZE` after a long match | `the_window_page_stays_on_the_page` |
     //! | Own team | none (no box), blue, red (a box in its colour around "you play ...") | `the_window_page_boxes_your_team` |
     //! | Clicks | each level's centre and corner, the gap between levels, elsewhere, the match button without and with free play (drawn then) | `clicks_choose_every_level_or_the_match` |
-    //! | MATCH page | a long match cut to the in-level menu's lines and width | `the_match_page_fits_the_in_level_menu` |
+    //! | MATCH page | a long match cut to the level menu's lines and width | `the_match_page_fits_the_in_level_menu` |
     //! | Free play | each phase on a free level, after match rounds (no match round indexed), the level outlined | `free_play_shows_its_level_and_wins` |
 
     use super::*;

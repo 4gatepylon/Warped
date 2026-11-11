@@ -1,4 +1,4 @@
-//! `menu.rs` is the in-game menu: its name with a `?` (help shows while the mouse is over it), the
+//! `menu.rs` is the level menu: its name with a `?` (help shows while the mouse is over it), the
 //! pages' names under it, and the page shown: the settings page, where a player
 //! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
 //! head bob, motion blur, how a hit looks, the wormhole tint, the Milky Way's brightness, how far

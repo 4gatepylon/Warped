@@ -65,7 +65,7 @@ const ADDED_PLAYER_KEYS: [&str; 8] = [
 ];
 const AT_MOST_1_KEYS: [&str; 2] = ["view.wormhole_tint_frac", "view.milky_way_brightness_frac"];
 
-/// `PLAYER_NUMBER_ROWS` is the numbers a settings page edits, the in-level menu's: each one's
+/// `PLAYER_NUMBER_ROWS` is the numbers a settings page edits, the level menu's: each one's
 /// dotted key in the file, its label, step, smallest and largest value.
 pub const PLAYER_NUMBER_ROWS: [(&str, &str, f64, f64, f64); 13] = [
     (

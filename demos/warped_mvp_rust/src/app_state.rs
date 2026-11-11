@@ -245,7 +245,7 @@ impl App {
         self.client.as_ref().and_then(|client| client.team)
     }
 
-    /// `join` joins the match server at `server` (as `team`, if known) and shows its game menu.
+    /// `join` joins the match server at `server` (as `team`, if known) and shows its map menu.
     ///
     /// Example: `self.join(server, None)?;`
     fn join(&mut self, server: SocketAddr, team: Option<Team>) -> Result<(), String> {
@@ -292,7 +292,7 @@ impl App {
         }
     }
 
-    /// `is_in_game_menu` says whether the game menu is shown (no level, no page over it).
+    /// `is_in_game_menu` says whether the map menu is shown (no level, no page over it).
     ///
     /// Example: `if app.is_in_game_menu() { ... }`
     pub fn is_in_game_menu(&self) -> bool {
@@ -301,7 +301,7 @@ impl App {
 
     /// `start_game` hosts a game of `kind` playing `choice` (the match, or one level) and joins
     /// it: alone or with bots, the player is blue at once (the allies are blue too); hosting for
-    /// others, they pick a team in the game menu.
+    /// others, they pick a team in the map menu.
     ///
     /// Example: `self.start_game(GameKind::Alone, Some(2))?;`
     pub fn start_game(&mut self, kind: GameKind, choice: Option<usize>) -> Result<(), String> {
@@ -360,7 +360,7 @@ impl App {
         self.navigator.open(Screen::PlayerSettings);
     }
 
-    /// `open_game_settings` opens the game master's settings page over the game menu; it asks the
+    /// `open_game_settings` opens the game master's settings page over the map menu; it asks the
     /// match server for the settings at once.
     ///
     /// Example: `app.open_game_settings();`
@@ -487,7 +487,7 @@ impl App {
     }
 
     /// `click` applies a left click at `at` in a window of `size` (both in window points): on the
-    /// game menu, a click on a level of the match's status plays it freely (the game master's
+    /// map menu, a click on a level of the match's status plays it freely (the game master's
     /// choice), and during free play the "back to the match" button goes back. A double click
     /// (`click_count` 2 or more) also asks the match server to start at once, without the break
     /// before the round (W-204, double-click a level to enter at once).
@@ -632,7 +632,7 @@ impl App {
         }
     }
 
-    /// `handle_game_menu` applies an input to the game menu.
+    /// `handle_game_menu` applies an input to the map menu.
     ///
     /// Example: `self.handle_game_menu(MenuInput::Activate);`
     fn handle_game_menu(&mut self, input: MenuInput) {
@@ -816,7 +816,7 @@ impl App {
         self.get_view().and_then(get_round) != self.level_round || self.level_round.is_none()
     }
 
-    /// `get_match_lines` gives the in-level menu's MATCH page for this player, or `None` before
+    /// `get_match_lines` gives the level menu's MATCH page for this player, or `None` before
     /// the server's first view.
     ///
     /// Example: `menu.set_match_lines(app.get_match_lines());`
@@ -831,9 +831,9 @@ impl App {
         self.get_view()
     }
 
-    /// `end_level` goes back to the game menu after a level returned `result`: when the round
+    /// `end_level` goes back to the map menu after a level returned `result`: when the round
     /// ended, the menu shows the match's progress; when the player left, the round isn't joined
-    /// again (the game menu's Rejoin does); closing the window quits; a failure shows on the game
+    /// again (the map menu's Rejoin does); closing the window quits; a failure shows on the map
     /// menu. The player's settings file is read again, since the level's menu may have saved it.
     ///
     /// Example: `app.end_level(Ok(LevelEnd::LeaveLevel));`
@@ -980,10 +980,10 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Address | an IP, an IP with a port, garbage | `addresses_parse_with_the_default_port` |
-    //! | Following the match | no team (stays in the game menu), a round starts (level), Escape (in-level menu), exit (game menu, not re-entered), rejoin (level), the round ends (game menu), Escape (main menu) | `the_app_follows_the_match_into_and_out_of_levels` |
+    //! | Following the match | no team (stays in the map menu), a round starts (level), Escape (level menu), exit (map menu, not re-entered), rejoin (level), the round ends (map menu), Escape (main menu) | `the_app_follows_the_match_into_and_out_of_levels` |
     //! | Game master | a choice sent until the server's view shows it | `the_game_masters_choice_is_sent_until_taken` |
-    //! | Clicks on the game menu | elsewhere (nothing), on the first level (free play there, after the break), a double click on it (also asked to start at once) | `clicking_a_level_plays_it` |
-    //! | Game master's settings | the page asks, shows the answer, sends a step up, Escape back to the game menu (UDP 48392, 48393) | `the_game_masters_settings_go_to_the_match_server` |
+    //! | Clicks on the map menu | elsewhere (nothing), on the first level (free play there, after the break), a double click on it (also asked to start at once) | `clicking_a_level_plays_it` |
+    //! | Game master's settings | the page asks, shows the answer, sends a step up, Escape back to the map menu (UDP 48392, 48393) | `the_game_masters_settings_go_to_the_match_server` |
     //! | Run id | the format | `run_ids_are_utc_times` |
 
     use super::*;

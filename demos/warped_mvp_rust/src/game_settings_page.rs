@@ -1,4 +1,4 @@
-//! `game_settings_page.rs` is the game master's settings page, opened from the game menu (W-158,
+//! `game_settings_page.rs` is the game master's settings page, opened from the map menu (W-158,
 //! per-map game settings): the match server's game settings (`warped_shared::game_settings`) in
 //! sections, the shared one (every level that has the key) and one per level (its own keys, shown
 //! even when it has none), edited with the shared settings editor. Changes and resets stay on the
