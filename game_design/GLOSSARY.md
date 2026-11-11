@@ -96,8 +96,6 @@ entity.
 | **mouth** | One end of a wormhole. | "wormhole" |
 | **thrown wormhole** | The pair of mouths a player throws with `Q`: a purple mouth, then a green one, once per level. | |
 | **fixed wormhole** | A wormhole a level designer placed. | |
-| **reach** | How far a warp object bends light. | |
-| **lens** | What a warp object's bending looks like: the world seen bent around it. | |
 | **laser** | The light ray a shot draws, from the gun's tip, in the shooter's team colour. | "beam" |
 | **shot** | One firing, with its path and what it hits. | |
 | **beam noise** | The flicker of random pixels of a laser. | "speckle" |
@@ -105,5 +103,6 @@ entity.
 | **sniper rifle**, **rifle** | The two weapons every player carries (`1` and `2`). The rifle looks like an energy revolver. | "revolver" |
 | **team colour** | Blue or red, on bot sprites, lasers, pylon beams, boundary planes and the minimap's dots. A player's thrown mouths are purple and green. | |
 | **shimmer** | The slight wavering of what a player sees through a boundary plane, until they cross it. | "haze" |
+| **edge stretch** | What a player sees as they slow down at the level edge (Zeno's paradox): the view stretches out from the middle of the screen, more and more as they slow. Its strength is the player setting `view.edge_stretch_frac`. | "Zeno's paradox", "getting Zeno's-paradoxed" |
 | **haze** | Thin fog in a level's air. | |
 | **sky** | What is drawn beyond a level, for looks only, such as the sun, a planet, stars and the Milky Way. | "skybox" |
