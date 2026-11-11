@@ -209,6 +209,7 @@ def _play_eu(run: _Run) -> None:
     page.goto("/game/")
     page.get_by_role("button", name="SIGN IN WITH GOOGLE").click()
     page.get_by_role("button", name="Sofia Kovalevskaya").click()
+    expect(page.locator("#signup_who")).to_contain_text("sofia")
     page.locator("#signup_name").fill("kovalevskaya")
     page.locator("#signup_terms").check()
     page.get_by_role("button", name="CREATE ACCOUNT").click()
