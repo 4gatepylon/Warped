@@ -10,8 +10,9 @@ smallest level and is built for close quarters, with no warp objects and one pyl
 spawn and pylon are blue's reflected through the sphere's centre.
 
 The level layout ([`common/maps/city_sphere/map.json`](../../../../common/maps/city_sphere/map.json)) splits the
-sphere into two zones, the blue half and the red half, with no middle zone. Names follow the
-[naming rules](../../README.md#naming-rules).
+sphere into two zones, the blue half and the red half, with no middle zone. This doc splits each half again by floor,
+so it has four zones: the outer sphere (the streets, 24 m from the centre) and the inner sphere (the glass level, 17 m
+from the centre), each with a blue zone and a red zone. Names follow the [naming rules](../../README.md#naming-rules).
 
 > NOTE: In the game, City Sphere's team areas are domes over the two pylons on the glass level, and everything else
 > is the middle ([`DESIGN.md`](../../../DESIGN.md#zones-and-routes)). The zones here are the level layout's two halves,
@@ -19,7 +20,9 @@ sphere into two zones, the blue half and the red half, with no middle zone. Name
 
 The pictures are the game's map picture of City Sphere (`demos/city_sphere_rust/assets/map_picture.png`), an unwrapped
 view of the whole sphere like a world map: longitude across, latitude up and down. It is scaled up twice and shifted so
-that each half is in one piece, blue's on the left and red's on the right, with a strip repeated at each side.
+that each half is in one piece, blue's on the left and red's on the right, with a strip repeated at each side. The
+picture appears twice, one copy above the other: objects on the outer sphere are marked on the top copy, and objects on
+the inner sphere on the bottom copy.
 
 ![City Sphere's map, with its zones outlined and named](map_zones.png)
 
@@ -27,10 +30,9 @@ that each half is in one piece, blue's on the left and red's on the right, with 
 
 ```text
 City Sphere
-├── blue zone
+├── outer sphere blue zone
 │   ├── blue spawn
 │   ├── blue stairs
-│   ├── blue pylon
 │   ├── blue block 0
 │   ├── blue block 1
 │   ├── blue block 2
@@ -41,53 +43,55 @@ City Sphere
 │   ├── blue block 7
 │   ├── blue block 8
 │   ├── blue block 9
+│   ├── lift 0
+│   ├── lift 1
+│   └── lift 2
+├── outer sphere red zone
+│   ├── red spawn
+│   ├── red stairs
+│   ├── red block 0
+│   ├── red block 1
+│   ├── red block 2
+│   ├── red block 3
+│   ├── red block 4
+│   ├── red block 5
+│   ├── red block 6
+│   ├── red block 7
+│   ├── red block 8
+│   ├── red block 9
+│   ├── lift 3
+│   ├── lift 4
+│   └── lift 5
+├── inner sphere blue zone
+│   ├── blue pylon
 │   ├── blue cover 0
 │   ├── blue cover 1
 │   ├── blue cover 2
 │   ├── blue cover 3
 │   ├── blue cover 4
-│   ├── blue cover 5
-│   ├── lift 0
-│   ├── lift 1
-│   └── lift 2
-└── red zone
-    ├── red spawn
-    ├── red stairs
+│   └── blue cover 5
+└── inner sphere red zone
     ├── red pylon
-    ├── red block 0
-    ├── red block 1
-    ├── red block 2
-    ├── red block 3
-    ├── red block 4
-    ├── red block 5
-    ├── red block 6
-    ├── red block 7
-    ├── red block 8
-    ├── red block 9
     ├── red cover 0
     ├── red cover 1
     ├── red cover 2
     ├── red cover 3
     ├── red cover 4
-    ├── red cover 5
-    ├── lift 3
-    ├── lift 4
-    └── lift 5
+    └── red cover 5
 ```
 
 ![City Sphere's map, with every object outlined and named](map_objects.png)
 
-## Blue zone
+## Outer sphere blue zone
 
-The half of the sphere around blue's spawn, the level layout's blue zone.
+The streets on the outer sphere, 24 m from the centre, in the level layout's blue half.
 
-![City Sphere's blue zone: the whole map, blurred and darkened outside the zone, with the zone's sub-zones and objects outlined and named](zone_blue_zone.png)
+![City Sphere's outer sphere blue zone: the whole map, blurred and darkened outside the zone, with the zone's sub-zones and objects outlined and named](zone_outer_sphere_blue_zone.png)
 
 | Name | What it is | Name in the level layout |
 | --- | --- | --- |
 | **blue spawn** | Where blue's players enter the level, on the streets: two spawn points. | blue spawn |
 | **blue stairs** | The staircase of 48 steps that rises from the streets beside blue's spawn. | blue stairs 0 to 47 |
-| **blue pylon** | Blue's one pylon, on the glass level in an exposed spot with no cover around it. | blue pylon, blue console |
 | **blue block 0** | A city block on the streets of blue's half, numbered as in the level layout. | blue block 0 |
 | **blue block 1** | A city block on the streets of blue's half, numbered as in the level layout. | blue block 1 |
 | **blue block 2** | A city block on the streets of blue's half, numbered as in the level layout. | blue block 2 |
@@ -98,27 +102,20 @@ The half of the sphere around blue's spawn, the level layout's blue zone.
 | **blue block 7** | A city block on the streets of blue's half, numbered as in the level layout. | blue block 7 |
 | **blue block 8** | A city block on the streets of blue's half, numbered as in the level layout. | blue block 8 |
 | **blue block 9** | A city block on the streets of blue's half, numbered as in the level layout. | blue block 9 |
-| **blue cover 0** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 0 |
-| **blue cover 1** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 1 |
-| **blue cover 2** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 2 |
-| **blue cover 3** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 3 |
-| **blue cover 4** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 4 |
-| **blue cover 5** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 5 |
 | **lift 0** | A lift in blue's half, from the streets up to the glass level. | lift pad 0 |
 | **lift 1** | A lift in blue's half, from the streets up to the glass level. | lift pad 1 |
 | **lift 2** | A lift from the streets up to the glass level, exactly on the line between the halves; it is listed in blue's half. | lift pad 2 |
 
-## Red zone
+## Outer sphere red zone
 
-The half of the sphere around red's spawn, the level layout's red zone.
+The streets on the outer sphere, 24 m from the centre, in the level layout's red half.
 
-![City Sphere's red zone: the whole map, blurred and darkened outside the zone, with the zone's sub-zones and objects outlined and named](zone_red_zone.png)
+![City Sphere's outer sphere red zone: the whole map, blurred and darkened outside the zone, with the zone's sub-zones and objects outlined and named](zone_outer_sphere_red_zone.png)
 
 | Name | What it is | Name in the level layout |
 | --- | --- | --- |
 | **red spawn** | Where red's players enter the level, on the streets: two spawn points. | red spawn |
 | **red stairs** | The staircase of 48 steps that rises from the streets beside red's spawn. | red stairs 0 to 47 |
-| **red pylon** | Red's one pylon, on the glass level in an exposed spot with no cover around it. | red pylon, red console |
 | **red block 0** | A city block on the streets of red's half, numbered as in the level layout. | red block 0 |
 | **red block 1** | A city block on the streets of red's half, numbered as in the level layout. | red block 1 |
 | **red block 2** | A city block on the streets of red's half, numbered as in the level layout. | red block 2 |
@@ -129,16 +126,43 @@ The half of the sphere around red's spawn, the level layout's red zone.
 | **red block 7** | A city block on the streets of red's half, numbered as in the level layout. | red block 7 |
 | **red block 8** | A city block on the streets of red's half, numbered as in the level layout. | red block 8 |
 | **red block 9** | A city block on the streets of red's half, numbered as in the level layout. | red block 9 |
+| **lift 3** | A lift in red's half, from the streets up to the glass level. | lift pad 3 |
+| **lift 4** | A lift in red's half, from the streets up to the glass level. | lift pad 4 |
+| **lift 5** | A lift from the streets up to the glass level, exactly on the line between the halves; it is listed in red's half. | lift pad 5 |
+
+## Inner sphere blue zone
+
+The glass level on the inner sphere, 17 m from the centre, in the level layout's blue half.
+
+![City Sphere's inner sphere blue zone: the whole map, blurred and darkened outside the zone, with the zone's sub-zones and objects outlined and named](zone_inner_sphere_blue_zone.png)
+
+| Name | What it is | Name in the level layout |
+| --- | --- | --- |
+| **blue pylon** | Blue's one pylon, on the glass level in an exposed spot with no cover around it. | blue pylon, blue console |
+| **blue cover 0** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 0 |
+| **blue cover 1** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 1 |
+| **blue cover 2** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 2 |
+| **blue cover 3** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 3 |
+| **blue cover 4** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 4 |
+| **blue cover 5** | Cover on the glass level in blue's half, numbered as in the level layout. | blue glass cover 5 |
+
+## Inner sphere red zone
+
+The glass level on the inner sphere, 17 m from the centre, in the level layout's red half.
+
+![City Sphere's inner sphere red zone: the whole map, blurred and darkened outside the zone, with the zone's sub-zones and objects outlined and named](zone_inner_sphere_red_zone.png)
+
+| Name | What it is | Name in the level layout |
+| --- | --- | --- |
+| **red pylon** | Red's one pylon, on the glass level in an exposed spot with no cover around it. | red pylon, red console |
 | **red cover 0** | Cover on the glass level in red's half, numbered as in the level layout. | red glass cover 0 |
 | **red cover 1** | Cover on the glass level in red's half, numbered as in the level layout. | red glass cover 1 |
 | **red cover 2** | Cover on the glass level in red's half, numbered as in the level layout. | red glass cover 2 |
 | **red cover 3** | Cover on the glass level in red's half, numbered as in the level layout. | red glass cover 3 |
 | **red cover 4** | Cover on the glass level in red's half, numbered as in the level layout. | red glass cover 4 |
 | **red cover 5** | Cover on the glass level in red's half, numbered as in the level layout. | red glass cover 5 |
-| **lift 3** | A lift in red's half, from the streets up to the glass level. | lift pad 3 |
-| **lift 4** | A lift in red's half, from the streets up to the glass level. | lift pad 4 |
-| **lift 5** | A lift from the streets up to the glass level, exactly on the line between the halves; it is listed in red's half. | lift pad 5 |
 
 City Sphere's blocks and covers keep the level layout's numbers rather than being numbered from the spawn outward, and
 its lifts have no team in their names, as in the level layout. Lifts 2 and 5 stand exactly on the line between the
-halves; lift 2 is listed in the blue zone and lift 5 in the red zone.
+halves; lift 2 is listed in the outer sphere blue zone and lift 5 in the outer sphere red zone. Each lift is listed on
+the outer sphere, where its pad is, though it also reaches the inner sphere.
