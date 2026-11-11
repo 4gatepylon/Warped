@@ -244,3 +244,19 @@ game menu
 ```
 
 ![The game menu, with the row or key that leads to each page marked](pages/game_menu.png)
+
+### The game settings page's SWG
+
+```text
+game settings
+├── title                                       UIE
+├── SAVE SETTINGS, DROP UNSAVED CHANGES         UIEs
+├── a section per scope (every level, each level only)
+│   ├── heading                                 UIE
+│   └── a row per setting: name and value       UIEs
+├── selected-row highlight                      UIE
+├── message                                     UIE, hidden until the server refuses the settings
+└── help line                                   UIE
+```
+
+![The game settings page, with the row or key that leads to each page marked](pages/game_settings.png)
