@@ -6,7 +6,7 @@ the red zone, and there is no black hole. The zones are bands across the level's
 48 m from the middle on blue's side, the red zone more than 48 m on red's side, and the middle zone lies between.
 
 The pictures mark the game's map picture of Dust (`demos/dust_rust/map_pictures/dust_r50m.png`), with blue on the
-left, so blue's left is the top of a picture and red's left is the bottom. Names follow the [naming rules](README.md#naming-rules);
+left, so left (blue's left) is the top of a picture. Names follow the [naming rules](README.md#naming-rules);
 the layout is [`common/maps/dust/map.json`](../../common/maps/dust/map.json).
 
 ## World tree
@@ -70,7 +70,7 @@ Dust
 | --- | --- | --- |
 | **red spawn** | Where red's players enter the level. | red spawn |
 | **red bunker** | The concrete bunker beside red's spawn. | red kazemat |
-| **red left pylon**, **red mid pylon**, **red right pylon** | Red's three pylons, left to right as seen from red's spawn facing blue. | red pylon |
+| **red left pylon**, **red mid pylon**, **red right pylon** | Red's three pylons, left to right as seen from blue's spawn facing red. | red pylon |
 | **red hesco wall 1** to **4** | Rows of 3 or 4 Hesco blocks, numbered from red's spawn outward. | hesco block |
 | **red boulder** | The boulder at the bottom of the red zone. | boulder |
 | **red pillar** | The sandstone pillar in front of red's pylons. | sandstone pillar |
