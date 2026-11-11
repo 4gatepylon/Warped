@@ -23,6 +23,8 @@ use serde_json::Value;
 /// `SUM_TOLERANCE` is how far shares that add up to 1 may be off, for float noise.
 const SUM_TOLERANCE: f64 = 1e-9;
 const FRACTION_SUFFIX: &str = "_frac";
+/// `DECIMAL_COUNT` is how many decimals a number in a message keeps.
+const DECIMAL_COUNT: usize = 9;
 
 /// `ZERO_ALLOWED_KEYS` are the numbers that may be 0; every other number must be above 0.
 const ZERO_ALLOWED_KEYS: [&str; 35] = [
@@ -267,16 +269,25 @@ pub fn check_group(group: &SettingGroup, settings: &Value) -> Result<(), String>
         .collect::<Vec<String>>()
         .join(" and ");
     Err(match group.relation {
-        Relation::SumsToOne => format!(
-            "{section}{} are shares of one whole and must add up to 1, not {} ({})",
-            names.join(" + "),
-            (found.iter().sum::<f64>() / SUM_TOLERANCE).round() * SUM_TOLERANCE,
-            found
-                .iter()
-                .map(f64::to_string)
-                .collect::<Vec<String>>()
-                .join(" + ")
-        ),
+        Relation::SumsToOne => {
+            let sum: f64 = found.iter().sum();
+            let (off, direction): (f64, &str) = if sum > 1.0 {
+                (sum - 1.0, "too much")
+            } else {
+                (1.0 - sum, "too little")
+            };
+            format!(
+                "{section}{} are shares of one whole and must add up to 1, not {} ({}): {} {direction}",
+                names.join(" + "),
+                format_number(sum),
+                found
+                    .iter()
+                    .map(|&x| format_number(x))
+                    .collect::<Vec<String>>()
+                    .join(" + "),
+                format_number(off)
+            )
+        }
         Relation::Ascending => format!(
             "{section}{} must be in ascending order, not {values}",
             names.join(", ")
@@ -286,6 +297,15 @@ pub fn check_group(group: &SettingGroup, settings: &Value) -> Result<(), String>
             names.join(", ")
         ),
     })
+}
+
+/// `format_number` writes `x` for a message, rounded to 9 decimals and without trailing zeros, so
+/// a sum shows as `1.01` and not with float noise (`1.0100000000000002`).
+///
+/// Example: `assert_eq!(format_number(0.1 + 0.2), "0.3");`
+fn format_number(x: f64) -> String {
+    let text: String = format!("{x:.DECIMAL_COUNT$}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 /// `split_section` gives the section every key of `keys` is in, as `<section>: ` (empty when
@@ -347,7 +367,7 @@ mod tests {
     //! | Kind of a setting | switch, share, a `_frac` that is a factor, amount, zoom, own range, choice, a word that is no choice | `kinds_come_from_the_key_and_the_default` |
     //! | A number's value | inside; negative; 0 where allowed and where not; not whole where the default is; above a share's 1; below a zoom's 1; outside its range; not a number | `numbers_are_held_to_their_kind` |
     //! | A switch's and a choice's value | a switch, a number for a switch; a known word, another word | `switches_and_choices_are_held_to_their_kind` |
-    //! | Group relation | shares adding up to 1 (within float noise) and not; ascending with equal values and descending; strictly ascending with equal values; a group whose keys the settings lack; keys in one section (named once) and in two | `groups_are_held_to_their_relation` |
+    //! | Group relation | shares adding up to 1 (within float noise) and not (over by a step, under: the message says by how much, without float noise); ascending with equal values and descending; strictly ascending with equal values; a group whose keys the settings lack; keys in one section (named once) and in two | `groups_are_held_to_their_relation` |
     //! | Whole settings | fine; a bad value named; a broken group named; a setting missing | `settings_are_checked_as_a_whole` |
 
     use serde_json::json;
@@ -452,8 +472,24 @@ mod tests {
         let error: String = check_group(&SETTING_GROUPS[0], &speckle(0.2)).unwrap_err();
         assert_eq!(
             error,
-            "beam_speckle: black_frac + white_frac + dropout_frac are shares of one whole and must add up to 1, not 1.1 (0.2 + 0.1 + 0.8)"
+            "beam_speckle: black_frac + white_frac + dropout_frac are shares of one whole and must add up to 1, not 1.1 (0.2 + 0.1 + 0.8): 0.1 too much"
         );
+        let one_step_over: String = check_group(
+            &SETTING_GROUPS[0],
+            &json!({"beam_speckle": {"black_frac": 0.21, "white_frac": 0.1, "dropout_frac": 0.7}}),
+        )
+        .unwrap_err();
+        assert!(
+            one_step_over.ends_with("not 1.01 (0.21 + 0.1 + 0.7): 0.01 too much"),
+            "{one_step_over}"
+        );
+        let short: String = check_group(&SETTING_GROUPS[0], &json!({"beam_speckle": {"black_frac": 0.333, "white_frac": 0.333, "dropout_frac": 0.333}})).unwrap_err();
+        assert!(
+            short.ends_with("not 0.999 (0.333 + 0.333 + 0.333): 0.001 too little"),
+            "{short}"
+        );
+        assert_eq!(format_number(0.1 + 0.2), "0.3");
+        assert_eq!(format_number(2.0), "2");
         assert_eq!(
             split_section(&["rifle.noise_start_rad", "sniper.noise_max_rad"]),
             (
