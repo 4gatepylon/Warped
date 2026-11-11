@@ -23,6 +23,7 @@ terms.
 - [People and entities](#people-and-entities)
 - [Programs and places](#programs-and-places)
 - [Pages and SWGs on the window](#pages-and-swgs-on-the-window)
+- [World objects](#world-objects)
 
 ## Structure of play
 
@@ -138,3 +139,30 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 7. **Hidden parts.** A part of an SWG can be hidden until something shows it, as the main map is.
 8. **One SWG per page.** Each page has its own SWG. Leaving the level page for the game menu leaves one SWG for
    another.
+
+## World objects
+
+What is in a world. An object's visuals are its sprite, and the colours and textures on it are its skin, as for an
+entity.
+
+| Say | Meaning | Might be called by the user |
+| --- | --- | --- |
+| **object**, **structure** | The same thing: anything placed in a world, such as a wall, a rock, a pylon or a building. Every object in a world has a name that is unique in that world. | "thing", "building" |
+| **pylon** | One of a team's 1 to 3 objectives in a level, near its spawn, made of one or more consoles. While its console is on, a pylon sends up a **pylon beam**, a column of light in its team's colour. | "flag" |
+| **console** | One part of a pylon. The opposing team deactivates consoles by holding `E` on them, and wins the level when all are off. | |
+| **warp object** | A black hole or a wormhole. Level designers place them, and each player throws a pair of wormhole mouths. | |
+| **black hole** | A warp object that bends light and lasers, slows time near it, and sends a player who falls in back to their spawn. | |
+| **wormhole** | Two linked mouths: what goes into one comes out of the other, bent on the way like light. | |
+| **mouth** | One end of a wormhole. | "wormhole" |
+| **thrown wormhole** | The pair of mouths a player throws with `Q`: a purple mouth, then a green one, once per level. | |
+| **fixed wormhole** | A wormhole a level designer placed. | |
+| **laser** | The light ray a shot draws, from the gun's tip, in the shooter's team colour. | "beam" |
+| **shot** | One firing, with its path and what it hits. | |
+| **beam noise** | The flicker of random pixels of a laser. | "speckle" |
+| **shot noise** | The small random angle by which a shot strays from the crosshair. | |
+| **sniper rifle**, **rifle** | The two weapons every player carries (`1` and `2`). The rifle looks like an energy revolver. | "revolver" |
+| **team colour** | Blue or red, on bot sprites, lasers, pylon beams, boundary planes and the minimap's dots. A player's thrown mouths are purple and green. | |
+| **shimmer** | The slight wavering of what a player sees through a boundary plane, until they cross it. | "haze" |
+| **edge stretch** | What a player sees as they slow down at the level edge (Zeno's paradox): the view stretches out from the middle of the screen, more and more as they slow. Its strength is the player setting `view.edge_stretch_frac`. | "Zeno's paradox", "getting Zeno's-paradoxed" |
+| **haze** | Thin fog in a level's air. | |
+| **sky** | What is drawn beyond a level, for looks only, such as the sun, a planet, stars and the Milky Way. | "skybox" |
