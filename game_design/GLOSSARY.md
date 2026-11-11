@@ -191,6 +191,8 @@ its named objects and marked map pictures. An object's name there is its officia
 
 ## Space and physics
 
+Space and physics terms are subject to change. If any agent notices discrepancies with the code let the user know immediately.
+
 "Curvature" alone can mean a level's curvature type or its curvature amount. Write the one you mean.
 
 | Say | Meaning | Might be called by the user |
