@@ -225,3 +225,22 @@ credits
 ```
 
 ![The credits page, with the row or key that leads to each page marked](pages/credits.png)
+
+### The game menu's SWG
+
+```text
+game menu
+├── match status
+│   ├── title, round, players, time left        UIEs
+│   ├── a card per level
+│   │   ├── map picture                         render
+│   │   └── name, team, defender, taken by      UIEs
+│   ├── waves, attacker and defender            UIEs
+│   ├── history                                 UIEs
+│   └── footer                                  UIEs
+├── rows                                        UIEs
+├── selected-row highlight                      UIE
+└── message                                     UIE, hidden until an action fails
+```
+
+![The game menu, with the row or key that leads to each page marked](pages/game_menu.png)
