@@ -97,7 +97,7 @@ terms.
 ## Pages and SWGs on the window
 
 Everything the player sees is on the window. The window shows **pages**, and what is on one page is that page's
-**SWG**. This section has the terms and the SWG model.
+**SWG**. This section has the terms, the pages tree, the page graph and the SWG model.
 
 ### Terms
 
@@ -135,6 +135,43 @@ Everything the player sees is on the window. The window shows **pages**, and wha
 > NOTE: We may call things that appear over the level page "in-game", such as the "in-game menu" (the level menu) or
 > the "in-game map" (the satellite map). That wording is not correct: a game is one that hasn't started. Read
 > it as the official term, and never write it.
+
+### The pages tree
+
+The app's pages, each under the page it belongs to. The tree has only pages: what is on a page is its SWG, below.
+
+```text
+window
+├── main menu
+│   ├── join by address
+│   ├── player settings
+│   └── credits
+├── game menu
+│   ├── game settings
+│   └── player settings
+├── level page
+└── level menu
+    └── player settings
+```
+
+### The page graph
+
+Which pages each page leads to, and how, from the app's own navigation code (`demos/warped_mvp_rust/src/screens.rs`
+and `app_state.rs`):
+
+| From | To |
+| --- | --- |
+| main menu | join by address, player settings, credits; game menu (join a game it found, host one, play alone or against bots, or go back to the game this app hosts); the app quits (Quit) |
+| join by address | game menu (Return joins the game); main menu (`Esc`) |
+| player settings | the page that opened it (`Esc`, which saves) |
+| credits | main menu (`Esc`) |
+| game menu | level page (by itself, when a round is played and you have a team, or after Rejoin); game settings, player settings; main menu (`Esc`, or Leave) |
+| game settings | game menu (`Esc`) |
+| level page | level menu (`Esc`); game menu (by itself, when the round ends) |
+| level menu | level page (`Esc`, or Resume); player settings; game menu (Exit to the game menu); the app quits (Quit Warped) |
+
+`Esc` never quits the app: quitting is a row of the main menu and of the level menu. Each page's SWG below has a
+picture of the page that marks which row or key leads to which page.
 
 ### The SWG model
 
