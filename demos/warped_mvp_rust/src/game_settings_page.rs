@@ -1,11 +1,11 @@
-//! `game_settings_page.rs` is the game master's settings page, opened from the game menu (W-158,
-//! per-map game settings): the match server's game settings (`warped_shared::game_settings`) in
+//! `game_settings_page.rs` is the game master's settings page, opened from the map menu (W-158,
+//! per-map game settings): the game server's game settings (`warped_shared::game_settings`) in
 //! sections, the shared one (every level that has the key) and one per level (its own keys, shown
 //! even when it has none), edited with the shared settings editor. Changes and resets stay on the
 //! page until the game master chooses SAVE SETTINGS (W-209, game settings checked when saved,
 //! with the reason): the page then checks every level's settings against the rules
 //! (`warped_shared::setting_rules`) and either says which rule is broken, where and why, or sends
-//! them all to the match server, which checks them again, holds them and gives each round's level
+//! them all to the game server, which checks them again, holds them and gives each round's level
 //! server its merged copy.
 //!
 //! Interface: `GameSettingsPage` (`New`, `update`, `handle`, `save`, `select`,
@@ -22,7 +22,7 @@
 //!   the default is" is asked of it, so a group can be changed one setting at a time (three
 //!   shares that must add up to 1); the rules are checked when the settings are saved.
 //! - Gotchas: Escape with unsaved changes asks once; a second Escape leaves and drops them.
-//! - Gotchas: a save the match server doesn't answer within `SAVE_ANSWER_TIMEOUT_S` (a match
+//! - Gotchas: a save the game server doesn't answer within `SAVE_ANSWER_TIMEOUT_S` (a match
 //!   server from before saves answers with nothing) is reported as not saved; the changes stay.
 
 use std::error::Error;
@@ -51,15 +51,15 @@ const DROP_ID: &str = "drop";
 const SAVE_LABEL: &str = "SAVE SETTINGS (checks them all, then applies them)";
 const DROP_LABEL: &str = "DROP UNSAVED CHANGES";
 const NOTHING_TO_SAVE_LINE: &str = "Nothing to save: no unsaved changes.";
-const SAVING_LINE: &str = "Checked. Saving to the match server...";
+const SAVING_LINE: &str = "Checked. Saving to the game server...";
 const SAVED_LINE: &str = "Saved: the next round of each level plays by these settings.";
 const DROPPED_LINE: &str = "Dropped the unsaved changes.";
 const SAVE_ANSWER_TIMEOUT_S: f64 = 3.0;
-const UNANSWERED_LINE: &str = "Not saved: the match server didn't answer the save within 3 s. It may be from an older build of the game, which can't take a save; the changes are still here.";
+const UNANSWERED_LINE: &str = "Not saved: the game server didn't answer the save within 3 s. It may be from an older build of the game, which can't take a save; the changes are still here.";
 const LEAVE_LINE: &str =
     "Unsaved changes: save or drop them, or press Escape again to leave without them.";
-const WAITING_LINE: &str = "Asking the match server for its game settings...";
-const OLD_SERVER_LINE: &str = "(A match server older than the game settings never answers.)";
+const WAITING_LINE: &str = "Asking the game server for its game settings...";
+const OLD_SERVER_LINE: &str = "(A game server older than the game settings never answers.)";
 const HEADING_ID: &str = "heading";
 const SHARED_SECTION: &str = "shared";
 const LEVEL_SECTION_PREFIX: &str = "level_";
@@ -193,7 +193,7 @@ fn push_heading_row(rows: &mut Vec<EditorRow>, label: String) {
 
 /// `GameSettingsPage` is the page's state: the editor (once the server's settings came), its
 /// rows' keys, the values and defaults it shows (sections `shared` and `level_<index>`), the
-/// levels' names, the match server's latest settings, those settings with the game master's
+/// levels' names, the game server's latest settings, those settings with the game master's
 /// unsaved changes, whether a save is on its way, and whether Escape was pressed once over
 /// unsaved changes.
 pub struct GameSettingsPage {
@@ -210,7 +210,7 @@ pub struct GameSettingsPage {
 }
 
 impl GameSettingsPage {
-    /// `New` waits for the match server's settings for a game of the levels named `level_names`.
+    /// `New` waits for the game server's settings for a game of the levels named `level_names`.
     ///
     /// Example: `let page = GameSettingsPage::New(vec!["Dust".to_string()]);`
     #[allow(non_snake_case)]
@@ -229,7 +229,7 @@ impl GameSettingsPage {
         }
     }
 
-    /// `has_unsaved_changes` says whether the page holds changes the match server doesn't have.
+    /// `has_unsaved_changes` says whether the page holds changes the game server doesn't have.
     ///
     /// Example: `if page.has_unsaved_changes() { ... }`
     pub fn has_unsaved_changes(&self) -> bool {
@@ -260,14 +260,14 @@ impl GameSettingsPage {
         &self.row_keys
     }
 
-    /// `is_waiting` says whether no settings have come from the match server yet.
+    /// `is_waiting` says whether no settings have come from the game server yet.
     ///
     /// Example: `if page.is_waiting() { ... }`
     pub fn is_waiting(&self) -> bool {
         self.editor.is_none()
     }
 
-    /// `update` takes `settings`, the match server's latest. Without unsaved changes the page
+    /// `update` takes `settings`, the game server's latest. Without unsaved changes the page
     /// shows them; with some it keeps showing those. A save on its way ends here: taken (the
     /// server has the page's overrides) or refused (the server says why, for these overrides).
     ///
@@ -423,7 +423,7 @@ impl GameSettingsPage {
     }
 
     /// `save` checks every level's settings with the unsaved changes against the rules: broken,
-    /// it says where and why and sends nothing; kept, it sends them all to the match server.
+    /// it says where and why and sends nothing; kept, it sends them all to the game server.
     ///
     /// Example: `let outcome = page.save();`
     pub fn save(&mut self) -> GameSettingsOutcome {
@@ -489,7 +489,7 @@ impl GameSettingsPage {
     }
 
     /// `handle` applies one input: a change or a reset of a number is kept on the page, SAVE
-    /// SETTINGS checks and sends them all (`save`), DROP UNSAVED CHANGES shows the match server's
+    /// SETTINGS checks and sends them all (`save`), DROP UNSAVED CHANGES shows the game server's
     /// again, and Escape closes the page (asking once over unsaved changes).
     ///
     /// Example: `let outcome = page.handle(MenuInput::Reset);`

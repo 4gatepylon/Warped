@@ -1,4 +1,4 @@
-//! `menu` is the in-game menu (ported from the hyperbolic demo's `menu.rs`): its name with a `?`
+//! `menu` is the level menu (ported from the hyperbolic demo's `menu.rs`): its name with a `?`
 //! (help shows while the mouse is over it), the pages' names under it, and the page shown, turned
 //! with the arrows, `Q`/`E` or a click on a page's name (W-150, arrow keys and clicks for menu
 //! pages; W-151, menu layout and help tooltip): the scores page, with each player's team, kills and deaths from the server; the
@@ -232,7 +232,7 @@ fn get_score_lines(scoreboard: Scoreboard) -> Vec<(String, bool)> {
             death_count,
         } => {
             return vec![
-                ("Playing alone against robots.".to_string(), false),
+                ("Playing alone against bots.".to_string(), false),
                 (String::new(), false),
                 (format_score_row("TEAM", "PLAYER", "KILLS", "DEATHS"), false),
                 (

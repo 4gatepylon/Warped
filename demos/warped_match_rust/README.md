@@ -109,7 +109,7 @@ files have) and one per level (keys only that level has: Lunar Surface's `surfac
 `sandstorm`, Snow Planet's `blizzard`; Dark Forest has none). A client sends `settings?`, `set <shared|level index>
 <key> <value>` or `reset <scope> <key>` and gets `settings <json>` back (only clients that ask, so older ones never
 see it); a value must be a finite number of at least 0, whole where the default is. Each round starts with the
-settings as they are then (`warped_shared::game_settings`, `src/match_flow.rs`). The one-window app's game menu edits
+settings as they are then (`warped_shared::game_settings`, `src/match_flow.rs`). The one-window app's map menu edits
 them.
 
 ## Level interface

@@ -1,7 +1,7 @@
 # Warped, the one-window app (the official MVP)
 
 `warped` is the whole game in one window, like a normal game (W-141, one window for the whole
-game): a main menu, a game menu, and each round's level in the same window. The match server, the
+game): a main menu, a map menu, and each round's level in the same window. The match server, the
 level servers and the bots are headless programs that the app starts as its own child processes; no
 second window opens.
 
@@ -66,13 +66,13 @@ Dust, City Sphere and Dark Forest) go into the app only if they were downloaded 
   to 5, and on the other, 0 to 6, since a level takes 12 players, 6 a team; turning off
   consoles or fighting; you play blue); while this app hosts a game, going back to it or
   stopping it; player settings; credits; quit.
-- **Game menu**: the match's status (the progression page shared with the match window: the level
+- **Map menu**: the match's status (the progression page shared with the match window: the level
   being played and its map picture, the wavefronts, the round, who attacks and defends, free play's
   wins, players per team); your team and switching it; rejoining the round being played; the game
   master's choice of what everyone plays (the match, or any one level: Left/Right on its row, or
   click a level on the match's status (a double click also skips the break before it starts), and "back to the match" there; no authentication yet, so
   anyone may set it); game settings; player settings; leaving to the main menu.
-- **Game settings** (the game master's, W-158, per-map game settings), from the game menu: the match
+- **Game settings** (the game master's, W-158, per-map game settings), from the map menu: the match
   server's settings in sections, every level's (a key at least two levels' settings files have,
   "(levels differ)" where their defaults do) and each level's own (Lunar Surface's gravity, City
   Sphere's glass bounces, range and reflectivity, Dust's wind, Snow Planet's blizzard size; Dark
@@ -88,12 +88,12 @@ Dust, City Sphere and Dark Forest) go into the app only if they were downloaded 
   (`src/level_library.rs`: Lunar Surface, Dust, Snow Planet, City Sphere, Dark Forest, found by
   the manifest's `folder`), joined to the round's level server on your team with your settings
   file. Escape opens the level's menu (its MATCH page shows the match's status; its QUIT page
-  leaves for the game menu); holding Tab shows the map. When the round ends the level returns to
-  the game menu, which shows the match's progress; leaving keeps you out of that round until
+  leaves for the map menu); holding Tab shows the map. When the round ends the level returns to
+  the map menu, which shows the match's progress; leaving keeps you out of that round until
   Rejoin; closing the window quits. A level without a library would show a stand-in screen.
 - **`warped --tour-levels`** checks the levels inside the app: it plays alone, asks for each level
   in turn, and in each one settles, times its frames, opens the menu and leaves; it writes
-  `frame_times.md` and the game menu after each level to `.artifacts/tour_levels/<run_id>/`.
+  `frame_times.md` and the map menu after each level to `.artifacts/tour_levels/<run_id>/`.
   It ends on the game master's settings page of the game it hosts, and fails unless the match
   server's settings show there (`game_settings.png`), the server takes a save of one raised
   setting (`game_settings_saved.png`), and the page refuses a save that breaks a rule
@@ -103,12 +103,12 @@ Dust, City Sphere and Dark Forest) go into the app only if they were downloaded 
   bots on the player's team and on the other (4 and 5 for a 5v5), to time the levels in a busy game.
   Run it with `WARPED_LOOPBACK_ONLY=1` and your own ports (`--match-port`, `--level-port`,
   `--discovery-port`).
-- **Player settings**, from every menu: every key binding and the in-level menu's numbers, saved to
+- **Player settings**, from every menu: every key binding and the level menu's numbers, saved to
   `~/.config/warped/player_settings.yaml`, the file every level reads (`--player-settings` for
   another file).
 
-Escape never quits: in a level it opens the in-level menu, in the in-level menu it resumes, in the
-game menu it goes to the main menu (the user's rule), and on the main menu it does nothing. A game
+Escape never quits: in a level it opens the level menu, in the level menu it resumes, in the
+map menu it goes to the main menu (the user's rule), and on the main menu it does nothing. A game
 the app hosts keeps running on the main menu until "Stop hosting" or quitting.
 
 ## Flags
@@ -131,14 +131,14 @@ the app hosts keeps running on the main menu until "Stop hosting" or quitting.
   `play_level_fn_t`; the app calls it with a `LevelWindow` (SDL, the window, its event pump, its
   `CAMetalLayer` and Metal device, and a `MatchLink`) and a `LevelJoin` (the manifest entry, the
   level server's address, the team, the player's settings file). It returns a `LevelEnd`: the
-  round is over, `LeaveLevel` or `CloseWindow` (the in-level menu's `PlayOutcome`). Each frame the
+  round is over, `LeaveLevel` or `CloseWindow` (the level menu's `PlayOutcome`). Each frame the
   level calls `match_link.is_round_over()`, where the app keeps the match client alive, and feeds
   `match_link.get_match_lines()` to its menu's MATCH page.
 - **Children** (`src/children.rs`): hosting runs `hyperbolic-wormholes --serve-match` from
   `../warped_match_rust/.build/release/` (built by `make build-children`); each bot is a match client
   with `--bot`. Playing alone adds one bot on the other team that sits out every round, since a
   round starts only when each team has a player.
-- **The game master's choice**: the game menu sends the match server `play <level>` or
+- **The game master's choice**: the map menu sends the match server `play <level>` or
   `play match`; the server sets the match aside for free play on that level (round after round,
   counting each team's wins) or goes back to it, ends the round under way, and every client follows
   into the next round (`warped_shared::match_protocol`, `../warped_match_rust/src/match_flow.rs`).
@@ -148,8 +148,8 @@ the app hosts keeps running on the main menu until "Stop hosting" or quitting.
 ## Tests
 
 `make test` covers the screens' navigation (every Escape and exit rule), the main menu (every
-manifest level can be chosen, each game kind and its bots), the game menu (teams, rejoining, the
-game master choosing every level, the in-level menu), the game master's settings page (its
+manifest level can be chosen, each game kind and its bots), the map menu (teams, rejoining, the
+game master choosing every level, the level menu), the game master's settings page (its
 sections, every change and reset sent, a refused fraction, following the server's answer; and against a
 stand-in server on UDP 48392 and 48393), the app following a match server's views into
 and out of a round's level and sending the game master's choice until it is taken (against a stand-in

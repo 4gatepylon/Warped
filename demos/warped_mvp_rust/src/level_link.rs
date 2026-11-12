@@ -291,7 +291,7 @@ impl MatchLink for AppLink<'_> {
         self.app.get_level_view()
     }
 
-    /// `get_match_lines` gives the in-level menu's MATCH page.
+    /// `get_match_lines` gives the level menu's MATCH page.
     ///
     /// Example: `menu.set_match_lines(link.get_match_lines());`
     fn get_match_lines(&self) -> Option<Vec<(String, bool)>> {

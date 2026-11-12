@@ -1,6 +1,6 @@
 //! `warped` is Warped's one-window app (W-141, one window for the whole game): one SDL3 window
 //! with a Metal layer, the main menu (games on the network, joining, hosting, playing alone or
-//! against bots, the match or any one level, player settings, credits), the game menu (the
+//! against bots, the match or any one level, player settings, credits), the map menu (the
 //! match's status, teams, rejoining, the game master's choice) and the levels, which will draw
 //! into the same window once they are libraries (`warped_shared::app`). Servers and bots are
 //! headless child processes (`children.rs`); no second window opens.
@@ -35,12 +35,12 @@
 
 mod app_state;
 mod children;
-mod game_menu;
 mod game_settings_page;
 mod level_library;
 mod level_link;
 mod levels_manifest;
 mod main_menu;
+mod map_menu;
 mod menu_page;
 mod painter;
 mod play_log;
@@ -75,11 +75,11 @@ use warped_shared::player_settings::{PerPlayerSettings, get_saved_player_setting
 
 use crate::app_state::{App, Ports, format_utc_now, get_address_shapes, get_credits_shapes};
 use crate::children::{BotObjective, GameKind, MAX_ALLY_COUNT, MAX_ENEMY_COUNT, make_run_folder};
-use crate::game_menu::{GameMenu, LevelMenu, get_level_shapes};
 use crate::game_settings_page::GameSettingsPage;
 use crate::level_link::{AppLink, FrameTimer, Tour};
 use crate::levels_manifest::{Picture, get_levels_manifest_path, load_levels, load_map_pictures};
 use crate::main_menu::MainMenu;
+use crate::map_menu::{LevelMenu, MapMenu, get_level_shapes};
 use crate::menu_page::{MenuInput, page_t};
 use crate::painter::{Painter, PixelOrder, render_page};
 use crate::play_log::{PLAY_SETTLE_S, PlayLog};
@@ -529,9 +529,9 @@ fn save_screen_pictures(
     let view: MatchView = make_sample_view(levels);
     let main_menu: MainMenu = MainMenu::New();
     let main_rows = main_menu.get_rows(&[], true);
-    let game_menu: GameMenu = GameMenu::New();
+    let map_menu: MapMenu = MapMenu::New();
     let team: Option<Team> = Some(Team::Blue);
-    let round: (usize, usize) = game_menu::get_round(&view).expect("the sample plays a round");
+    let round: (usize, usize) = map_menu::get_round(&view).expect("the sample plays a round");
     let mut free_view: MatchView = view.clone();
     free_view.state.start_free_play(0);
     free_view.state.record_free_round(Team::Red);
@@ -556,16 +556,16 @@ fn save_screen_pictures(
         ),
         ("credits", get_credits_shapes()),
         (
-            "game_menu_connecting",
-            game_menu.get_shapes(&game_menu.get_rows(None), None, None, "192.168.1.20:47850"),
+            "map_menu_connecting",
+            map_menu.get_shapes(&map_menu.get_rows(None), None, None, "192.168.1.20:47850"),
         ),
         (
-            "game_menu_mid_match",
-            game_menu.get_shapes(&game_menu.get_rows(team), team, Some(&view), ""),
+            "map_menu_mid_match",
+            map_menu.get_shapes(&map_menu.get_rows(team), team, Some(&view), ""),
         ),
         (
-            "game_menu_free_play",
-            game_menu.get_shapes(&game_menu.get_rows(team), team, Some(&free_view), ""),
+            "map_menu_free_play",
+            map_menu.get_shapes(&map_menu.get_rows(team), team, Some(&free_view), ""),
         ),
         (
             "level_stand_in",

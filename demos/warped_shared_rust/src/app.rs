@@ -39,8 +39,8 @@ pub struct LevelJoin {
 
 /// `LevelEnd` is how a level ended: the match's round ended (the app's `MatchLink` said so),
 /// with the winner the level saw (`None` if it saw none, e.g. the match timed out); or the
-/// in-level menu's `PlayOutcome` (`menu_and_map.rs`) other than `Play`: the player left the level
-/// for the game menu (`LeaveLevel`), or closed the window, quitting the app (`CloseWindow`).
+/// level menu's `PlayOutcome` (`menu_and_map.rs`) other than `Play`: the player left the level
+/// for the map menu (`LeaveLevel`), or closed the window, quitting the app (`CloseWindow`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LevelEnd {
     RoundOver { winner: Option<Team> },
@@ -50,7 +50,7 @@ pub enum LevelEnd {
 
 /// `MatchLink` is the app's side of a level's frame loop: the level calls `is_round_over` once a
 /// frame, and the app polls the match server there and says whether the round has ended; the
-/// level's in-level menu shows the match's status on its MATCH page
+/// level's level menu shows the match's status on its MATCH page
 /// (`Menu::set_match_lines(window.match_link.get_match_lines())`): the level played now, the
 /// wavefronts, the round, who attacks and defends, free play's wins, players per team, from the
 /// shared `match_menu::get_match_lines`.
@@ -67,7 +67,7 @@ pub trait MatchLink {
     /// Example: `if let Some(view) = window.match_link.get_match_view() { ... }`
     fn get_match_view(&self) -> Option<&MatchView>;
 
-    /// `get_match_lines` gives the in-level menu's MATCH page for this player
+    /// `get_match_lines` gives the level menu's MATCH page for this player
     /// (`match_menu::get_match_lines`), or `None` before the server's first view.
     ///
     /// Example: `menu.set_match_lines(window.match_link.get_match_lines());`
@@ -89,7 +89,7 @@ pub struct LevelWindow<'a> {
 
 /// `play_level_fn_t` is a level's entry point: it plays `join` in the app's window until the round
 /// ends, the player leaves or quits, and says which; it fails only on what the level can't recover
-/// from (the app shows the error and goes back to the game menu).
+/// from (the app shows the error and goes back to the map menu).
 #[cfg(target_os = "macos")]
 #[allow(non_camel_case_types)]
 pub type play_level_fn_t =
@@ -102,7 +102,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Ending | round over, left to the game menu, quit | `a_level_function_fits_the_interface` |
+    //! | Ending | round over, left to the map menu, quit | `a_level_function_fits_the_interface` |
 
     use super::*;
 

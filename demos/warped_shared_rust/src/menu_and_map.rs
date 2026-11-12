@@ -3,7 +3,7 @@
 //! shows over the game, which goes on and keeps taking input; the open-menu control (`Escape`)
 //! opens the one menu and frees the mouse, and closing it captures the mouse again; and the menu's
 //! QUIT page leaves the level (`PlayOutcome::LeaveLevel`), which a level run alone treats as
-//! quitting and the one-window app as going back to its game menu. Inside the one-window app the
+//! quitting and the one-window app as going back to its map menu. Inside the one-window app the
 //! menu also has a MATCH page first, with lines the app supplies (the match's status); a level run
 //! alone has none. It also holds what every level's menu shares of its top two lines (W-151, menu
 //! layout and help tooltip; W-150, arrow keys and clicks for menu pages): the menu's name with a
@@ -76,7 +76,7 @@ pub enum MouseChange {
 }
 
 /// `PlayOutcome` is what a level's window does after an event: play on, leave the level (the
-/// QUIT page: a level run alone quits, the one-window app goes back to its game menu), or close
+/// QUIT page: a level run alone quits, the one-window app goes back to its map menu), or close
 /// (the window's close button: quit).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum PlayOutcome {

@@ -165,7 +165,7 @@ impl Programs {
         };
         if !match_server.exists() {
             return Err(format!(
-                "the match server {} isn't built; run make build-children in demos/warped_mvp_rust",
+                "the game server {} isn't built; run make build-children in demos/warped_mvp_rust",
                 match_server.display()
             )
             .into());

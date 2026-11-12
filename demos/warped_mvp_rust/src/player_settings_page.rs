@@ -1,5 +1,5 @@
 //! `player_settings_page.rs` is the player's settings page, reachable from every menu: every key
-//! binding and the in-level menu's numbers (`PLAYER_NUMBER_ROWS`), edited with the shared
+//! binding and the level menu's numbers (`PLAYER_NUMBER_ROWS`), edited with the shared
 //! settings editor and saved to the player's `player_settings.yaml`, the file every level reads.
 //!
 //! Interface: `PlayerSettingsPage` (`New`, `handle`, `is_rebinding`, `get_shapes`), `PageOutcome`.

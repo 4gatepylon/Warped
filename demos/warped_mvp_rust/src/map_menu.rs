@@ -1,20 +1,20 @@
-//! `game_menu.rs` is the game's own screens between the main menu and a level: the game menu
+//! `map_menu.rs` is the game's own screens between the main menu and a level: the map menu
 //! (the match's status from the shared progression page, the player's team, switching team,
 //! rejoining the round, the game master's choice of what to play, the game master's settings,
 //! the player's settings, leaving), the
-//! in-level menu (Escape in a level: the same match status, resuming, settings, exiting to the
-//! game menu, quitting), and the level's stand-in until the levels are libraries (W-141, one
+//! level menu (Escape in a level: the same match status, resuming, settings, exiting to the
+//! map menu, quitting), and the level's stand-in until the levels are libraries (W-141, one
 //! window for the whole game). They keep no window state.
 //!
-//! Interface: `GameMenu` (`New`, `get_rows`, `handle`, `get_shapes`), `GameRow`, `GameAction`,
+//! Interface: `MapMenu` (`New`, `get_rows`, `handle`, `get_shapes`), `MapMenuRow`, `MapMenuAction`,
 //! `LevelMenu` (`New`, `handle`, `get_shapes`), `LevelMenuAction`, `get_level_shapes`,
 //! `get_round`.
 //!
-//! Example: `let action = game_menu.handle(MenuInput::Activate, &rows, Some(Team::Blue), 5);`
+//! Example: `let action = map_menu.handle(MenuInput::Activate, &rows, Some(Team::Blue), 5);`
 //!
 //! Must know:
 //! - Gotchas: the match status is `warped_shared::match_menu`'s page, the one the match window
-//!   and the levels' in-level menus show; its `Thumbnail` shapes index the levels' map pictures.
+//!   and the levels' level menus show; its `Thumbnail` shapes index the levels' map pictures.
 
 use warped_shared::match_menu::{PAGE_SIZE, TEAM_RGB, get_progression_shapes_with_footer};
 use warped_shared::match_protocol::{MatchView, Phase};
@@ -42,9 +42,9 @@ pub fn get_round(view: &MatchView) -> Option<(usize, usize)> {
     }
 }
 
-/// `GameRow` is one row of the game menu.
+/// `MapMenuRow` is one row of the map menu.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum GameRow {
+pub enum MapMenuRow {
     PickTeam(Team),
     SwitchTeam,
     Rejoin,
@@ -54,12 +54,12 @@ pub enum GameRow {
     Leave,
 }
 
-/// `GameAction` is what the app does after an input on the game menu: nothing, play for a team,
-/// rejoin the round being played, ask the match server to play `choice` (a level's index, or
+/// `MapMenuAction` is what the app does after an input on the map menu: nothing, play for a team,
+/// rejoin the round being played, ask the game server to play `choice` (a level's index, or
 /// `None` for the match), open the game master's settings or the player's, or leave to the main
 /// menu.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum GameAction {
+pub enum MapMenuAction {
     Stay,
     SetTeam(Team),
     Rejoin,
@@ -69,9 +69,9 @@ pub enum GameAction {
     Leave,
 }
 
-/// `GameMenu` is the game menu's state: the selected row, the game master's choice (0 for the
+/// `MapMenu` is the map menu's state: the selected row, the game master's choice (0 for the
 /// match, else a level's index plus 1), and a message.
-pub struct GameMenu {
+pub struct MapMenu {
     selected: usize,
     master_choice: usize,
     pub message: Option<String>,
@@ -106,13 +106,13 @@ fn get_status_page(
     (shapes, size)
 }
 
-impl GameMenu {
+impl MapMenu {
     /// `New` starts with the first row selected and the match as the game master's choice.
     ///
-    /// Example: `let game_menu = GameMenu::New();`
+    /// Example: `let map_menu = MapMenu::New();`
     #[allow(non_snake_case)]
-    pub fn New() -> GameMenu {
-        GameMenu {
+    pub fn New() -> MapMenu {
+        MapMenu {
             selected: 0,
             master_choice: 0,
             message: None,
@@ -121,17 +121,20 @@ impl GameMenu {
 
     /// `get_rows` gives the rows for a player on `team` (`None` before they pick one).
     ///
-    /// Example: `let rows = game_menu.get_rows(Some(Team::Blue));`
-    pub fn get_rows(&self, team: Option<Team>) -> Vec<GameRow> {
-        let mut rows: Vec<GameRow> = match team {
-            None => vec![GameRow::PickTeam(Team::Blue), GameRow::PickTeam(Team::Red)],
-            Some(_) => vec![GameRow::SwitchTeam, GameRow::Rejoin],
+    /// Example: `let rows = map_menu.get_rows(Some(Team::Blue));`
+    pub fn get_rows(&self, team: Option<Team>) -> Vec<MapMenuRow> {
+        let mut rows: Vec<MapMenuRow> = match team {
+            None => vec![
+                MapMenuRow::PickTeam(Team::Blue),
+                MapMenuRow::PickTeam(Team::Red),
+            ],
+            Some(_) => vec![MapMenuRow::SwitchTeam, MapMenuRow::Rejoin],
         };
         rows.extend([
-            GameRow::GameMasterChoice,
-            GameRow::GameSettings,
-            GameRow::PlayerSettings,
-            GameRow::Leave,
+            MapMenuRow::GameMasterChoice,
+            MapMenuRow::GameSettings,
+            MapMenuRow::PlayerSettings,
+            MapMenuRow::Leave,
         ]);
         rows
     }
@@ -139,56 +142,58 @@ impl GameMenu {
     /// `handle` applies one input with `rows` shown, for a player on `team`, in a match of
     /// `level_count` levels (`view`'s, `None` before it came), and says what the app does.
     ///
-    /// Example: `let action = game_menu.handle(MenuInput::Activate, &rows, Some(Team::Red), Some(&view));`
+    /// Example: `let action = map_menu.handle(MenuInput::Activate, &rows, Some(Team::Red), Some(&view));`
     pub fn handle(
         &mut self,
         input: MenuInput,
-        rows: &[GameRow],
+        rows: &[MapMenuRow],
         team: Option<Team>,
         view: Option<&MatchView>,
-    ) -> GameAction {
+    ) -> MapMenuAction {
         self.message = None;
         self.selected = move_selection(self.selected, &input, rows.len());
         let level_count: usize = view.map_or(0, |view| view.levels.len());
-        let row: GameRow = rows[self.selected];
+        let row: MapMenuRow = rows[self.selected];
         match (&input, row) {
-            (MenuInput::Left | MenuInput::Right, GameRow::GameMasterChoice) if level_count > 0 => {
+            (MenuInput::Left | MenuInput::Right, MapMenuRow::GameMasterChoice)
+                if level_count > 0 =>
+            {
                 let step: i64 = if input == MenuInput::Left { -1 } else { 1 };
                 let count: i64 = level_count as i64 + 1;
                 self.master_choice = (self.master_choice as i64 + step).rem_euclid(count) as usize;
-                GameAction::Stay
+                MapMenuAction::Stay
             }
-            (MenuInput::Back, _) => GameAction::Leave,
-            (MenuInput::Activate, GameRow::PickTeam(team)) => GameAction::SetTeam(team),
-            (MenuInput::Activate, GameRow::SwitchTeam) => match team {
-                Some(team) => GameAction::SetTeam(team.get_other()),
-                None => GameAction::Stay,
+            (MenuInput::Back, _) => MapMenuAction::Leave,
+            (MenuInput::Activate, MapMenuRow::PickTeam(team)) => MapMenuAction::SetTeam(team),
+            (MenuInput::Activate, MapMenuRow::SwitchTeam) => match team {
+                Some(team) => MapMenuAction::SetTeam(team.get_other()),
+                None => MapMenuAction::Stay,
             },
-            (MenuInput::Activate, GameRow::Rejoin) => match view.and_then(get_round) {
-                Some(_) => GameAction::Rejoin,
+            (MenuInput::Activate, MapMenuRow::Rejoin) => match view.and_then(get_round) {
+                Some(_) => MapMenuAction::Rejoin,
                 None => {
                     self.message = Some("No round is being played now.".to_string());
-                    GameAction::Stay
+                    MapMenuAction::Stay
                 }
             },
-            (MenuInput::Activate, GameRow::GameMasterChoice) if level_count > 0 => {
-                GameAction::Play(self.master_choice.checked_sub(1))
+            (MenuInput::Activate, MapMenuRow::GameMasterChoice) if level_count > 0 => {
+                MapMenuAction::Play(self.master_choice.checked_sub(1))
             }
-            (MenuInput::Activate, GameRow::GameSettings) => GameAction::OpenGameSettings,
-            (MenuInput::Activate, GameRow::PlayerSettings) => GameAction::OpenPlayerSettings,
-            (MenuInput::Activate, GameRow::Leave) => GameAction::Leave,
-            _ => GameAction::Stay,
+            (MenuInput::Activate, MapMenuRow::GameSettings) => MapMenuAction::OpenGameSettings,
+            (MenuInput::Activate, MapMenuRow::PlayerSettings) => MapMenuAction::OpenPlayerSettings,
+            (MenuInput::Activate, MapMenuRow::Leave) => MapMenuAction::Leave,
+            _ => MapMenuAction::Stay,
         }
     }
 
     /// `format_row` gives a row's text.
     ///
-    /// Example: `let text = game_menu.format_row(GameRow::SwitchTeam, Some(Team::Blue), view);`
-    fn format_row(&self, row: GameRow, team: Option<Team>, view: Option<&MatchView>) -> MenuRow {
+    /// Example: `let text = map_menu.format_row(MapMenuRow::SwitchTeam, Some(Team::Blue), view);`
+    fn format_row(&self, row: MapMenuRow, team: Option<Team>, view: Option<&MatchView>) -> MenuRow {
         let round: Option<(usize, usize)> = view.and_then(get_round);
         let (text, is_enabled): (String, bool) = match row {
-            GameRow::PickTeam(team) => (format!("Play for {}", team.get_name()), true),
-            GameRow::SwitchTeam => match team {
+            MapMenuRow::PickTeam(team) => (format!("Play for {}", team.get_name()), true),
+            MapMenuRow::SwitchTeam => match team {
                 Some(team) => (
                     format!(
                         "You play {}: switch to {}",
@@ -199,14 +204,14 @@ impl GameMenu {
                 ),
                 None => ("Pick a team".to_string(), false),
             },
-            GameRow::Rejoin => match (round, view) {
+            MapMenuRow::Rejoin => match (round, view) {
                 (Some((number, level)), Some(view)) => (
                     format!("Rejoin round {number}: {}", view.levels[level].name),
                     true,
                 ),
                 _ => ("Rejoin the round (none is being played)".to_string(), false),
             },
-            GameRow::GameMasterChoice => match (view, self.master_choice.checked_sub(1)) {
+            MapMenuRow::GameMasterChoice => match (view, self.master_choice.checked_sub(1)) {
                 (None, _) => (
                     "Game master: play... (waiting for the server)".to_string(),
                     false,
@@ -226,23 +231,23 @@ impl GameMenu {
                     true,
                 ),
             },
-            GameRow::GameSettings => (
+            MapMenuRow::GameSettings => (
                 "Game settings (game master): every level's, and each level's own".to_string(),
                 true,
             ),
-            GameRow::PlayerSettings => ("Player settings (keys, mouse, look)".to_string(), true),
-            GameRow::Leave => ("Leave to the main menu".to_string(), true),
+            MapMenuRow::PlayerSettings => ("Player settings (keys, mouse, look)".to_string(), true),
+            MapMenuRow::Leave => ("Leave to the main menu".to_string(), true),
         };
         MenuRow { text, is_enabled }
     }
 
-    /// `get_shapes` gives the game menu's page for a player on `team` at `server_label`: the
+    /// `get_shapes` gives the map menu's page for a player on `team` at `server_label`: the
     /// match's status, then the rows and the message, and the page's size.
     ///
-    /// Example: `let (shapes, size) = game_menu.get_shapes(&rows, Some(Team::Blue), Some(&view), "127.0.0.1:47850");`
+    /// Example: `let (shapes, size) = map_menu.get_shapes(&rows, Some(Team::Blue), Some(&view), "127.0.0.1:47850");`
     pub fn get_shapes(
         &self,
-        rows: &[GameRow],
+        rows: &[MapMenuRow],
         team: Option<Team>,
         view: Option<&MatchView>,
         server_label: &str,
@@ -264,14 +269,14 @@ impl GameMenu {
     }
 }
 
-/// `LevelMenuAction` is what the app does after an input on the in-level menu: nothing, resume
-/// the level, open the player's settings, exit to the game menu, or quit the app.
+/// `LevelMenuAction` is what the app does after an input on the level menu: nothing, resume
+/// the level, open the player's settings, exit to the map menu, or quit the app.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LevelMenuAction {
     Stay,
     Resume,
     OpenPlayerSettings,
-    ExitToGameMenu,
+    ExitToMapMenu,
     Quit,
 }
 
@@ -281,11 +286,11 @@ const LEVEL_MENU_ROWS: [(LevelMenuAction, &str); 4] = [
         LevelMenuAction::OpenPlayerSettings,
         "Player settings (keys, mouse, look)",
     ),
-    (LevelMenuAction::ExitToGameMenu, "Exit to the game menu"),
+    (LevelMenuAction::ExitToMapMenu, "Exit to the map menu"),
     (LevelMenuAction::Quit, "Quit Warped"),
 ];
 
-/// `LevelMenu` is the in-level menu's state: the selected row.
+/// `LevelMenu` is the level menu's state: the selected row.
 pub struct LevelMenu {
     selected: usize,
 }
@@ -311,7 +316,7 @@ impl LevelMenu {
         }
     }
 
-    /// `get_shapes` gives the in-level menu: the match's status with the menu's rows under it.
+    /// `get_shapes` gives the level menu: the match's status with the menu's rows under it.
     ///
     /// Example: `let (shapes, size) = level_menu.get_shapes(Some(&view), Some(Team::Blue));`
     pub fn get_shapes(
@@ -366,7 +371,7 @@ pub fn get_level_shapes(
         false => {
             for (i, line) in [
                 "This level will draw here once the levels are libraries (W-141).",
-                "Until then the round goes on without you: the match server",
+                "Until then the round goes on without you: the game server",
                 "plays it, and this screen follows the match.",
             ]
             .iter()
@@ -381,7 +386,7 @@ pub fn get_level_shapes(
 
 #[cfg(test)]
 mod tests {
-    //! Unit tests for `game_menu.rs`.
+    //! Unit tests for `map_menu.rs`.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -389,7 +394,7 @@ mod tests {
     //! | Rejoin | a round being played, none | `rejoining_needs_a_round` |
     //! | Game master's choice | the match, every level of the view (both ways, wrapping), no view yet | `the_game_master_can_choose_every_level` |
     //! | Other rows and Escape | settings, game settings, leave, Escape | `the_other_rows_and_escape` |
-    //! | In-level menu | resume, settings, exit, quit, Escape resumes | `the_in_level_menu_resumes_exits_or_quits` |
+    //! | Level menu | resume, settings, exit, quit, Escape resumes | `the_in_level_menu_resumes_exits_or_quits` |
     //! | Pages | status with a view, without one, the level's stand-in with and without the map | `pages_show_the_match_status` |
 
     use super::*;
@@ -413,38 +418,38 @@ mod tests {
 
     /// `select` moves `menu` to `target`'s row.
     ///
-    /// Example: `select(&mut menu, &rows, GameRow::Leave);`
-    fn select(menu: &mut GameMenu, rows: &[GameRow], target: GameRow) {
+    /// Example: `select(&mut menu, &rows, MapMenuRow::Leave);`
+    fn select(menu: &mut MapMenu, rows: &[MapMenuRow], target: MapMenuRow) {
         menu.selected = rows.iter().position(|&row| row == target).unwrap();
     }
 
     #[test]
     fn teams_are_picked_and_switched() {
-        let mut menu: GameMenu = GameMenu::New();
+        let mut menu: MapMenu = MapMenu::New();
         let view: MatchView = make_view(Phase::WaitingForTeams);
-        let rows: Vec<GameRow> = menu.get_rows(None);
+        let rows: Vec<MapMenuRow> = menu.get_rows(None);
         for team in [Team::Blue, Team::Red] {
-            select(&mut menu, &rows, GameRow::PickTeam(team));
+            select(&mut menu, &rows, MapMenuRow::PickTeam(team));
             assert_eq!(
                 menu.handle(MenuInput::Activate, &rows, None, Some(&view)),
-                GameAction::SetTeam(team)
+                MapMenuAction::SetTeam(team)
             );
         }
         for team in [Team::Blue, Team::Red] {
-            let rows: Vec<GameRow> = menu.get_rows(Some(team));
-            select(&mut menu, &rows, GameRow::SwitchTeam);
+            let rows: Vec<MapMenuRow> = menu.get_rows(Some(team));
+            select(&mut menu, &rows, MapMenuRow::SwitchTeam);
             assert_eq!(
                 menu.handle(MenuInput::Activate, &rows, Some(team), Some(&view)),
-                GameAction::SetTeam(team.get_other())
+                MapMenuAction::SetTeam(team.get_other())
             );
         }
     }
 
     #[test]
     fn rejoining_needs_a_round() {
-        let mut menu: GameMenu = GameMenu::New();
-        let rows: Vec<GameRow> = menu.get_rows(Some(Team::Blue));
-        select(&mut menu, &rows, GameRow::Rejoin);
+        let mut menu: MapMenu = MapMenu::New();
+        let rows: Vec<MapMenuRow> = menu.get_rows(Some(Team::Blue));
+        select(&mut menu, &rows, MapMenuRow::Rejoin);
         let playing: MatchView = make_view(Phase::Playing {
             round: 2,
             level: 1,
@@ -452,70 +457,73 @@ mod tests {
         });
         assert_eq!(
             menu.handle(MenuInput::Activate, &rows, Some(Team::Blue), Some(&playing)),
-            GameAction::Rejoin
+            MapMenuAction::Rejoin
         );
         let waiting: MatchView = make_view(Phase::Intermission { left_s: 3.0 });
         assert_eq!(
             menu.handle(MenuInput::Activate, &rows, Some(Team::Blue), Some(&waiting)),
-            GameAction::Stay
+            MapMenuAction::Stay
         );
         assert!(menu.message.is_some());
     }
 
     #[test]
     fn the_game_master_can_choose_every_level() {
-        let mut menu: GameMenu = GameMenu::New();
+        let mut menu: MapMenu = MapMenu::New();
         let view: MatchView = make_view(Phase::WaitingForTeams);
-        let rows: Vec<GameRow> = menu.get_rows(Some(Team::Red));
-        select(&mut menu, &rows, GameRow::GameMasterChoice);
+        let rows: Vec<MapMenuRow> = menu.get_rows(Some(Team::Red));
+        select(&mut menu, &rows, MapMenuRow::GameMasterChoice);
         let team: Option<Team> = Some(Team::Red);
         assert_eq!(
             menu.handle(MenuInput::Activate, &rows, team, Some(&view)),
-            GameAction::Play(None)
+            MapMenuAction::Play(None)
         );
         for level in 0..view.levels.len() {
             menu.handle(MenuInput::Right, &rows, team, Some(&view));
             assert_eq!(
                 menu.handle(MenuInput::Activate, &rows, team, Some(&view)),
-                GameAction::Play(Some(level))
+                MapMenuAction::Play(Some(level))
             );
             let text: String = menu
-                .format_row(GameRow::GameMasterChoice, team, Some(&view))
+                .format_row(MapMenuRow::GameMasterChoice, team, Some(&view))
                 .text;
             assert!(text.contains(&view.levels[level].name), "{text}");
         }
         menu.handle(MenuInput::Right, &rows, team, Some(&view));
         assert_eq!(
             menu.handle(MenuInput::Activate, &rows, team, Some(&view)),
-            GameAction::Play(None)
+            MapMenuAction::Play(None)
         );
         menu.handle(MenuInput::Left, &rows, team, Some(&view));
         assert_eq!(
             menu.handle(MenuInput::Activate, &rows, team, Some(&view)),
-            GameAction::Play(Some(view.levels.len() - 1))
+            MapMenuAction::Play(Some(view.levels.len() - 1))
         );
         assert_eq!(
             menu.handle(MenuInput::Activate, &rows, team, None),
-            GameAction::Stay
+            MapMenuAction::Stay
         );
     }
 
     #[test]
     fn the_other_rows_and_escape() {
-        let mut menu: GameMenu = GameMenu::New();
-        let rows: Vec<GameRow> = menu.get_rows(Some(Team::Blue));
+        let mut menu: MapMenu = MapMenu::New();
+        let rows: Vec<MapMenuRow> = menu.get_rows(Some(Team::Blue));
         let team: Option<Team> = Some(Team::Blue);
         for (row, action) in [
-            (GameRow::PlayerSettings, GameAction::OpenPlayerSettings),
-            (GameRow::GameSettings, GameAction::OpenGameSettings),
-            (GameRow::Leave, GameAction::Leave),
+            (
+                MapMenuRow::PlayerSettings,
+                MapMenuAction::OpenPlayerSettings,
+            ),
+            (MapMenuRow::GameSettings, MapMenuAction::OpenGameSettings),
+            (MapMenuRow::Leave, MapMenuAction::Leave),
         ] {
             select(&mut menu, &rows, row);
             assert_eq!(menu.handle(MenuInput::Activate, &rows, team, None), action);
         }
         assert_eq!(
             menu.handle(MenuInput::Back, &rows, team, None),
-            GameAction::Leave
+            MapMenuAction::Leave
         );
     }
 
@@ -526,7 +534,7 @@ mod tests {
         assert_eq!(menu.handle(MenuInput::Activate), LevelMenuAction::Resume);
         for action in [
             LevelMenuAction::OpenPlayerSettings,
-            LevelMenuAction::ExitToGameMenu,
+            LevelMenuAction::ExitToMapMenu,
             LevelMenuAction::Quit,
         ] {
             menu.handle(MenuInput::Down);
@@ -536,13 +544,13 @@ mod tests {
 
     #[test]
     fn pages_show_the_match_status() {
-        let menu: GameMenu = GameMenu::New();
+        let menu: MapMenu = MapMenu::New();
         let view: MatchView = make_view(Phase::Playing {
             round: 1,
             level: 2,
             port: 1,
         });
-        let rows: Vec<GameRow> = menu.get_rows(Some(Team::Blue));
+        let rows: Vec<MapMenuRow> = menu.get_rows(Some(Team::Blue));
         let (with_view, size) = menu.get_shapes(&rows, Some(Team::Blue), Some(&view), "x");
         assert!(
             with_view

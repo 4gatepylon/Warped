@@ -85,8 +85,8 @@ const RIFLE_ROUTE_SETTLE_S: f64 = 1.0;
 const RIFLE_ROUTE_TIMEOUT_S: f64 = 20.0;
 const RIFLE_ROUTE_RESPAWN_WAIT_S: f64 = 4.0;
 const TARGET_DISTANCE_M: f64 = 7.0;
-const CITY_MAP_LEGEND: &str = "The whole sphere, unrolled: you white, cyan holes to the street";
-const CITY_PAPER_MAP_LEGEND: &str = "The whole sphere, unrolled: cyan holes to the street";
+const CITY_MAP_LEGEND: &str = "The whole sphere, unrolled: you white, cyan holes to the floor";
+const CITY_PAPER_MAP_LEGEND: &str = "The whole sphere, unrolled: cyan holes to the floor";
 const MAP_STREET_COLOR: [u8; 4] = [70, 70, 78, 255];
 const MAP_BUILDING_COLOR: [u8; 4] = [140, 105, 85, 255];
 const MAP_COVER_COLOR: [u8; 4] = [150, 165, 190, 255];
@@ -2199,7 +2199,7 @@ impl CitySession {
     fn get_hud_title(&self, render_px: (usize, usize), fps: f64, gpu_ms: f64) -> String {
         let team: &str = net::TEAM_NAMES[self.get_team() as usize % 2];
         let level: &str = match self.world.get_side(self.player.feet) {
-            Side::Street => "street",
+            Side::Street => "floor",
             Side::Glass => "glass level",
         };
         let on = |team: u32| {
@@ -2835,7 +2835,7 @@ fn get_map_pixel(d: DVec3, size_px: (usize, usize)) -> (usize, usize) {
 }
 
 /// `make_map_base` draws the map picture's still part as seen from the centre: the street,
-/// buildings, the glass level's covers and the glass's holes to the street.
+/// buildings, the glass level's covers and the glass's holes to the floor.
 fn make_map_base(world: &CityWorld, size_px: (usize, usize)) -> Vec<u8> {
     let glass_radius_m: f64 = world.get_glass().map_or(0.0, |glass| glass.radius_m);
     let mut pixels: Vec<u8> = Vec::with_capacity(size_px.0 * size_px.1 * BYTES_PER_PIXEL);

@@ -1,8 +1,8 @@
 //! `tour_run.rs` drives `warped --tour-levels`: it plays alone or with bots and asks the match
 //! server for each toured level in turn (free play), lets each run its `Tour` in the app's window (settle, time
-//! its frames, open the menu, leave), saves the game menu after each level, writes every
+//! its frames, open the menu, leave), saves the map menu after each level, writes every
 //! level's frame times to its run folder, and opens the game master's settings page to check that
-//! the match server's settings show there, before quitting.
+//! the game server's settings show there, before quitting.
 //!
 //! Interface: `TourRun` (`Start`, `before_frame`, `make_level_tour`, `after_level`, `is_done`,
 //! `finish`).
@@ -78,11 +78,11 @@ impl TourRun {
         })
     }
 
-    /// `before_frame` asks the match server for the next level while the game menu shows.
+    /// `before_frame` asks the game server for the next level while the map menu shows.
     ///
     /// Example: `tour_run.before_frame(&mut app);`
     pub fn before_frame(&self, app: &mut App) {
-        if app.is_in_game_menu() && !self.is_done() {
+        if app.is_in_map_menu() && !self.is_done() {
             app.request_play(Some(self.level_indices[self.done_count]));
         }
     }
@@ -94,7 +94,7 @@ impl TourRun {
         Tour::New(SETTLE_S, TIME_S, STEP_S)
     }
 
-    /// `after_level` records `level_name`'s frame times from `tour`, saves the game menu as it
+    /// `after_level` records `level_name`'s frame times from `tour`, saves the map menu as it
     /// shows after the level, and moves to the next level.
     ///
     /// Example: `tour_run.after_level(&app, "Dust", &tour)?;`
@@ -104,7 +104,7 @@ impl TourRun {
         self.summaries.push((level_name.to_string(), summary));
         self.save_page(
             app,
-            &format!("game_menu_after_{}.png", get_level_slug(level_name)),
+            &format!("map_menu_after_{}.png", get_level_slug(level_name)),
         )?;
         self.done_count += 1;
         Ok(())
@@ -134,12 +134,12 @@ impl TourRun {
     }
 
     /// `check_game_settings` opens the game master's settings page on the game the tour hosts,
-    /// waits for the match server's settings to show (`game_settings.png`), raises one setting
+    /// waits for the game server's settings to show (`game_settings.png`), raises one setting
     /// and saves it, then raises one of the beam speckle's shares and lowers another by as much
-    /// and saves that, each time waiting for the match server to take it
+    /// and saves that, each time waiting for the game server to take it
     /// (`game_settings_saved.png`), then raises a share again and saves, which the page must refuse
     /// (`game_settings_refused.png`), and leaves. It fails if the settings don't show or the
-    /// save isn't taken within `SETTINGS_ANSWER_TIMEOUT_S` (a match server that stopped never
+    /// save isn't taken within `SETTINGS_ANSWER_TIMEOUT_S` (a game server that stopped never
     /// answers), or if the bad save isn't refused.
     ///
     /// Example: `self.check_game_settings(app)?;`
@@ -149,7 +149,7 @@ impl TourRun {
         while !app.has_game_settings() {
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "tour: the game settings page didn't get the match server's settings within {SETTINGS_ANSWER_TIMEOUT_S} s"
+                    "tour: the game settings page didn't get the game server's settings within {SETTINGS_ANSWER_TIMEOUT_S} s"
                 )
                 .into());
             }
@@ -157,7 +157,7 @@ impl TourRun {
             std::thread::sleep(Duration::from_millis(SETTINGS_POLL_MS));
         }
         self.save_page(app, SETTINGS_PICTURE_NAME)?;
-        println!("tour: the game settings page shows the match server's settings");
+        println!("tour: the game settings page shows the game server's settings");
         app.step_game_setting(SAVED_SETTING_ROW, true)?;
         self.save_and_wait(app, SAVED_SETTING_ROW)?;
         for _ in 0..SHARE_STEP_COUNT {
@@ -182,7 +182,7 @@ impl TourRun {
     }
 
     /// `save_and_wait` saves the game settings page's changes (`what` names them) and waits for
-    /// the match server to take them; it fails if the page still has unsaved changes after
+    /// the game server to take them; it fails if the page still has unsaved changes after
     /// `SETTINGS_ANSWER_TIMEOUT_S`.
     ///
     /// Example: `self.save_and_wait(app, "shared.respawn.start_s")?;`
@@ -192,14 +192,14 @@ impl TourRun {
         while app.has_unsaved_game_settings() {
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "tour: the match server didn't take a save of {what} within {SETTINGS_ANSWER_TIMEOUT_S} s"
+                    "tour: the game server didn't take a save of {what} within {SETTINGS_ANSWER_TIMEOUT_S} s"
                 )
                 .into());
             }
             app.update();
             std::thread::sleep(Duration::from_millis(SETTINGS_POLL_MS));
         }
-        println!("tour: the match server took a save of {what}");
+        println!("tour: the game server took a save of {what}");
         Ok(())
     }
 

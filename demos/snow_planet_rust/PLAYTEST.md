@@ -79,7 +79,7 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
     every window from the same commit.
   - **THE GAME IS FULL:** the server already has 8 players.
   - **JOINING THE GAME:** you pressed `1` or `2`, and the server hasn't let you in yet.
-- You can't shoot until the server has let you into the game (not from the team screen, nor while joining).
+- You can't shoot until the server has let you into the game (not from the lobby, nor while joining).
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
   connections. Without that, nobody can reach the game.
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
