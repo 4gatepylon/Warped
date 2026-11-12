@@ -49,7 +49,7 @@ pub enum LevelEnd {
 }
 
 /// `MatchLink` is the app's side of a level's frame loop: the level calls `is_round_over` once a
-/// frame, and the app polls the match server there and says whether the round has ended; the
+/// frame, and the app polls the game server there and says whether the round has ended; the
 /// level's level menu shows the match's status on its MATCH page
 /// (`Menu::set_match_lines(window.match_link.get_match_lines())`): the level played now, the
 /// wavefronts, the round, who attacks and defends, free play's wins, players per team, from the

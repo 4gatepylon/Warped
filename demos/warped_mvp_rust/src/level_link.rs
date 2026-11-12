@@ -1,6 +1,6 @@
 //! `level_link.rs` is the app's side of a level playing in its window (`app::MatchLink`): once a
 //! frame the level asks it whether the round is over, and it polls the network there, so the
-//! match server keeps hearing this player; it gives the level's menu the match's status. With a
+//! game server keeps hearing this player; it gives the level's menu the match's status. With a
 //! `Tour` (`warped --tour-levels`), it also times the level's frames and presses the keys that
 //! show the map, open the menu and leave the level. With a `FrameTimer` (a person playing), it
 //! times the level's frames for the play log (`play_log.rs`).

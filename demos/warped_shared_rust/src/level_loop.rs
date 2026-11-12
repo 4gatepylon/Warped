@@ -12,7 +12,7 @@
 //!
 //! Must know:
 //! - Gotchas: the loop asks the match link once a frame, before the window's events, so a level
-//!   in the app never stops saying hello to the match server (`app::MatchLink`).
+//!   in the app never stops saying hello to the game server (`app::MatchLink`).
 //! - Gotchas: a level run alone shows its HUD in the window's title (`is_hud_in_title`); in the
 //!   app the title stays the app's.
 

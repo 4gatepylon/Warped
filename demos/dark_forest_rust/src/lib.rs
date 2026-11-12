@@ -26,6 +26,7 @@ mod credits;
 pub mod forest_layout;
 mod game;
 pub mod level;
+pub mod main_menu;
 pub mod map;
 mod match_play;
 mod menu;
@@ -40,7 +41,6 @@ mod settings;
 mod text_overlay;
 #[allow(dead_code)]
 mod thrown_wormholes;
-pub mod title;
 
 use std::error::Error;
 
@@ -70,7 +70,7 @@ fn get_join_visuals(join: &LevelJoin) -> Result<VisualsSettings, Box<dyn Error>>
 }
 
 /// `get_join_args` gives the flags that play `join`: join its server on its team at once, with
-/// no title screen, the player's visuals (W-51, basic visuals), and the level's `--map` and
+/// no main menu, the player's visuals (W-51, basic visuals), and the level's `--map` and
 /// client flags from the levels manifest.
 ///
 /// Example: `let args: Args = get_join_args(&join)?;`

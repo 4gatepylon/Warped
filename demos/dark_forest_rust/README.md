@@ -143,7 +143,7 @@ Metal layer and device, the level server's address and the team. It plays as `da
 --no-title` would (plus the levels manifest's `--map` and client flags), shows the app's lines on the menu's MATCH page,
 and returns when the round is over, the QUIT page is confirmed (`LeaveLevel`) or the window is closed (`CloseWindow`),
 having freed its GPU resources and given the layer back as it found it. `src/lib.rs` holds the entry point,
-`src/level.rs` the level (`Level::Load`, `run_title_screen`, `play`), `src/args.rs` the flags, and `src/main.rs` opens
+`src/level.rs` the level (`Level::Load`, `run_main_menu`, `play`), `src/args.rs` the flags, and `src/main.rs` opens
 a window and plays the level alone. `cargo test --test play_twice -- --ignored` plays it twice in one process in a
 hidden window (it needs the GPU), leaving each time from the QUIT page, and checks that the GPU memory comes back.
 

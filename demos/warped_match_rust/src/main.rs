@@ -28,6 +28,7 @@ mod console_bot;
 mod console_reach;
 mod credits;
 mod dust;
+mod main_menu;
 mod map;
 mod map_export;
 mod map_layout;
@@ -50,7 +51,6 @@ mod settings;
 mod terrain;
 mod third_person;
 mod thrown_wormholes;
-mod title;
 mod voxel_clearance;
 mod voxel_textures;
 mod voxel_world;
@@ -375,15 +375,15 @@ struct Arguments {
     /// Defaults to `fight`, and with --match to `consoles` (each round's bot).
     #[arg(long, value_enum, requires = "bot")]
     bot_objective: Option<BotObjective>,
-    /// Run a match server (match_flow.rs) on UDP --match-port, without a window: it plays the
+    /// Run a game server (match_flow.rs) on UDP --match-port, without a window: it plays the
     /// levels of --match-levels round by round and exits once the match is over.
     #[arg(long, conflicts_with_all = ["serve", "join", "match_server", "bench_views", "autopilot", "play_route"])]
     serve_match: bool,
-    /// Join the match server at this address (e.g. 127.0.0.1): show the match's progression and
+    /// Join the game server at this address (e.g. 127.0.0.1): show the match's progression and
     /// open each round's level in its own window (or, with --bot, run a bot in each round).
     #[arg(long = "match", conflicts_with_all = ["serve", "join", "bench_views", "autopilot", "play_route"])]
     match_server: Option<String>,
-    /// The match server's UDP port.
+    /// The game server's UDP port.
     #[arg(long, default_value_t = match_flow::MATCH_PORT)]
     match_port: u16,
     /// With --serve-match: the levels file (see match_levels.yaml).
@@ -705,9 +705,9 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
 ///
 /// Example: `cargo run --release -- --autopilot`
 fn main() -> ExitCode {
-    let is_title_screen: bool = std::env::args_os().len() == 1;
-    let result: Result<()> = if is_title_screen {
-        run_title_screen()
+    let is_main_menu: bool = std::env::args_os().len() == 1;
+    let result: Result<()> = if is_main_menu {
+        run_main_menu()
     } else {
         run(Arguments::parse())
     };
@@ -715,7 +715,7 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     };
     eprintln!("Error: {error}");
-    if is_title_screen {
+    if is_main_menu {
         let _ = show_alert(&error.to_string());
     }
     match error.downcast_ref::<net::PasswordRefused>() {
@@ -740,7 +740,7 @@ fn run(arguments: Arguments) -> Result<()> {
         return serve_only(&arguments);
     }
     if arguments.serve_match {
-        return run_match_server(&arguments);
+        return run_game_server(&arguments);
     }
     if let Some(address) = &arguments.match_server {
         return run_match_client(&arguments, address);
@@ -767,11 +767,11 @@ fn run(arguments: Arguments) -> Result<()> {
     }
 }
 
-/// `run_match_server` runs one match (`match_flow::serve_match`) on `--match-levels`, its level
+/// `run_game_server` runs one match (`match_flow::serve_match`) on `--match-levels`, its level
 /// results and logs under `.artifacts/match/<run_id>/`, and prints how it ended.
 ///
-/// Example: `run_match_server(&arguments)?;`
-fn run_match_server(arguments: &Arguments) -> Result<()> {
+/// Example: `run_game_server(&arguments)?;`
+fn run_game_server(arguments: &Arguments) -> Result<()> {
     let levels: Vec<match_flow::LevelEntry> = match_flow::LoadLevels(&arguments.match_levels)?;
     let folder: PathBuf = make_run_folder("match", arguments.label.as_deref())?;
     let times: match_flow::MatchTimes = match_flow::MatchTimes {
@@ -822,7 +822,7 @@ fn get_bot_objective_flags(objective: BotObjective) -> &'static [&'static str] {
     }
 }
 
-/// `run_match_client` joins the match server at `address`: it shows the progression page
+/// `run_match_client` joins the game server at `address`: it shows the progression page
 /// (`match_menu.rs`) in a window, or prints it with `--bot`, and for each round it starts the
 /// round's level joined to `--team` (a window, or a `--bot-objective consoles` bot) and stops it
 /// when the round ends. It returns once the match is over.
@@ -1051,11 +1051,11 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
     result
 }
 
-/// `run_title_screen` shows the title screen (`title.rs`) until the player quits, starting each
+/// `run_main_menu` shows the main menu (`main_menu.rs`) until the player quits, starting each
 /// chosen game as this program with that game's flags and showing why in a pop-up when one fails.
 ///
-/// Example: `run_title_screen()?;`
-fn run_title_screen() -> Result<()> {
+/// Example: `run_main_menu()?;`
+fn run_main_menu() -> Result<()> {
     let online_games_path: Option<PathBuf> = app_bundle::get_app_resources_folder()
         .map(|folder| folder.join(ONLINE_GAMES_FILE))
         .filter(|path| path.exists());
@@ -1063,20 +1063,20 @@ fn run_title_screen() -> Result<()> {
         Some(path) => fs::read_to_string(path)?,
         None => String::new(),
     };
-    let mut title_screen: title::TitleScreen = title::TitleScreen::New(&online_games)?;
-    while let Some(choice) = pick_title_choice(&mut title_screen)? {
-        if let Err(error) = start_title_choice(&choice) {
+    let mut main_menu: main_menu::MainMenu = main_menu::MainMenu::New(&online_games)?;
+    while let Some(choice) = pick_main_menu_choice(&mut main_menu)? {
+        if let Err(error) = start_main_menu_choice(&choice) {
             show_alert(&error.to_string())?;
         }
     }
     Ok(())
 }
 
-/// `pick_title_choice` opens the title screen's window until the player picks a game (`Some`) or
+/// `pick_main_menu_choice` opens the main menu's window until the player picks a game (`Some`) or
 /// quits (`None`).
 ///
-/// Example: `let choice = pick_title_choice(&mut title_screen)?;`
-fn pick_title_choice(title_screen: &mut title::TitleScreen) -> Result<Option<title::Choice>> {
+/// Example: `let choice = pick_main_menu_choice(&mut main_menu)?;`
+fn pick_main_menu_choice(main_menu: &mut main_menu::MainMenu) -> Result<Option<main_menu::Choice>> {
     let sdl: sdl3::Sdl = sdl3::init()?;
     let window: sdl3::video::Window = sdl
         .video()?
@@ -1094,12 +1094,12 @@ fn pick_title_choice(title_screen: &mut title::TitleScreen) -> Result<Option<tit
                     scancode: Some(scancode),
                     ..
                 } => match scancode {
-                    Scancode::Up | Scancode::W => title_screen.move_selection(-1),
-                    Scancode::Down | Scancode::S => title_screen.move_selection(1),
+                    Scancode::Up | Scancode::W => main_menu.move_selection(-1),
+                    Scancode::Down | Scancode::S => main_menu.move_selection(1),
                     Scancode::Escape => return Ok(None),
                     Scancode::Return | Scancode::KpEnter => {
-                        let choice: title::Choice = title_screen.get_selected().clone();
-                        return Ok((choice != title::Choice::Quit).then_some(choice));
+                        let choice: main_menu::Choice = main_menu.get_selected().clone();
+                        return Ok((choice != main_menu::Choice::Quit).then_some(choice));
                     }
                     _ => {}
                 },
@@ -1111,7 +1111,7 @@ fn pick_title_choice(title_screen: &mut title::TitleScreen) -> Result<Option<tit
         draw_text_overlay(
             &mut canvas,
             &OverlayText {
-                lines: title_screen.get_lines(),
+                lines: main_menu.get_lines(),
                 mask_px: MENU_MASK_PX,
                 height_frac: MENU_HEIGHT_FRAC,
                 is_centered: false,
@@ -1124,12 +1124,12 @@ fn pick_title_choice(title_screen: &mut title::TitleScreen) -> Result<Option<tit
     }
 }
 
-/// `start_title_choice` runs the chosen game as this program with its flags until it ends, its
+/// `start_main_menu_choice` runs the chosen game as this program with its flags until it ends, its
 /// output in a log under `~/Library/Logs/Warped/`; an online game first asks for the game's
 /// password once and keeps it, and forgets it if the server refuses it.
 ///
-/// Example: `start_title_choice(&title::Choice::Join(MapName::HouseDemo))?;`
-fn start_title_choice(choice: &title::Choice) -> Result<()> {
+/// Example: `start_main_menu_choice(&main_menu::Choice::Join(MapName::HouseDemo))?;`
+fn start_main_menu_choice(choice: &main_menu::Choice) -> Result<()> {
     let home: PathBuf = PathBuf::from(std::env::var_os("HOME").ok_or("HOME isn't set")?);
     let password_path: PathBuf = home.join(GAME_PASSWORD_HOME_PATH);
     let mut flags: Vec<String> = choice.get_flags();

@@ -209,10 +209,10 @@ pub struct Args {
     /// With --serve or --host: the server settings file (default: the built-in server_settings.yaml).
     #[arg(long)]
     pub server_settings: Option<PathBuf>,
-    /// A name the match server gives this window or bot; accepted and ignored.
+    /// A name the game server gives this window or bot; accepted and ignored.
     #[arg(long)]
     pub label: Option<String>,
-    /// Start playing at once instead of on the title screen (flags such as --join already do).
+    /// Start playing at once instead of on the main menu (flags such as --join already do).
     #[arg(long)]
     pub no_title: bool,
     /// Save one frame, without the HUD, to this PNG after the scene settles, then quit.

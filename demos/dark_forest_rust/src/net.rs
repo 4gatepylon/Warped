@@ -1222,7 +1222,7 @@ pub fn serve(
 }
 
 /// `write_level_result` writes `{"winner": "<team>"}` to a level result file at once, by writing
-/// `<path>.partial` and renaming it, so a match server never reads half a file.
+/// `<path>.partial` and renaming it, so a game server never reads half a file.
 ///
 /// Example: `write_level_result(Path::new("result.json"), 1)?;`
 pub fn write_level_result(path: &Path, winner: u32) -> Result<()> {

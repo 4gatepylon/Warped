@@ -277,7 +277,7 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   (`exit_prompt.rs` removed); the state is the shared `warped_shared::menu_and_map`, as in every level.
 - **D45. A library the one-window app plays in its own window** (W-141, one window for the whole game). `lib.rs`
   exposes `play_level`, a `warped_shared::app::play_level_fn_t`; `main.rs` opens its own window and plays through the
-  same `level::Level` (`Load`, `run_title_screen`, `play`), so the program run alone plays as before. Choices:
+  same `level::Level` (`Load`, `run_main_menu`, `play`), so the program run alone plays as before. Choices:
   - **The app's join is a command line.** `play_level` plays `dark-forest --join <server> --team <team> --no-title`
     plus the manifest entry's `--map` and client flags, parsed by the same `Args`, so the forest can't play
     differently in the app; a client flag that ends the game on its own (`--exit-after-s`) is an error there.

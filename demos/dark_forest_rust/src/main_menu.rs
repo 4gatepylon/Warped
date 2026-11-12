@@ -1,12 +1,12 @@
-//! `title` is the title screen the window opens on when no flag says what to play (ported from
-//! the hyperbolic demo's `title.rs`): playing alone against bots, hosting a game on this Wi-Fi,
+//! `title` is the main menu the window opens on when no flag says what to play (ported from
+//! the hyperbolic demo's `main_menu.rs`): playing alone against bots, hosting a game on this Wi-Fi,
 //! joining one, or quitting. It keeps no window state: the window feeds it keys and draws its lines.
 //!
-//! Interface: `TitleScreen` (`New`, `get_lines`, `move_selection`, `get_selected`), `Choice`.
+//! Interface: `MainMenu` (`New`, `get_lines`, `move_selection`, `get_selected`), `Choice`.
 //!
-//! Example: `let mut title = TitleScreen::New(); title.move_selection(1); let choice = title.get_selected();`
+//! Example: `let mut title = MainMenu::New(); title.move_selection(1); let choice = title.get_selected();`
 
-/// `Choice` is one thing the title screen can start.
+/// `Choice` is one thing the main menu can start.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Choice {
     PlayAlone,
@@ -30,18 +30,18 @@ const HEADER_LINES: [&str; 5] = [
 ];
 const FOOTER_LINE: &str = "Up/Down choose   Return start   Esc quits";
 
-/// `TitleScreen` is the title screen's selected choice.
-pub struct TitleScreen {
+/// `MainMenu` is the main menu's selected choice.
+pub struct MainMenu {
     selected_index: usize,
 }
 
-impl TitleScreen {
-    /// `New` makes the title screen with its first choice selected.
+impl MainMenu {
+    /// `New` makes the main menu with its first choice selected.
     ///
-    /// Example: `let title = TitleScreen::New();`
+    /// Example: `let title = MainMenu::New();`
     #[allow(non_snake_case)]
-    pub fn New() -> TitleScreen {
-        TitleScreen { selected_index: 0 }
+    pub fn New() -> MainMenu {
+        MainMenu { selected_index: 0 }
     }
 
     /// `get_lines` gives the screen's lines, each with whether it is highlighted: the name and
@@ -83,7 +83,7 @@ impl TitleScreen {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the title screen's selection.
+    //! Tests of the main menu's selection.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn selection_wraps() {
-        let mut title: TitleScreen = TitleScreen::New();
+        let mut title: MainMenu = MainMenu::New();
         assert_eq!(title.get_selected(), Choice::PlayAlone);
         title.move_selection(1);
         assert_eq!(title.get_selected(), Choice::Host);
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn only_the_selected_choice_is_marked() {
-        let mut title: TitleScreen = TitleScreen::New();
+        let mut title: MainMenu = MainMenu::New();
         title.move_selection(2);
         let marked: Vec<String> = title
             .get_lines()

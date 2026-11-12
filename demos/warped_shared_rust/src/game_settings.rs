@@ -12,7 +12,7 @@
 //! Example: `settings.apply(&parse_settings_message(b"set shared respawn.delay_s 5", 5)?)?;`
 //!
 //! Must know:
-//! - The game master saves every override at once (`SettingsMessage::Save`): the match server
+//! - The game master saves every override at once (`SettingsMessage::Save`): the game server
 //!   takes the save only if every level's settings then keep the rules of `setting_rules.rs`, and
 //!   otherwise keeps what it had and answers with the reason (`GameSettings::refusal`). `Set` and
 //!   `Reset`, one key at a time and unchecked beyond the number itself, stay for older apps.
@@ -78,7 +78,7 @@ pub struct Overrides {
     pub levels: Vec<BTreeMap<String, Value>>,
 }
 
-/// `Refusal` is why the match server didn't take the last save: the overrides it refused (so a
+/// `Refusal` is why the game server didn't take the last save: the overrides it refused (so a
 /// client knows the refusal is of its own save), the level whose settings would break a rule (its
 /// index in the levels file; `None` when the save itself was wrong), and the reason.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -221,7 +221,7 @@ fn get_number_keys(value: &Value) -> Vec<String> {
     keys
 }
 
-/// `GameSettings` is the game's settings as the match server keeps them: each level's default
+/// `GameSettings` is the game's settings as the game server keeps them: each level's default
 /// server settings (`None` for a level without a settings file), the shared overrides, each
 /// level's own overrides, each a dotted key to a number, and why the last save was refused, if it
 /// was.
@@ -503,7 +503,7 @@ impl GameSettings {
         Some(merged)
     }
 
-    /// `to_answer` gives the `settings <json>` datagram the match server answers a settings
+    /// `to_answer` gives the `settings <json>` datagram the game server answers a settings
     /// message with.
     ///
     /// Example: `socket.send_to(&settings.to_answer(), client)?;`

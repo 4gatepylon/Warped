@@ -1,11 +1,11 @@
 //! `level.rs` plays Dark Forest in a window it is lent: `Level::Load` sets up the renderer, the
-//! sounds and the forest's scene on the window's Metal layer; `Level::run_title_screen` shows the
-//! title screen (the program run alone); `Level::play` joins the game (alone against bots, or
+//! sounds and the forest's scene on the window's Metal layer; `Level::run_main_menu` shows the
+//! main menu (the program run alone); `Level::play` joins the game (alone against bots, or
 //! online) and runs the frame loop until the player leaves or closes the window, the caller's
 //! `MatchLink` says the round is over, or a flag's run (a photo, a benchmark) ends. Dropping the
 //! `Level` frees its GPU resources and gives the layer back as it found it.
 //!
-//! Interface: `LevelFiles` (`Find`), `Level` (`Load`, `run_title_screen`, `play`).
+//! Interface: `LevelFiles` (`Find`), `Level` (`Load`, `run_main_menu`, `play`).
 //!
 //! Example:
 //!     let files: LevelFiles = LevelFiles::Find(&args)?;
@@ -391,17 +391,17 @@ const MENU_DIM_FRAC: f32 = 0.75;
 const HELD_MAP_DIM_FRAC: f32 = 0.6;
 /// `MENU_HEIGHT_FRAC` is the most of the window's height the menu's text takes.
 const MENU_HEIGHT_FRAC: f32 = 0.85;
-/// `TITLE_PICTURE_PX` is the size of the title screen's text picture.
+/// `TITLE_PICTURE_PX` is the size of the main menu's text picture.
 const TITLE_PICTURE_PX: (u32, u32) = (416, 168);
-/// `TITLE_HEIGHT_FRAC` is the most of the window's height the title screen's text takes.
+/// `TITLE_HEIGHT_FRAC` is the most of the window's height the main menu's text takes.
 const TITLE_HEIGHT_FRAC: f32 = 0.5;
-/// `TITLE_DIM_FRAC` is how much the title screen darkens the forest behind it.
+/// `TITLE_DIM_FRAC` is how much the main menu darkens the forest behind it.
 const TITLE_DIM_FRAC: f32 = 0.45;
 /// `DEATH_PICTURE_PX` and `BANNER_HEIGHT_FRAC` are the Lunar Surface demo's "YOU DIED" banner: its
 /// text picture's size and the most of the window's height it takes.
 const DEATH_PICTURE_PX: (u32, u32) = (240, 24);
 const BANNER_HEIGHT_FRAC: f32 = 0.2;
-/// `TITLE_TURN_RAD_PER_S` is how fast the view behind the title screen turns.
+/// `TITLE_TURN_RAD_PER_S` is how fast the view behind the main menu turns.
 const TITLE_TURN_RAD_PER_S: f32 = 0.05;
 const TEAM_MARK_RGBA: [[u8; 4]; 2] = [[80, 140, 255, 255], [240, 80, 60, 255]];
 const ROBOT_MARK_RGBA: [u8; 4] = [255, 170, 40, 255];
@@ -443,19 +443,19 @@ fn fill_marks(session: &Session, marks: &mut Vec<Mark>) {
     }
 }
 
-/// `run_title_screen` shows the title screen over a slowly turning view of the forest until a
+/// `run_main_menu` shows the main menu over a slowly turning view of the forest until a
 /// choice is made with Return, or `None` if the window closes or Escape is pressed.
 ///
-/// Example: `let choice = run_title_screen(window, &mut renderer, &mut event_pump, &scene, &map_file, &settings);`
-fn run_title_screen(
+/// Example: `let choice = run_main_menu(window, &mut renderer, &mut event_pump, &scene, &map_file, &settings);`
+fn run_main_menu(
     window: &sdl3::video::Window,
     renderer: &mut MetalRenderer,
     event_pump: &mut sdl3::EventPump,
     scene: &Scene,
     map_file: &map::MapFile,
     settings: &RenderSettings,
-) -> Option<title::Choice> {
-    let mut title_screen: title::TitleScreen = title::TitleScreen::New();
+) -> Option<main_menu::Choice> {
+    let mut main_menu: main_menu::MainMenu = main_menu::MainMenu::New();
     let mut picture: TextPicture = TextPicture::New(TITLE_PICTURE_PX.0, TITLE_PICTURE_PX.1);
     let mut preview: Session = Session::new(Arena::from_map(map_file), 0, false);
     let (feet_m, yaw_rad, pitch_rad) = CameraView::Lookout.pose();
@@ -471,10 +471,10 @@ fn run_title_screen(
                     ..
                 } => match scancode {
                     Scancode::Escape => return None,
-                    Scancode::Up | Scancode::W => title_screen.move_selection(-1),
-                    Scancode::Down | Scancode::S => title_screen.move_selection(1),
+                    Scancode::Up | Scancode::W => main_menu.move_selection(-1),
+                    Scancode::Down | Scancode::S => main_menu.move_selection(1),
                     Scancode::Return | Scancode::KpEnter | Scancode::Space => {
-                        return Some(title_screen.get_selected());
+                        return Some(main_menu.get_selected());
                     }
                     _ => {}
                 },
@@ -492,7 +492,7 @@ fn run_title_screen(
             yaw_rad + start.elapsed().as_secs_f32() * TITLE_TURN_RAD_PER_S,
         );
         preview.player.pitch_rad = pitch_rad;
-        picture.draw(&title_screen.get_lines(), true);
+        picture.draw(&main_menu.get_lines(), true);
         let mut frame: FrameData = preview.frame_data(scene, width_px, height_px);
         frame.viewmodel_draws.clear();
         frame.hud_rects.clear();
@@ -886,12 +886,12 @@ impl Level {
         }
     }
 
-    /// `run_title_screen` shows the title screen in `window` until a choice is made, or `None`
+    /// `run_main_menu` shows the main menu in `window` until a choice is made, or `None`
     /// if the window closes or Escape is pressed.
     ///
-    /// Example: `let choice: Option<title::Choice> = level.run_title_screen(&mut window);`
-    pub fn run_title_screen(&mut self, window: &mut LevelWindow) -> Option<title::Choice> {
-        run_title_screen(
+    /// Example: `let choice: Option<main_menu::Choice> = level.run_main_menu(&mut window);`
+    pub fn run_main_menu(&mut self, window: &mut LevelWindow) -> Option<main_menu::Choice> {
+        run_main_menu(
             window.window,
             &mut self.renderer,
             window.event_pump,

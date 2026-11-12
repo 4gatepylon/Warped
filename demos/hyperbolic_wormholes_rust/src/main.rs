@@ -2,7 +2,7 @@
 //! the program is the `lunar_surface_level` library (`lib.rs`), which the one-window app plays
 //! too (W-141, one window for the whole game).
 //!
-//! Interface: the command line in `lib.rs`'s docstring; without arguments, the title screen.
+//! Interface: the command line in `lib.rs`'s docstring; without arguments, the main menu.
 //!
 //! Example: `cargo run --release -- --map lunar-surface --join 192.168.1.5`
 

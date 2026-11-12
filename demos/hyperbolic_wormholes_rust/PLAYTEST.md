@@ -11,7 +11,7 @@ holds `Warped.app` and a note, `How to open Warped.txt`.
 - Unzip it and drag `Warped.app` into Applications. The first time, macOS can't check the app (it isn't notarized):
   click Done, then System Settings → Privacy & Security → Open Anyway. The download page's install command skips
   this step.
-- The app opens on a title screen: online games (with the game's password, asked once), hosting or joining on this
+- The app opens on a main menu: online games (with the game's password, asked once), hosting or joining on this
   Wi-Fi, or playing alone. Logs go to `~/Library/Logs/Warped/`, and a failure shows in a pop-up.
 - The app carries the surface textures from `demos/fps_demo/assets/`, and the revolver is built into the game
   itself (so the zip is about 110 MB); it runs on a Mac without the repository.

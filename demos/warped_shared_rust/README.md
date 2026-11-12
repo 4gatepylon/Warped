@@ -71,7 +71,7 @@ Everything else differs between levels, or needs a module that does:
 - `map.rs` (each level adds map fields, such as Dust's atmosphere, and its own `MapName`s), `settings.rs` (each embeds
   its own `server_settings.yaml` and `player_settings.yaml` and composes the shared
   `play_settings` sections into its `ServerSettings` and `PerPlayerSettings`; City Sphere adds `glass`), `voxel_world.rs`, `render_voxel.*`, `map_layout.rs`,
-  `net.rs`, `multiplayer.rs`, `main.rs`, `title.rs`, `credits.rs`, `dust.rs`, `terrain.rs` (Dust's own), and
+  `net.rs`, `multiplayer.rs`, `main.rs`, `main_menu.rs`, `credits.rs`, `dust.rs`, `terrain.rs` (Dust's own), and
   `voxel_textures.rs` (each level's own surface sets).
 - Files identical in every level but needing one of those: `avatar_animation`, `black_hole_growth`,
   `voxel_clearance`, `minimap` and `third_person` need `voxel_world`; `menu` needs `net`, `settings` and `credits`;
