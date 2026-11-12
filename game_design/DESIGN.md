@@ -60,6 +60,8 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 - A console pulses with light once a second while it is on. While someone holds `E` on it, it
   pulses faster and faster, up to 8 times a second just before it turns off, and eases back down
   over about a second if the hold stops. It goes dark once it is off.
+- While its console is on, a pylon sends up a pylon beam, a column of light in its team's colour. The beam
+  goes out when the console is deactivated.
 - A player can only deactivate the other team's consoles.
 - What deactivating a pylon does, besides bringing its team closer to losing, varies per level: on
   Lunar Surface it grows the black hole (see [Lunar Surface](#lunar-surface)); on the other levels
@@ -447,7 +449,7 @@ What a player sees while playing:
   taking the player's input, until `Tab` is let go. It has the MAP page's marks, plus the player as a disk pointing
   the way they face, every other player in the game, near or far, as a dot in their team's colour, and a circle of
   the player's fog of war range around them (`main_map.fog_of_war_range_m` in `player_settings.yaml`, 60 m by
-  default), outside which the picture is darker and blurred: the fog of war. A legend line names the marks.
+  default), drawn as a white rim, outside which the picture is darker and blurred: the fog of war. A legend line names the marks.
 - **Menu** (`Esc`, which frees the mouse; `Esc` again closes it and captures the mouse): its name on the first line,
   the names of its five pages on the line under it (the open one in brackets), then the page. It opens on SCORES.
   The left and right arrows, `Q` and `E`, or a click on a page's name turn the pages. On SETTINGS, `Down` or `Up`
