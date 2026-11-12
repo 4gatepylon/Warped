@@ -279,3 +279,14 @@ picture of it. The picture is Dark Forest run as its own program (`game_design/s
 console bar, the readouts and the banner aren't on it.
 
 ![The level page, with the row or key that leads to each page marked](pages/level_page.png)
+
+### The level menu's SWG
+
+```text
+level menu
+├── match status, as on the game menu           UIEs and renders
+├── rows                                        UIEs
+└── selected-row highlight                      UIE
+```
+
+![The level menu, with the row or key that leads to each page marked](pages/level_menu.png)
