@@ -1,5 +1,5 @@
 //! `text_overlay` draws lines of text with SDL's built-in 8x8 font into an RGBA picture for the
-//! HUD (`HudImage`): the menu and the title screen. It redraws only when the lines change.
+//! HUD (`HudImage`): the menu and the main menu. It redraws only when the lines change.
 //!
 //! Interface: `TextPicture` (`New`, `draw`, `draw_team_box`, `get_image`, `get_layout`),
 //! `GLYPH_PX`.

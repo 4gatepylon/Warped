@@ -212,7 +212,7 @@ pub struct Args {
     /// A name the match server gives this window or bot; accepted and ignored.
     #[arg(long)]
     pub label: Option<String>,
-    /// Start playing at once instead of on the title screen (flags such as --join already do).
+    /// Start playing at once instead of on the main menu (flags such as --join already do).
     #[arg(long)]
     pub no_title: bool,
     /// Save one frame, without the HUD, to this PNG after the scene settles, then quit.

@@ -16,7 +16,7 @@ use warped_shared::metal_window::{MetalWindow, NoMatchLink, WindowOptions};
 
 use warped_dark_forest::args::Args;
 use warped_dark_forest::level::{Level, LevelFiles};
-use warped_dark_forest::title::Choice;
+use warped_dark_forest::main_menu::Choice;
 use warped_dark_forest::{forest_layout, server};
 
 /// `MAP_PICTURE_SHADOW_DISTANCE_M` lets the sun's shadows reach the forest from as high as
@@ -86,7 +86,7 @@ fn main() {
         || args.photo.is_some()
         || args.video_frames.is_some());
     if is_title_shown {
-        match level.run_title_screen(&mut window) {
+        match level.run_main_menu(&mut window) {
             None | Some(Choice::Quit) => return,
             Some(Choice::PlayAlone) => {}
             Some(Choice::Host) => args.host = true,

@@ -248,7 +248,7 @@ As of `staging/user-4gatepylon` at #482 (2026-11-09):
 | Player settings | `player_settings.yaml` | identical copy | identical copy | identical copy | `HIT_EFFECTS` and `HEAD_BOB` constants (Lunar's values) |
 | Map picture | none: drawn from the map in code (`map_layout.rs`) | `map_pictures/dust_r50m.png` (`--make-map-picture`) | `map_pictures/snow_planet.png` (`--map-picture`) | `assets/map_picture.png` (`make map-picture`) | `assets/map_picture.png` (`--map-picture <png>`) |
 | Credits | `src/credits.rs` | `src/credits.rs` (its own surfaces) | `src/credits.rs` (Lunar's, unchanged) | `src/credits.rs` (adds 2 textures) | `src/credits.rs`; README's asset table |
-| Title, port | `title.rs` "Lunar Surface", 47800 | 47830 | 47820 | 47810 | 47840 |
+| Title, port | `main_menu.rs` "Lunar Surface", 47800 | 47830 | 47820 | 47810 | 47840 |
 | In the match | `match_levels.yaml`: `program: self` | `.levels/dust/...` binary | `.levels/snow_planet/...` | `.levels/city_sphere/...` | `.levels/dark_forest/...`, `takes_bot_label: false` |
 
 Duplicates and inconsistencies this design removes:

@@ -1,7 +1,7 @@
 //! `snow-planet` runs Snow Planet alone, in a window of its own: the program is the `snow_planet_level`
 //! library (`lib.rs`), which the one-window app plays too (W-141, one window for the whole game).
 //!
-//! Interface: the command line in `lib.rs`'s docstring; without arguments, the title screen.
+//! Interface: the command line in `lib.rs`'s docstring; without arguments, the main menu.
 //!
 //! Example: `cargo run --release -- --map snow-planet --join 192.168.1.5`
 
