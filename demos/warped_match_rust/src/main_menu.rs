@@ -1,12 +1,12 @@
-//! `title.rs` is the title screen a double-clicked app opens on (W-58): the choices of game
+//! `main_menu.rs` is the main menu a double-clicked app opens on (W-58): the choices of game
 //! (online games, or joining one on this Wi-Fi on either map), the one selected, and the flags that
 //! start each. It keeps no window state: the window feeds it keys and
 //! draws its lines, as with `menu.rs`.
 //!
-//! Interface: `TitleScreen` (`New`, `get_lines`, `move_selection`, `get_selected`), `Choice`
+//! Interface: `MainMenu` (`New`, `get_lines`, `move_selection`, `get_selected`), `Choice`
 //! (`get_flags`, `is_online`).
 //!
-//! Example: `let title = TitleScreen::New("34.1.2.3:47810 lunar-surface Lunar Surface 1")?;`
+//! Example: `let title = MainMenu::New("34.1.2.3:47810 lunar-surface Lunar Surface 1")?;`
 //!
 //! Must know:
 //! - The online games come from the app's `online_games.txt`, one game a line:
@@ -22,14 +22,14 @@ use crate::map::MapName;
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const MAPS: [MapName; 3] = [MapName::Dust, MapName::LunarSurface, MapName::HouseDemo];
+const MAPS: [MapName; 2] = [MapName::LunarSurface, MapName::HouseDemo];
 const HEADER_LINES: [&str; 3] = [
     "WARPED",
     "Up and Down choose, Return starts, Escape quits.",
     "",
 ];
 
-/// `Choice` is one line of the title screen: a game to start, or quitting.
+/// `Choice` is one line of the main menu: a game to start, or quitting.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Choice {
     Online {
@@ -41,8 +41,8 @@ pub enum Choice {
     Quit,
 }
 
-/// `TitleScreen` is the title screen's choices and the selected one.
-pub struct TitleScreen {
+/// `MainMenu` is the main menu's choices and the selected one.
+pub struct MainMenu {
     choices: Vec<Choice>,
     selected: usize,
 }
@@ -52,7 +52,6 @@ pub struct TitleScreen {
 /// Example: `let label = get_map_label(MapName::LunarSurface);`
 fn get_map_label(map: MapName) -> &'static str {
     match map {
-        MapName::Dust => "Dust",
         MapName::HouseDemo => "House",
         MapName::LunarSurface => "Lunar Surface",
     }
@@ -69,7 +68,7 @@ fn get_map_flag(map: MapName) -> String {
 }
 
 impl Choice {
-    /// `get_label` gives the choice's line on the title screen.
+    /// `get_label` gives the choice's line on the main menu.
     ///
     /// Example: `let line = choice.get_label();`
     fn get_label(&self) -> String {
@@ -103,13 +102,13 @@ impl Choice {
     }
 }
 
-impl TitleScreen {
-    /// `New` makes the title screen from the text of `online_games.txt` (empty for none), with
+impl MainMenu {
+    /// `New` makes the main menu from the text of `online_games.txt` (empty for none), with
     /// the first choice selected.
     ///
-    /// Example: `let title = TitleScreen::New("")?;`
+    /// Example: `let title = MainMenu::New("")?;`
     #[allow(non_snake_case)]
-    pub fn New(online_games: &str) -> Result<TitleScreen> {
+    pub fn New(online_games: &str) -> Result<MainMenu> {
         let mut choices: Vec<Choice> = Vec::new();
         for line in online_games.lines().filter(|line| !line.trim().is_empty()) {
             let words: Vec<&str> = line.split_whitespace().collect();
@@ -132,13 +131,13 @@ impl TitleScreen {
         }
         choices.extend(MAPS.map(Choice::Join));
         choices.push(Choice::Quit);
-        Ok(TitleScreen {
+        Ok(MainMenu {
             choices,
             selected: 0,
         })
     }
 
-    /// `get_lines` gives the title screen's lines, each with whether it is highlighted (the
+    /// `get_lines` gives the main menu's lines, each with whether it is highlighted (the
     /// title and the selected choice).
     ///
     /// Example: `let lines = title.get_lines();`
@@ -176,7 +175,7 @@ impl TitleScreen {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the title screen's choices.
+    //! Tests of the main menu's choices.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -186,20 +185,20 @@ mod tests {
 
     use super::*;
 
-    const LOCAL_CHOICE_COUNT: usize = 4;
+    const LOCAL_CHOICE_COUNT: usize = 3;
 
     #[test]
     fn without_online_games_only_local_choices_show() {
-        let title: TitleScreen = TitleScreen::New("").expect("a title screen");
+        let title: MainMenu = MainMenu::New("").expect("a main menu");
         assert_eq!(title.choices.len(), LOCAL_CHOICE_COUNT);
-        assert_eq!(title.get_selected(), &Choice::Join(MapName::Dust));
+        assert_eq!(title.get_selected(), &Choice::Join(MapName::LunarSurface));
     }
 
     #[test]
     fn online_games_come_first() {
         let text: &str =
             "34.1.2.3:47810 lunar-surface Lunar Surface 1\n\n34.1.2.3:47812 house-demo House\n";
-        let title: TitleScreen = TitleScreen::New(text).expect("a title screen");
+        let title: MainMenu = MainMenu::New(text).expect("a main menu");
         assert_eq!(title.choices.len(), LOCAL_CHOICE_COUNT + 2);
         assert_eq!(
             title.get_selected(),
@@ -222,7 +221,7 @@ mod tests {
             "34.1.2.3:47810 lunar-surface",
             "34.1.2.3:47810 moon Moon Base",
         ] {
-            let error: String = TitleScreen::New(line)
+            let error: String = MainMenu::New(line)
                 .err()
                 .expect("a bad line")
                 .to_string();
@@ -252,9 +251,9 @@ mod tests {
 
     #[test]
     fn selection_wraps_around() {
-        let mut title: TitleScreen = TitleScreen::New("").expect("a title screen");
+        let mut title: MainMenu = MainMenu::New("").expect("a main menu");
         title.move_selection(1);
-        assert_eq!(title.get_selected(), &Choice::Join(MapName::LunarSurface));
+        assert_eq!(title.get_selected(), &Choice::Join(MapName::HouseDemo));
         title.move_selection(-2);
         assert_eq!(title.get_selected(), &Choice::Quit);
     }

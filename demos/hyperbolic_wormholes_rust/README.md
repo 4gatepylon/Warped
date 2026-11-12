@@ -19,7 +19,7 @@ make join-game SERVER=127.0.0.1
 - Playing is only on a game server: `make serve-game` runs one (Lunar Surface by default), and every player joins
   it with `make join-game` (`SERVER=127.0.0.1` on the same computer, or the address the server prints). There is no
   local demo or host-and-play command; without a server, only the tools below run.
-- Started without flags (a double-click on the app, or `cargo run --release`), the game opens on a title screen:
+- Started without flags (a double-click on the app, or `cargo run --release`), the game opens on a main menu:
   the online games (from the app's `online_games.txt`), a server by the address the player types (`IP:port`,
   remembered for next time), or a game on this Wi-Fi, on either map. It runs
   the chosen game as itself with that game's flags, logs it to `~/Library/Logs/Warped/`, and shows a pop-up if
@@ -186,7 +186,7 @@ make package-mac-app ONLINE_GAMES=online_games.txt
   (`../warped_shared_rust/`) reads them from there when the game runs from the app. The revolver is built into the
   program (`viewmodel.rs`), not shipped as files, as its Sketchfab Standard license asks; the menu's CREDITS page
   credits its author.
-- `ONLINE_GAMES=` copies an `online_games.txt` into the app for its title screen (`title.rs` says the format); the
+- `ONLINE_GAMES=` copies an `online_games.txt` into the app for its main menu (`main_menu.rs` says the format); the
   cloud deploy writes it.
 
 ## Play together
