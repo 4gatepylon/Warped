@@ -983,7 +983,7 @@ mod tests {
     //! | Following the match | no team (stays in the map menu), a round starts (level), Escape (level menu), exit (map menu, not re-entered), rejoin (level), the round ends (map menu), Escape (main menu) | `the_app_follows_the_match_into_and_out_of_levels` |
     //! | Game master | a choice sent until the server's view shows it | `the_game_masters_choice_is_sent_until_taken` |
     //! | Clicks on the map menu | elsewhere (nothing), on the first level (free play there, after the break), a double click on it (also asked to start at once) | `clicking_a_level_plays_it` |
-    //! | Game master's settings | the page asks, shows the answer, sends a step up, Escape back to the map menu (UDP 48392, 48393) | `the_game_masters_settings_go_to_the_match_server` |
+    //! | Game master's settings | the page asks, shows the answer, sends a step up, Escape back to the map menu (UDP 48392, 48393) | `the_game_masters_settings_go_to_the_game_server` |
     //! | Run id | the format | `run_ids_are_utc_times` |
 
     use super::*;
@@ -1162,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    fn the_game_masters_settings_go_to_the_match_server() {
+    fn the_game_masters_settings_go_to_the_game_server() {
         let server: FakeServer = start_server(48_392);
         let mut app: App = make_app(48_393);
         app.join("127.0.0.1:48392".parse().unwrap(), Some(Team::Blue))

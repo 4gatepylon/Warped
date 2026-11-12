@@ -17,7 +17,7 @@ use crate::net;
 use crate::settings::ServerSettings;
 
 /// `NEW_GAME_AFTER_WIN_S` is how long after a win a new game starts, unless the server writes a
-/// level result (then the match server decides what comes next).
+/// level result (then the game server decides what comes next).
 const NEW_GAME_AFTER_WIN_S: u64 = 10;
 
 /// `ServerOptions` is what a server needs to start: its port, map, where it writes a win, the

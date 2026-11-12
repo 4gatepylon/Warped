@@ -1,4 +1,4 @@
-//! `match_flow.rs` runs a match server across the levels (`serve_match`): it keeps the
+//! `match_flow.rs` runs a game server across the levels (`serve_match`): it keeps the
 //! `MatchState`, starts each round's level server (a separate program, see `LevelEntry`), reads
 //! the level's winner back from the file the level writes, tells the match clients what is on, so
 //! each client can start and stop its level, and announces the match on the local network
@@ -186,7 +186,7 @@ pub fn serve_match(
     )
 }
 
-/// `serve_match_on` is `serve_match` listening at `address` (the match server's) with each
+/// `serve_match_on` is `serve_match` listening at `address` (the game server's) with each
 /// round's level server on `level_port`, announcing itself with `announcer`, or not at all with
 /// `None` (a test on 127.0.0.1: no beacon, nothing open to the network).
 ///
@@ -214,7 +214,7 @@ pub fn serve_match_on(
     let mut round_result_path: Option<PathBuf> = None;
     let mut free_round_total: usize = 0;
     let mut buffer: Vec<u8> = vec![0; MAX_DATAGRAM_BYTES];
-    println!("Match server on UDP port {match_port}; levels on port {level_port}.");
+    println!("Game server on UDP port {match_port}; levels on port {level_port}.");
     loop {
         let received: Option<(usize, SocketAddr)> = match socket.recv_from(&mut buffer) {
             Ok(received) => Some(received),
@@ -448,8 +448,8 @@ mod tests {
     //! | --- | --- | --- |
     //! | Levels file | the shipped one (an even count: `warped_shared::match_protocol`) | `the_shipped_levels_file_loads` |
     //! | Level result | none yet, blue, red, garbage | `level_results_are_read` |
-    //! | Game master's choice (a match server on 127.0.0.1, no beacon) | free play on a level (every round there, wins counted, no match round), back to the match (its next level) | `the_game_master_switches_levels_and_everyone_follows` |
-    //! | Game master's settings (a match server on 127.0.0.1, no beacon) | a shared and a level's change answered, then in the first round's settings file; a refused change (a level's own key as shared) answered unchanged | `the_game_masters_settings_reach_each_rounds_level` |
+    //! | Game master's choice (a game server on 127.0.0.1, no beacon) | free play on a level (every round there, wins counted, no match round), back to the match (its next level) | `the_game_master_switches_levels_and_everyone_follows` |
+    //! | Game master's settings (a game server on 127.0.0.1, no beacon) | a shared and a level's change answered, then in the first round's settings file; a refused change (a level's own key as shared) answered unchanged | `the_game_masters_settings_reach_each_rounds_level` |
 
     use super::*;
     use std::os::unix::fs::PermissionsExt;

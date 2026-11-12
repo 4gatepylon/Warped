@@ -1,7 +1,7 @@
 //! `match_state.rs` keeps one match's state by the rules of `game_design/DESIGN.md` (Match,
 //! Wavefront): the map's line of levels, every round played and who won it, each team's
 //! wavefront, which team attacks now, and the match's outcome. It only applies the rules; the
-//! match server (`../warped_match_rust/src/match_flow.rs`) feeds it each round's winner.
+//! game server (`../warped_match_rust/src/match_flow.rs`) feeds it each round's winner.
 //!
 //! Interface: `Team`, `Ownership`, `Round`, `Outcome`, `FreePlay`, `MatchState` (`New`,
 //! `get_next_level`, `get_attacker`, `get_defender`, `get_wavefront`, `get_ownership`,

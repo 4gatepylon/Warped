@@ -151,7 +151,7 @@ impl SettingsEditor {
     }
 
     /// `get_selected_row` gives the row selected now, so a caller can act on its key (the game
-    /// master's page sends each change to the match server).
+    /// master's page sends each change to the game server).
     ///
     /// Example: `let row: &EditorRow = editor.get_selected_row();`
     pub fn get_selected_row(&self) -> &EditorRow {

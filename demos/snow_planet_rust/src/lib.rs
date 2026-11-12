@@ -350,7 +350,7 @@ struct Arguments {
     #[arg(long, value_enum, requires = "join")]
     team: Option<TeamFlag>,
     /// With --serve: when a team wins, write `{"winner":"blue"}` (or red) to this file once,
-    /// atomically, for a match server (`demos/warped_match_rust`), and keep the won game (no new one).
+    /// atomically, for a game server (`demos/warped_match_rust`), and keep the won game (no new one).
     #[arg(long, requires = "serve")]
     level_result_file: Option<PathBuf>,
     /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.

@@ -1,11 +1,11 @@
-//! `children.rs` starts the headless programs behind a game the player hosts: the match server
+//! `children.rs` starts the headless programs behind a game the player hosts: the game server
 //! (which starts each round's level server itself) and the bots, each a match client without a
 //! window. They are child processes of the app, logging to its run folder, stopped when the
 //! player stops hosting or quits, and when the app ends in any other way (`ChildGroup`).
 //!
 //! Interface: `GameKind`, `BotObjective`, `BotPlan`, `Programs` (`Find`), `plan_bots`,
 //! `MAX_ALLY_COUNT`, `MAX_ENEMY_COUNT`, `MAX_BOT_COUNT`,
-//! `make_match_server_command`, `make_bot_command`, `HostedGame` (`Start`, `has_stopped`,
+//! `make_game_server_command`, `make_bot_command`, `HostedGame` (`Start`, `has_stopped`,
 //! `move_sit_out_bot`, `stop`), `make_run_folder`, `describe_game_kind`, `SIT_OUT_ROUND_COUNT`.
 //!
 //! Example: `let game = HostedGame::Start(&programs, GameKind::Alone, Team::Blue, ports, &folder)?;`
@@ -16,10 +16,10 @@
 //!   each team has a player.
 //! - Gotchas: `--bot-objective fight` reaches the match client, which (until its `main.rs` passes
 //!   it on, after W-140) still starts console bots.
-//! - Side effects: the match server writes its own run folder in its crate's `.artifacts/`.
+//! - Side effects: the game server writes its own run folder in its crate's `.artifacts/`.
 //! - Gotchas: everything a game starts shares one process group, whose guard kills it all when
-//!   the app ends, however it ends (a crash too). A level server is the match server's child, so
-//!   only the group reaches it once the match server is killed.
+//!   the app ends, however it ends (a crash too). A level server is the game server's child, so
+//!   only the group reaches it once the game server is killed.
 
 use std::error::Error;
 use std::fs;
@@ -143,52 +143,52 @@ pub fn plan_bots(kind: GameKind, player_team: Team) -> Vec<BotPlan> {
     }
 }
 
-/// `Programs` is where the headless programs and the levels manifest are: the match server's
+/// `Programs` is where the headless programs and the levels manifest are: the game server's
 /// program (which also runs the bots), and the manifest it plays.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Programs {
-    pub match_server: PathBuf,
+    pub game_server: PathBuf,
     pub levels_manifest: PathBuf,
 }
 
 impl Programs {
     /// `Find` gives the programs inside `Warped.app` when the app runs from one, else in the
-    /// checkout (built by `make build-children`), failing with the fix when the match server
+    /// checkout (built by `make build-children`), failing with the fix when the game server
     /// isn't built.
     ///
     /// Example: `let programs = Programs::Find(&manifest)?;`
     #[allow(non_snake_case)]
     pub fn Find(levels_manifest: &Path) -> Result<Programs> {
-        let match_server: PathBuf = match get_app_resources_folder() {
+        let game_server: PathBuf = match get_app_resources_folder() {
             Some(resources) => resources.with_file_name("MacOS").join(MATCH_PROGRAM_IN_APP),
             None => Path::new(env!("CARGO_MANIFEST_DIR")).join(CHECKOUT_MATCH_PROGRAM),
         };
-        if !match_server.exists() {
+        if !game_server.exists() {
             return Err(format!(
                 "the game server {} isn't built; run make build-children in demos/warped_mvp_rust",
-                match_server.display()
+                game_server.display()
             )
             .into());
         }
         Ok(Programs {
-            match_server,
+            game_server,
             levels_manifest: levels_manifest.to_path_buf(),
         })
     }
 }
 
-/// `make_match_server_command` gives the command that serves a match of the manifest's levels on
+/// `make_game_server_command` gives the command that serves a match of the manifest's levels on
 /// UDP `match_port`, each round's level server on `level_port`, with it and every level on
 /// 127.0.0.1 only (`WARPED_LOOPBACK_ONLY=1`) when `is_loopback_only`.
 ///
-/// Example: `let command = make_match_server_command(&programs, 47850, 47852, false);`
-pub fn make_match_server_command(
+/// Example: `let command = make_game_server_command(&programs, 47850, 47852, false);`
+pub fn make_game_server_command(
     programs: &Programs,
     match_port: u16,
     level_port: u16,
     is_loopback_only: bool,
 ) -> Command {
-    let mut command: Command = Command::new(&programs.match_server);
+    let mut command: Command = Command::new(&programs.game_server);
     if is_loopback_only {
         command.env(network_scope::LOOPBACK_ONLY_VARIABLE, "1");
     }
@@ -201,11 +201,11 @@ pub fn make_match_server_command(
     command
 }
 
-/// `make_bot_command` gives the command of a bot (`plan`) joining the match server at `server`.
+/// `make_bot_command` gives the command of a bot (`plan`) joining the game server at `server`.
 ///
 /// Example: `let command = make_bot_command(&programs, server, &plan);`
 pub fn make_bot_command(programs: &Programs, server: SocketAddr, plan: &BotPlan) -> Command {
-    let mut command: Command = Command::new(&programs.match_server);
+    let mut command: Command = Command::new(&programs.game_server);
     command
         .args(["--match", &server.ip().to_string()])
         .args(["--match-port", &server.port().to_string()])
@@ -355,20 +355,20 @@ fn spawn_logged(mut command: Command, group_id: i32, folder: &Path, name: &str) 
         .map_err(|error| format!("can't start {name} ({error})"))?)
 }
 
-/// `HostedGame` is a game this app hosts: its kind, the match server's address, the match server
+/// `HostedGame` is a game this app hosts: its kind, the game server's address, the game server
 /// and the bots, the process group they all run in, and the folder of their logs.
 pub struct HostedGame {
     pub kind: GameKind,
     pub server: SocketAddr,
     pub run_folder: PathBuf,
     programs: Programs,
-    match_server: Option<Child>,
+    game_server: Option<Child>,
     bots: Vec<(BotPlan, Option<Child>)>,
     group: ChildGroup,
 }
 
 impl HostedGame {
-    /// `Start` starts the match server on `ports` (match, level), on 127.0.0.1 only when
+    /// `Start` starts the game server on `ports` (match, level), on 127.0.0.1 only when
     /// `is_loopback_only`, and the bots of `kind` for a player on `player_team`, logging into
     /// `run_folder`.
     ///
@@ -384,8 +384,8 @@ impl HostedGame {
     ) -> Result<HostedGame> {
         let server: SocketAddr = SocketAddr::from((Ipv4Addr::LOCALHOST, ports.0));
         let group: ChildGroup = ChildGroup::Start()?;
-        let match_server: Child = spawn_logged(
-            make_match_server_command(programs, ports.0, ports.1, is_loopback_only),
+        let game_server: Child = spawn_logged(
+            make_game_server_command(programs, ports.0, ports.1, is_loopback_only),
             group.get_id()?,
             run_folder,
             "match_server",
@@ -395,7 +395,7 @@ impl HostedGame {
             server,
             run_folder: run_folder.to_path_buf(),
             programs: programs.clone(),
-            match_server: Some(match_server),
+            game_server: Some(game_server),
             bots: Vec::new(),
             group,
         };
@@ -420,12 +420,12 @@ impl HostedGame {
         Ok(())
     }
 
-    /// `has_stopped` says, with its exit status, whether the match server stopped by itself (a
+    /// `has_stopped` says, with its exit status, whether the game server stopped by itself (a
     /// port in use, a level that failed, or the match over).
     ///
     /// Example: `if let Some(status) = game.has_stopped()? { ... }`
     pub fn has_stopped(&mut self) -> Result<Option<String>> {
-        match self.match_server.as_mut() {
+        match self.game_server.as_mut() {
             Some(child) => Ok(child.try_wait()?.map(|status| status.to_string())),
             None => Ok(Some("stopped".to_string())),
         }
@@ -453,8 +453,8 @@ impl HostedGame {
         Ok(())
     }
 
-    /// `stop` stops the bots and the match server, then the rest of their process group (the
-    /// level server the match server started); it fails if a process of the group is still alive
+    /// `stop` stops the bots and the game server, then the rest of their process group (the
+    /// level server the game server started); it fails if a process of the group is still alive
     /// afterwards.
     ///
     /// Example: `game.stop()?;`
@@ -462,7 +462,7 @@ impl HostedGame {
         for (_, child) in &mut self.bots {
             stop_child(child);
         }
-        stop_child(&mut self.match_server);
+        stop_child(&mut self.game_server);
         self.group.stop()
     }
 }
@@ -486,9 +486,9 @@ mod tests {
     //! | --- | --- | --- |
     //! | Game kind | hosted, alone (blue, red), bots (none: as alone; allies and enemies; allies only: a sitting-out enemy; the most) | `each_game_kind_plans_its_bots` |
     //! | Game kind in words | hosted, alone, with bots | `game_kinds_are_described` |
-    //! | Match server command | ports and manifest passed; on the network (no variable), loopback only (`WARPED_LOOPBACK_ONLY=1`) | `the_match_server_serves_the_manifest_on_its_ports` |
+    //! | Game server command | ports and manifest passed; on the network (no variable), loopback only (`WARPED_LOOPBACK_ONLY=1`) | `the_game_server_serves_the_manifest_on_its_ports` |
     //! | Bot command | consoles, fight, sitting out (as many rounds as `SIT_OUT_ROUND_COUNT`, the other team named) | `bots_join_with_their_team_and_objective` |
-    //! | How the game's processes end | the app stops the game (a level server left by its killed match server dies too), the app ends without stopping it (the guard's pipe closes) | `stopping_a_group_kills_a_grandchild`, `a_group_dies_with_the_app` |
+    //! | How the game's processes end | the app stops the game (a level server left by its killed game server dies too), the app ends without stopping it (the guard's pipe closes) | `stopping_a_group_kills_a_grandchild`, `a_group_dies_with_the_app` |
 
     use super::*;
     use std::ffi::OsStr;
@@ -562,7 +562,7 @@ mod tests {
     /// Example: `let programs = make_programs();`
     fn make_programs() -> Programs {
         Programs {
-            match_server: PathBuf::from("/app/warped-match"),
+            game_server: PathBuf::from("/app/warped-match"),
             levels_manifest: PathBuf::from("/app/match_levels.yaml"),
         }
     }
@@ -619,10 +619,10 @@ mod tests {
     }
 
     #[test]
-    fn the_match_server_serves_the_manifest_on_its_ports() {
-        let command: Command = make_match_server_command(&make_programs(), 48_304, 48_305, false);
+    fn the_game_server_serves_the_manifest_on_its_ports() {
+        let command: Command = make_game_server_command(&make_programs(), 48_304, 48_305, false);
         assert_eq!(command.get_envs().count(), 0);
-        let loopback: Command = make_match_server_command(&make_programs(), 48_304, 48_305, true);
+        let loopback: Command = make_game_server_command(&make_programs(), 48_304, 48_305, true);
         let variable: (&OsStr, Option<&OsStr>) = loopback.get_envs().next().unwrap();
         assert_eq!(
             variable,

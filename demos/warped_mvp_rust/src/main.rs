@@ -116,7 +116,7 @@ struct Arguments {
     /// player_settings.yaml's keys (default ~/.config/warped/player_settings.yaml).
     #[arg(long)]
     player_settings: Option<PathBuf>,
-    /// The UDP port of the match server of a game this app hosts.
+    /// The UDP port of the game server of a game this app hosts.
     #[arg(long, default_value_t = MATCH_PORT)]
     match_port: u16,
     /// The UDP port of each round's level server in a game this app hosts.
@@ -648,7 +648,7 @@ mod tests {
     //! | Toured levels | none named (all), a name, a slug, a name no level has | `toured_levels_are_picked_by_name` |
     //! | Toured game | no bots (alone), allies only, enemies only, both; a count over the most | `a_tour_plays_alone_or_with_bots` |
     //! | Shipped settings files | every level's file on the game master's page: shared respawn, shooting switches and gravity, each level's own setting (City Sphere's glass, its team domes' size and its glass lights' pulse), Dark Forest's none | `the_shipped_settings_all_show` |
-    //! | Shipped settings on the network | the answer a match server sends for them, over loopback in one datagram | `the_shipped_settings_reach_a_client_in_one_datagram` |
+    //! | Shipped settings on the network | the answer a game server sends for them, over loopback in one datagram | `the_shipped_settings_reach_a_client_in_one_datagram` |
     //! | Shipped settings and the rules | every level's file keeps `setting_rules`' kinds and groups | `the_shipped_settings_pass_the_rules` |
 
     use super::*;

@@ -105,7 +105,7 @@ impl ServerSettings {
     }
 
     /// `Load` reads settings from a file like `server_settings.yaml` (YAML or JSON), every key
-    /// required: `--server-settings`, such as the match server's copy for each round.
+    /// required: `--server-settings`, such as the game server's copy for each round.
     ///
     /// Example: `let settings = ServerSettings::Load(Path::new("fast.yaml"))?;`
     #[allow(non_snake_case)]

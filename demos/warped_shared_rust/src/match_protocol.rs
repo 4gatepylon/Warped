@@ -1,8 +1,8 @@
-//! `match_protocol.rs` is what a match server and its clients share: the levels of a match
+//! `match_protocol.rs` is what a game server and its clients share: the levels of a match
 //! (`match_levels.yaml`, read by `LoadLevels`), what the match is doing (`Phase`, `MatchView`),
-//! a client of the match server (`MatchClient`), and the beacon a match server broadcasts on the
+//! a client of the game server (`MatchClient`), and the beacon a game server broadcasts on the
 //! local network so players can find it (`MatchBeacon`, `MatchAnnouncer`, `MatchListener`). The
-//! match server itself, which starts the level programs, is
+//! game server itself, which starts the level programs, is
 //! `../warped_match_rust/src/match_flow.rs`.
 //!
 //! Interface: `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `MatchTimes`, `MatchClient`
@@ -19,7 +19,7 @@
 //!   `CLIENT_TIMEOUT_S` no longer counts. Any client may also send `play <level>` or `play match`
 //!   (the game master's choice; no authentication yet), and the game settings messages of
 //!   `game_settings.rs`, answered with `settings <json>` instead of the view.
-//! - A beacon is `MATCH_BEACON_MAGIC`, a version byte, the match server's port and a summary of
+//! - A beacon is `MATCH_BEACON_MAGIC`, a version byte, the game server's port and a summary of
 //!   its match, broadcast every `MATCH_BEACON_PERIOD_S` to UDP `MATCH_DISCOVERY_PORT`; a reader
 //!   ignores bytes after the fields it knows, so a later version can append fields. Loopback-only
 //!   programs (`network_scope`) send it to 127.0.0.1 instead of broadcasting it.
@@ -301,7 +301,7 @@ pub fn make_play(choice: Option<usize>, is_now: bool) -> Vec<u8> {
     }
 }
 
-/// `MatchClient` is a connection to a match server: the team it says it plays for, the last
+/// `MatchClient` is a connection to a game server: the team it says it plays for, the last
 /// `MatchView` the server sent and when it came (`view_at`), and the last game settings it sent
 /// (only after this client asked, `send_settings`).
 pub struct MatchClient {
@@ -316,7 +316,7 @@ pub struct MatchClient {
 }
 
 impl MatchClient {
-    /// `Connect` makes a client of the match server at `server` playing for `team` (`None` until
+    /// `Connect` makes a client of the game server at `server` playing for `team` (`None` until
     /// the player picks one); a server on this Mac is reached on the loopback interface only.
     ///
     /// Example: `let client = MatchClient::Connect(server, Some(Team::Blue))?;`
@@ -336,7 +336,7 @@ impl MatchClient {
         })
     }
 
-    /// `send_play` asks the match server, as the game master, to play `choice`: one level freely
+    /// `send_play` asks the game server, as the game master, to play `choice`: one level freely
     /// (its index), or the match (`None`). A server older than free play ignores it.
     ///
     /// Example: `client.send_play(Some(4))?;`
@@ -346,7 +346,7 @@ impl MatchClient {
         Ok(())
     }
 
-    /// `send_settings` sends the match server a game settings message (`game_settings.rs`): a
+    /// `send_settings` sends the game server a game settings message (`game_settings.rs`): a
     /// request, or the game master's change, which it answers with the settings. A server older
     /// than the game settings answers with its view instead.
     ///
@@ -443,7 +443,7 @@ impl BeaconPhase {
     }
 }
 
-/// `MatchBeacon` is what a match server announces about itself: the UDP port its clients say
+/// `MatchBeacon` is what a game server announces about itself: the UDP port its clients say
 /// hello to, how many clients each team has (blue, red; at most 255 each), what the match does,
 /// and the round being played or the number of rounds played.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -535,7 +535,7 @@ impl MatchBeacon {
     }
 }
 
-/// `MatchAnnouncer` sends a match server's beacon to `target` (the local network's
+/// `MatchAnnouncer` sends a game server's beacon to `target` (the local network's
 /// `MATCH_DISCOVERY_PORT`, or a test's address) at most every `MATCH_BEACON_PERIOD_S`.
 pub struct MatchAnnouncer {
     socket: UdpSocket,
@@ -595,7 +595,7 @@ impl MatchAnnouncer {
     }
 }
 
-/// `FoundMatch` is a match server heard on the network: its address (the beacon's sender with
+/// `FoundMatch` is a game server heard on the network: its address (the beacon's sender with
 /// the beacon's port), its latest beacon, and when that came.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct FoundMatch {

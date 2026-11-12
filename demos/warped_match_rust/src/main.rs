@@ -375,15 +375,15 @@ struct Arguments {
     /// Defaults to `fight`, and with --match to `consoles` (each round's bot).
     #[arg(long, value_enum, requires = "bot")]
     bot_objective: Option<BotObjective>,
-    /// Run a match server (match_flow.rs) on UDP --match-port, without a window: it plays the
+    /// Run a game server (match_flow.rs) on UDP --match-port, without a window: it plays the
     /// levels of --match-levels round by round and exits once the match is over.
     #[arg(long, conflicts_with_all = ["serve", "join", "match_server", "bench_views", "autopilot", "play_route"])]
     serve_match: bool,
-    /// Join the match server at this address (e.g. 127.0.0.1): show the match's progression and
+    /// Join the game server at this address (e.g. 127.0.0.1): show the match's progression and
     /// open each round's level in its own window (or, with --bot, run a bot in each round).
     #[arg(long = "match", conflicts_with_all = ["serve", "join", "bench_views", "autopilot", "play_route"])]
     match_server: Option<String>,
-    /// The match server's UDP port.
+    /// The game server's UDP port.
     #[arg(long, default_value_t = match_flow::MATCH_PORT)]
     match_port: u16,
     /// With --serve-match: the levels file (see match_levels.yaml).
@@ -740,7 +740,7 @@ fn run(arguments: Arguments) -> Result<()> {
         return serve_only(&arguments);
     }
     if arguments.serve_match {
-        return run_match_server(&arguments);
+        return run_game_server(&arguments);
     }
     if let Some(address) = &arguments.match_server {
         return run_match_client(&arguments, address);
@@ -767,11 +767,11 @@ fn run(arguments: Arguments) -> Result<()> {
     }
 }
 
-/// `run_match_server` runs one match (`match_flow::serve_match`) on `--match-levels`, its level
+/// `run_game_server` runs one match (`match_flow::serve_match`) on `--match-levels`, its level
 /// results and logs under `.artifacts/match/<run_id>/`, and prints how it ended.
 ///
-/// Example: `run_match_server(&arguments)?;`
-fn run_match_server(arguments: &Arguments) -> Result<()> {
+/// Example: `run_game_server(&arguments)?;`
+fn run_game_server(arguments: &Arguments) -> Result<()> {
     let levels: Vec<match_flow::LevelEntry> = match_flow::LoadLevels(&arguments.match_levels)?;
     let folder: PathBuf = make_run_folder("match", arguments.label.as_deref())?;
     let times: match_flow::MatchTimes = match_flow::MatchTimes {
@@ -822,7 +822,7 @@ fn get_bot_objective_flags(objective: BotObjective) -> &'static [&'static str] {
     }
 }
 
-/// `run_match_client` joins the match server at `address`: it shows the progression page
+/// `run_match_client` joins the game server at `address`: it shows the progression page
 /// (`match_menu.rs`) in a window, or prints it with `--bot`, and for each round it starts the
 /// round's level joined to `--team` (a window, or a `--bot-objective consoles` bot) and stops it
 /// when the round ends. It returns once the match is over.
