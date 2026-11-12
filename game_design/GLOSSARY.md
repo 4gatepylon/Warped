@@ -190,3 +190,15 @@ main menu
 ```
 
 ![The main menu, with the row or key that leads to each page marked](pages/main_menu.png)
+
+### The join by address page's SWG
+
+```text
+join by address
+├── title                                       UIE
+├── address field                               UIE
+├── message                                     UIE, hidden until joining fails
+└── help line                                   UIE
+```
+
+![The join by address page, with the row or key that leads to each page marked](pages/join_by_address.png)
