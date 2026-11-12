@@ -1,7 +1,8 @@
 # `player_settings.yaml` holds each player's own choices in the Rust demo: which keys do what, how fast the
 # mouse turns the view, the head bob, motion blur, the colour shift inside a wormhole, how bright the Milky
-# Way is, and how strongly a hit reddens, shakes and blurs the screen. They change only that player's
-# experience; the numbers that shape play for everyone are the server's, in `server_settings.yaml`.
+# Way is, how strongly a hit reddens, shakes and blurs the screen, and the picture's brightness, contrast,
+# saturation and gamma. They change only that player's experience; the numbers that shape play for everyone
+# are the server's, in `server_settings.yaml`.
 #
 # Interface:
 #     Copy this file, change it, and start the game with the copy: `PLAYER_SETTINGS=` with
@@ -39,8 +40,8 @@ keys:
   join_red: ["2"]  # In the lobby, join the red team.
   lower_resolution: ["-"]  # Render at a lower resolution.
   raise_resolution: ["="]  # Render at a higher resolution.
-  release_mouse: [Escape]  # Free the mouse; again to ask whether to quit.
-  open_menu: [Tab]  # Open or close the menu (settings).
+  show_map: [Tab]  # Show the level's map over the game while held; play goes on.
+  open_menu: [Escape]  # Open or close the menu (scores, settings, map, credits, quit); it frees the mouse.
 
 view:
   look_rad_per_px: 0.0025  # How far the view turns for each pixel the mouse moves (mouse sensitivity).
@@ -69,4 +70,13 @@ minimap:  # The round map of what is around you, a Poincaré disk: straight path
   is_shown: true  # Whether it shows.
   corner: top_right  # Where it sits: top_left, top_right, bottom_left or bottom_right.
   radius_frac: 0.14  # Its radius, as a fraction of the window's height.
-  range_m: 60.0  # How far from you it reaches, in meters (also the circle on the menu's map page).
+  range_m: 60.0  # How far from you it reaches, in meters.
+
+main_map:  # The picture of the whole level from above.
+  fog_of_war_range_m: 60.0  # How far from you the satellite map (held Tab) stays clear, in meters; beyond it is the fog of war.
+
+visuals:  # How the finished picture looks on your screen (W-51), each 1 for none; nothing in the world changes.
+  brightness: 1.0  # How bright the picture is, 0.5 to 2 (above 1 brighter).
+  contrast: 1.0  # How far colours spread from mid grey, 0.5 to 2 (above 1 more).
+  saturation: 1.0  # How vivid colours are, 0 to 2 (0 for black and white).
+  gamma: 1.0  # Above 1 lifts the dark and middle tones, below 1 sinks them, 0.5 to 2.

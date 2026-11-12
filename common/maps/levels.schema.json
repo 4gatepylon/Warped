@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/4gatepylon/Warped/common/maps/levels.schema.json",
+  "title": "Warped levels manifest",
+  "description": "The engines that draw levels and the matches' lines of levels; see common/maps/LEVELS.md.",
+  "type": "object",
+  "required": ["format", "version", "engines", "matches"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {"const": "warped-levels"},
+    "version": {"const": 1},
+    "engines": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/engine"}},
+    "matches": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["levels"],
+        "additionalProperties": false,
+        "properties": {"levels": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9_]+$"}}}
+      }
+    }
+  },
+  "$defs": {
+    "engine": {
+      "type": "object",
+      "required": ["crate", "binary", "spaces", "styles", "lighting_models", "map_features", "required_map_features",
+        "level_features"],
+      "additionalProperties": false,
+      "properties": {
+        "crate": {"type": "string"},
+        "binary": {"type": "string"},
+        "spaces": {"type": "array", "items": {"enum": ["hyperbolic", "spherical", "euclidean"]}},
+        "styles": {"type": "array", "items": {"type": "string"}},
+        "lighting_models": {"type": "array", "items": {"enum": ["ambient_sun", "lunar_lambert"]}},
+        "map_features": {"type": "array", "items": {"$ref": "#/$defs/map_feature"}},
+        "required_map_features": {"type": "array", "items": {"$ref": "#/$defs/map_feature"}},
+        "level_features": {"type": "array", "items": {"$ref": "#/$defs/level_feature"}}
+      }
+    },
+    "map_feature": {
+      "enum": ["space.torus_periods_m", "ground.sphere", "ground.tiling", "ground.terrain", "structures",
+        "structures.mesh", "boxes", "ladders", "warps", "shells", "lights", "lights.flicker_frac", "sky.planet",
+        "sky.milky_way", "sky.fog_m", "sky.snow_per_m3", "regions.zones", "regions.boundary", "regions.boundary.soft_edge_m",
+        "regions.zone_walls",
+        "regions.blizzards", "atmosphere.fog", "atmosphere.sand", "atmosphere.wind", "variation", "scatter", "laser",
+        "lasers", "appearance.laser_color"]
+    },
+    "level_feature": {"enum": ["black_hole_growth", "laser_color"]}
+  }
+}

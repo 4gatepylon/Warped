@@ -32,6 +32,10 @@ use objc2_metal::{
 use objc2_metal_fx::{MTLFXSpatialScaler, MTLFXSpatialScalerBase, MTLFXSpatialScalerDescriptor};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
+pub use crate::overlay::{
+    FLAT_RECT_STYLE, HitEffect, MAX_MINIMAP_LINE_COUNT, MAX_MINIMAP_MARK_COUNT, Minimap,
+    NO_RECT_PULSE, Overlay, OverlayMinimap, OverlayPicture, OverlayRect, OverlayWand,
+};
 use crate::render_voxel::{VoxelFrame, VoxelGpu};
 use crate::scene_data::{
     HALF_FOV_RAD, ROW_COUNT, ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS,
@@ -49,6 +53,9 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// `Texture` is a Metal texture and its size in pixels.
 type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
+
+/// `RectTiles` is the buffer of the HUD rectangles' tiles with the output size it was made for.
+type RectTiles = (Retained<ProtocolObject<dyn MTLBuffer>>, (usize, usize));
 
 /// `LoadingStep` is one part of what `MetalRenderer::load` reads and compiles before the first
 /// frame, so a window can show a loading bar between parts: the surface textures and the voxel
@@ -92,204 +99,6 @@ pub fn get_loading_steps(is_voxel_map: bool) -> &'static [LoadingStep] {
         ]
     }
 }
-
-/// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
-/// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
-/// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
-/// (the HUD's bars), the player's wand with the gun model drawn in its place, how much of the
-/// previous frame's scene to blend into this one's (motion blur; 0 for none), what a recent hit
-/// does to the scene, how much of the frame's height the mask's text may take, a picture under
-/// the text, how far the scene stretches at the map's soft edge (the shader's
-/// `read_stretched_scene`; 0 for none), the minimap, and how far the scene blueshifts inside a
-/// wormhole mouth (the shader's `blueshift_scene`: 1 for walking straight ahead at the throat,
-/// negative for a redshift, 0 for none).
-pub struct Overlay<'a> {
-    pub dim_frac: f32,
-    pub mask: Option<(&'a [u8], (usize, usize))>,
-    pub rects: &'a [OverlayRect],
-    pub wand: Option<(OverlayWand, GunModel)>,
-    pub blur_frac: f32,
-    pub hit: HitEffect,
-    pub mask_height_frac: f32,
-    pub picture: Option<OverlayPicture<'a>>,
-    pub stretch_frac: f32,
-    pub minimap: Option<OverlayMinimap<'a>>,
-    pub blueshift_frac: f32,
-}
-
-/// `OverlayMinimap` is the minimap: the map's picture from above without labels (RGBA, rows top
-/// first, `map_layout.rs`) with its size, and the shader's `Minimap`.
-pub struct OverlayMinimap<'a> {
-    pub map_pixels: &'a [u8],
-    pub map_size_px: (usize, usize),
-    pub minimap: Minimap,
-}
-
-/// `Minimap` is the shader's `Minimap` (each member a multiple of 16 bytes, as Metal lays it
-/// out): the frame that takes the minimap's plane (its y = 0, with −z up the minimap) into the
-/// world; where it sits (the centre's x and y and the radius in pixels, then the Poincaré disk's
-/// radius at its rim, tanh of half its range in curvature radii); where the map's picture lies
-/// (the Fermi u and v of its top left corner, meters per pixel, then the curvature radius); how
-/// many marks and lines it has (then two zeros); the marks (other players: a point in the
-/// minimap's unit disk, x right and y down, then a radius in pixels and a zero; and a colour);
-/// and the lines (shots: two ends in the unit disk, then a colour).
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Minimap {
-    pub ground_frame: [[f32; 4]; 4],
-    pub placement: [f32; 4],
-    pub map: [f32; 4],
-    pub counts: [i32; 4],
-    pub marks: [[[f32; 4]; 2]; MAX_MINIMAP_MARK_COUNT],
-    pub lines: [[[f32; 4]; 2]; MAX_MINIMAP_LINE_COUNT],
-}
-
-impl Minimap {
-    /// `Hidden` is no minimap: a radius of 0, which the shader skips.
-    ///
-    /// Example: `let minimap = Minimap::Hidden();`
-    #[allow(non_snake_case)]
-    pub fn Hidden() -> Minimap {
-        Minimap {
-            ground_frame: [[0.0; 4]; 4],
-            placement: [0.0; 4],
-            map: [0.0; 4],
-            counts: [0; 4],
-            marks: [[[0.0; 4]; 2]; MAX_MINIMAP_MARK_COUNT],
-            lines: [[[0.0; 4]; 2]; MAX_MINIMAP_LINE_COUNT],
-        }
-    }
-}
-
-/// `OverlayPicture` is an RGBA picture (rows top first) of `size_px`, drawn under the overlay's
-/// text and stretched between two corners given in the text mask's pixels.
-pub struct OverlayPicture<'a> {
-    pub pixels: &'a [u8],
-    pub size_px: (usize, usize),
-    pub min_mask_px: [i32; 2],
-    pub max_excl_mask_px: [i32; 2],
-}
-
-/// `HitEffect` is what a recent hit does to the scene (the shader's `read_hit_scene`): how much of
-/// the effect is left (1 just after the hit, 0 for none), how red the edges turn, how wide their
-/// blur is and how far the picture is shifted this frame.
-#[derive(Clone, Copy, Default)]
-pub struct HitEffect {
-    pub strength_frac: f32,
-    pub red_frac: f32,
-    pub blur_px: f32,
-    pub shake_px: [f32; 2],
-}
-
-/// `OverlayWand` is the shader's `OverlayWand`: the wand's shaft centre in camera space (x right,
-/// y up, -z ahead, meters; w unused), its axes as columns (its length along its own -z), its
-/// shaft's half sizes and RGB colour, and its tip's half sizes and RGB colour.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct OverlayWand {
-    pub center_m: [f32; 4],
-    pub axes: [[f32; 4]; 3],
-    pub shaft_half_m: [f32; 4],
-    pub shaft_color: [f32; 4],
-    pub tip_half_m: [f32; 4],
-    pub tip_color: [f32; 4],
-}
-
-impl OverlayWand {
-    /// `get_tip_m` gives the front of the wand's tip in camera space, where the gun's muzzle is.
-    ///
-    /// Example: `let muzzle_m = wand.get_tip_m();`
-    pub fn get_tip_m(&self) -> glam::Vec3 {
-        let reach_m: f32 = self.shaft_half_m[2] + 2.0 * self.tip_half_m[2];
-        glam::Vec4::from(self.center_m).truncate()
-            - glam::Vec4::from(self.axes[2]).truncate() * reach_m
-    }
-}
-
-/// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0),
-/// an RGBA colour (A the opacity), how it looks beyond its colour (`FLAT_RECT_STYLE` for a
-/// plain rectangle) and the pulses it carries for its bar (`NO_RECT_PULSE` for none).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct OverlayRect {
-    pub min_frac: [f32; 2],
-    pub max_frac: [f32; 2],
-    pub color: [f32; 4],
-    pub style: RectStyle,
-    pub pulse: RectPulse,
-}
-
-/// `RectPulse` is the shader's `RectPulse`, up to `MAX_RECT_PULSE_COUNT` soft glows running along
-/// a HUD bar, carried by the bar's first `OverlayRect`: their middles' x as fractions of the
-/// screen's width (measured along the rect's slant, at its middle row), their opacities (0 for
-/// none), the x span they show in (the bar's filled part; they fade out just inside its ends), their
-/// half width (of the screen's width) and half height (of its height), and their RGBA colour (A
-/// unused).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RectPulse {
-    pub centers_x_frac: [f32; MAX_RECT_PULSE_COUNT],
-    pub opacities: [f32; MAX_RECT_PULSE_COUNT],
-    pub min_x_frac: f32,
-    pub max_x_frac: f32,
-    pub half_width_frac: f32,
-    pub half_height_frac: f32,
-    pub color: [f32; 4],
-}
-
-/// `MAX_RECT_PULSE_COUNT` is how many pulses one `RectPulse` carries, the shader's.
-pub const MAX_RECT_PULSE_COUNT: usize = 4;
-
-/// `NO_RECT_PULSE` is no pulse: every opacity 0, which the shader skips.
-pub const NO_RECT_PULSE: RectPulse = RectPulse {
-    centers_x_frac: [0.0; MAX_RECT_PULSE_COUNT],
-    opacities: [0.0; MAX_RECT_PULSE_COUNT],
-    min_x_frac: 0.0,
-    max_x_frac: 0.0,
-    half_width_frac: 0.0,
-    half_height_frac: 0.0,
-    color: [0.0; 4],
-};
-
-/// `RectStyle` is the shader's `RectStyle`, how an `OverlayRect` looks beyond its colour, with
-/// lengths as fractions of the output's height so it looks the same at any size: its corners'
-/// radius (at most half its shorter side), an inner outline's width, a gloss highlight's strength
-/// over its top half (0 to 1), a soft drop shadow's blur, a slant (how far its sides lean right
-/// per unit of height, like `/` when positive), a glow's radius in its own colour, how much
-/// lighter its top and darker its bottom are (0 for even), a zero, and the outline's RGBA colour.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RectStyle {
-    pub corner_frac: f32,
-    pub outline_frac: f32,
-    pub gloss_frac: f32,
-    pub shadow_frac: f32,
-    pub slant_x_per_y: f32,
-    pub glow_frac: f32,
-    pub shade_frac: f32,
-    pub padding: f32,
-    pub outline_color: [f32; 4],
-}
-
-/// `FLAT_RECT_STYLE` is a plain rectangle: square corners, no outline, gloss, shadow, slant, glow
-/// or shading.
-pub const FLAT_RECT_STYLE: RectStyle = RectStyle {
-    corner_frac: 0.0,
-    outline_frac: 0.0,
-    gloss_frac: 0.0,
-    shadow_frac: 0.0,
-    slant_x_per_y: 0.0,
-    glow_frac: 0.0,
-    shade_frac: 0.0,
-    padding: 0.0,
-    outline_color: [0.0; 4],
-};
-
-const BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT: usize = 144;
-const _: () = assert!(
-    std::mem::size_of::<OverlayRect>() == BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT,
-    "OverlayRect must match the shader's 144-byte OverlayRect"
-);
 
 /// `OverlayParams` is the shader's `OverlayParams` (8-byte aligned, as its `int2` makes it).
 #[repr(C, align(8))]
@@ -441,8 +250,11 @@ const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
 pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
-pub(crate) const MAX_MINIMAP_MARK_COUNT: usize = 16;
-pub(crate) const MAX_MINIMAP_LINE_COUNT: usize = 96;
+/// `RECT_TILE_PX` is the side of the squares of the output the shader's `mark_rect_tiles` sorts the
+/// HUD's rectangles into, and `BYTES_PER_RECT_TILE` what it keeps for each: a bit a rectangle.
+const RECT_TILE_PX: usize = 32;
+const BYTES_PER_RECT_TILE: usize = std::mem::size_of::<u64>();
+const _: () = assert!(MAX_OVERLAY_RECT_COUNT == u64::BITS as usize);
 /// `GUN_MODEL_WAND` is `has_wand` when a gun model (viewmodel.rs) is drawn in the wand's place.
 const GUN_MODEL_WAND: i32 = 2;
 const EMPTY_MASK_PX: (usize, usize) = (1, 1);
@@ -492,6 +304,9 @@ pub struct MetalRenderer {
     push_holes: Pipeline,
     fill_holes: Pipeline,
     apply_overlay: Pipeline,
+    mark_rect_tiles: Pipeline,
+    rect_tiles: Option<RectTiles>,
+    marks_every_rect: bool,
     overlay_target: Option<Texture>,
     overlay_mask: Option<Texture>,
     overlay_picture: Option<Texture>,
@@ -523,7 +338,7 @@ pub struct MetalRenderer {
 ///
 /// Example: `let source = fill_shader_constants(SHADER_SOURCE);`
 fn fill_shader_constants(source: &str) -> String {
-    let constants: [(&str, usize); 28] = [
+    let constants: [(&str, usize); 29] = [
         ("TEXEL_MOUTH_FIELDS", TEXEL_MOUTH_FIELDS),
         ("TEXELS_PER_MOUTH_FIELD", TEXELS_PER_MOUTH_FIELD),
         ("TEXELS_PER_TABLE_ENTRY", TEXELS_PER_TABLE_ENTRY),
@@ -552,6 +367,7 @@ fn fill_shader_constants(source: &str) -> String {
         ("TEXEL_BEAM_POINTS", TEXEL_BEAM_POINTS),
         ("MATERIAL_GLASS", MATERIAL_GLASS as usize),
         ("MATERIAL_GLOW", MATERIAL_GLOW as usize),
+        ("RECT_TILE_PX", RECT_TILE_PX),
     ];
     let mut filled: String = source.to_string();
     for (name, value) in constants {
@@ -752,15 +568,28 @@ pub(crate) fn encode_adaptive_sampling(
 }
 
 impl MetalRenderer {
-    /// `New` opens the default GPU, compiles the ray tracer and allocates the scene buffer. With
-    /// `is_adaptive`, it traces every other pixel each way and interpolates where that is exact
-    /// enough (see `resolve_pixels` in the shader); otherwise it traces every pixel.
+    /// `New` opens the default GPU and makes the renderer on it (`OnDevice`).
     ///
     /// Example: `let renderer = MetalRenderer::New(true)?;`
     #[allow(non_snake_case)]
     pub fn New(is_adaptive: bool) -> Result<MetalRenderer> {
-        let device: Retained<ProtocolObject<dyn MTLDevice>> =
-            MTLCreateSystemDefaultDevice().ok_or("Metal: this machine has no GPU Metal can use")?;
+        MetalRenderer::OnDevice(
+            MTLCreateSystemDefaultDevice().ok_or("Metal: this machine has no GPU Metal can use")?,
+            is_adaptive,
+        )
+    }
+
+    /// `OnDevice` compiles the ray tracer and allocates the scene buffer on `device` (the window's,
+    /// in the one-window app). With `is_adaptive`, it traces every other pixel each way and
+    /// interpolates where that is exact enough (see `resolve_pixels` in the shader); otherwise it
+    /// traces every pixel.
+    ///
+    /// Example: `let renderer = MetalRenderer::OnDevice(device.retain(), true)?;`
+    #[allow(non_snake_case)]
+    pub fn OnDevice(
+        device: Retained<ProtocolObject<dyn MTLDevice>>,
+        is_adaptive: bool,
+    ) -> Result<MetalRenderer> {
         let source: Retained<NSString> = NSString::from_str(&fill_shader_constants(SHADER_SOURCE));
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&source, None)
@@ -783,6 +612,7 @@ impl MetalRenderer {
         );
         let (push_holes, fill_holes) = (make_pipeline("push_holes")?, make_pipeline("fill_holes")?);
         let apply_overlay: Pipeline = make_pipeline("apply_overlay")?;
+        let mark_rect_tiles: Pipeline = make_pipeline("mark_rect_tiles")?;
         let build_mouth_fields: Pipeline = make_pipeline("build_mouth_fields")?;
         let make_table = |entry_count: usize| {
             device
@@ -817,6 +647,9 @@ impl MetalRenderer {
             push_holes,
             fill_holes,
             apply_overlay,
+            mark_rect_tiles,
+            rect_tiles: None,
+            marks_every_rect: false,
             overlay_target: None,
             blur_histories: None,
             overlay_mask: None,
@@ -1277,6 +1110,21 @@ impl MetalRenderer {
         output_px: (usize, usize),
         pixels: &mut [u8],
     ) -> Result<()> {
+        let (command_buffer, texture) = self.encode_frame(data, output_px)?;
+        self.read_pixels(&command_buffer, &texture, output_px, pixels)
+    }
+
+    /// `read_pixels` encodes copying `texture` (of `output_px`) out of the GPU, runs
+    /// `command_buffer` and puts the copy in `pixels` (RGBA, top row first).
+    ///
+    /// Example: `self.read_pixels(&command_buffer, &texture, (2560, 1600), &mut pixels)?;`
+    fn read_pixels(
+        &mut self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        texture: &ProtocolObject<dyn MTLTexture>,
+        output_px: (usize, usize),
+        pixels: &mut [u8],
+    ) -> Result<()> {
         let pixel_bytes: usize = output_px.0 * output_px.1 * BYTES_PER_PIXEL;
         if pixels.len() != pixel_bytes {
             return Err(format!(
@@ -1296,7 +1144,6 @@ impl MetalRenderer {
                 .ok_or("Metal: no memory to read the pixels back")?;
             self.readback = Some((buffer, pixel_bytes));
         }
-        let (command_buffer, texture) = self.encode_frame(data, output_px)?;
         let (readback, _) = self
             .readback
             .as_ref()
@@ -1307,7 +1154,7 @@ impl MetalRenderer {
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A COPY PAST THE READBACK BUFFER WILL HAPPEN
         unsafe {
             blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
-                &texture,
+                texture,
                 0,
                 0,
                 MTLOrigin { x: 0, y: 0, z: 0 },
@@ -1319,7 +1166,7 @@ impl MetalRenderer {
             );
         }
         blit.endEncoding();
-        self.finish(&command_buffer)?;
+        self.finish(command_buffer)?;
         let (readback, _) = self
             .readback
             .as_ref()
@@ -1338,12 +1185,55 @@ impl MetalRenderer {
         Ok(())
     }
 
+    /// `render_overlay_to_pixels` draws `overlay` over a scene given as pixels (BGRA, top row
+    /// first, of `output_px`) and reads the result back into `pixels` (RGBA, top row first).
+    ///
+    /// Example: `renderer.render_overlay_to_pixels(&scene_pixels, &overlay, (640, 352), &mut pixels)?;`
+    #[cfg(test)]
+    fn render_overlay_to_pixels(
+        &mut self,
+        scene_pixels: &[u8],
+        overlay: &Overlay,
+        output_px: (usize, usize),
+        pixels: &mut [u8],
+    ) -> Result<()> {
+        self.prepare_render_texture(output_px)?;
+        let (scene, _) = self
+            .render_texture
+            .clone()
+            .expect("the render texture was just made");
+        let mut scene_source: Option<Texture> = None;
+        upload_texture(
+            &self.device,
+            &mut scene_source,
+            scene_pixels,
+            output_px,
+            PIXEL_FORMAT,
+            BYTES_PER_PIXEL,
+        )?;
+        let (scene_source, _) = scene_source.expect("the scene's texture was just made");
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or("Metal: no command buffer")?;
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .ok_or("Metal: no blit encoder")?;
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A COPY BETWEEN TEXTURES OF DIFFERENT SIZES WILL HAPPEN
+        unsafe { blit.copyFromTexture_toTexture(&scene_source, &scene) };
+        blit.endEncoding();
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+            self.encode_overlay(&command_buffer, &scene, overlay, output_px)?;
+        self.read_pixels(&command_buffer, &texture, output_px, pixels)
+    }
+
     /// `encode_overlay` encodes drawing `overlay` over a finished frame into a texture of its own,
     /// which it returns: the frame blended with the previous frame's scene (kept in one of two
     /// history textures, swapped each frame; none after a resize) and darkened, the mask (if any)
     /// scaled by a whole number to at most `mask_height_frac` of the frame's height (and at most
     /// `OVERLAY_MAX_WIDTH_FRAC` of its width), centred, over the picture (if any), and the
-    /// rectangles.
+    /// rectangles, which the shader's `mark_rect_tiles` first sorts into the output's tiles so
+    /// that each pixel looks only at the ones near it.
     ///
     /// Example: `let shown = self.encode_overlay(&command_buffer, &frame, &overlay, (2560, 1600))?;`
     fn encode_overlay(
@@ -1380,6 +1270,24 @@ impl MetalRenderer {
                 self.make_texture(output_px, usage)?,
                 self.make_texture(output_px, usage)?,
             ));
+        }
+        let tile_grid: (usize, usize) = (
+            output_px.0.div_ceil(RECT_TILE_PX),
+            output_px.1.div_ceil(RECT_TILE_PX),
+        );
+        if self
+            .rect_tiles
+            .as_ref()
+            .is_none_or(|(_, size)| *size != output_px)
+        {
+            let buffer = self
+                .device
+                .newBufferWithLength_options(
+                    tile_grid.0 * tile_grid.1 * BYTES_PER_RECT_TILE,
+                    MTLResourceOptions::StorageModeShared,
+                )
+                .ok_or("Metal: no memory for the rectangles' tiles")?;
+            self.rect_tiles = Some((buffer, output_px));
         }
         let empty_picture: [u8; BYTES_PER_PICTURE_PIXEL] = [0; BYTES_PER_PICTURE_PIXEL];
         let (picture_bytes, picture_px, picture_corners_mask_px) = match &overlay.picture {
@@ -1518,12 +1426,17 @@ impl MetalRenderer {
             .blur_histories
             .as_ref()
             .expect("the histories were just made");
+        let (rect_tiles, _) = self
+            .rect_tiles
+            .as_ref()
+            .expect("the rectangles' tiles were just made");
         let encoder = command_buffer
             .computeCommandEncoder()
             .ok_or("Metal: no compute encoder")?;
-        encoder.setComputePipelineState(&self.apply_overlay);
+        encoder.setComputePipelineState(&self.mark_rect_tiles);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURES WILL HAPPEN
         unsafe {
+            encoder.setBuffer_offset_atIndex(Some(rect_tiles), 0, 4);
             encoder.setTexture_atIndex(Some(frame), 0);
             encoder.setTexture_atIndex(Some(mask), 1);
             encoder.setTexture_atIndex(Some(target), 2);
@@ -1553,6 +1466,20 @@ impl MetalRenderer {
             );
             encoder.setTexture_atIndex(Some(map), 7);
         }
+        if self.marks_every_rect {
+            let every_rect: u64 = u64::MAX >> (u64::BITS as usize - MAX_OVERLAY_RECT_COUNT);
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A WRITE PAST THE TILES' BUFFER WILL HAPPEN
+            unsafe {
+                std::slice::from_raw_parts_mut(
+                    rect_tiles.contents().as_ptr().cast::<u64>(),
+                    tile_grid.0 * tile_grid.1,
+                )
+                .fill(every_rect);
+            }
+        } else {
+            dispatch_grid(&encoder, tile_grid);
+        }
+        encoder.setComputePipelineState(&self.apply_overlay);
         dispatch_grid(&encoder, output_px);
         encoder.endEncoding();
         let target: Retained<ProtocolObject<dyn MTLTexture>> = target.clone();
@@ -1629,5 +1556,278 @@ impl MetalRenderer {
         command_buffer.presentDrawable(ProtocolObject::from_ref(&*drawable));
         self.finish(&command_buffer)?;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for `encode_overlay`'s sorting of the HUD's rectangles into tiles: a picture drawn
+    //! with the sorting equals, pixel for pixel, the one drawn with every rectangle marked in
+    //! every tile (`marks_every_rect`), over a scene that is different at every pixel.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Rectangles | none, one, several, `MAX_OVERLAY_RECT_COUNT` (every bit of a tile's mask) | `sorted_rects_draw_as_unsorted`, `rects_change_the_picture` |
+    //! | A rectangle's look | flat; a shadow and a glow reaching beyond it; slanted with round corners, an outline and gloss; pulses taller than it | `sorted_rects_draw_as_unsorted`, `rects_change_the_picture` |
+    //! | Where a rectangle lies | inside one tile, across tiles, over the screen's edge | `sorted_rects_draw_as_unsorted` |
+    //! | Output size | whole tiles, part tiles at the right and the bottom | `sorted_rects_draw_as_unsorted` |
+
+    use super::*;
+    use crate::overlay::{RectPulse, RectStyle};
+
+    const WHOLE_TILES_PX: (usize, usize) = (20 * RECT_TILE_PX, 11 * RECT_TILE_PX);
+    const PART_TILES_PX: (usize, usize) = (WHOLE_TILES_PX.0 + 13, WHOLE_TILES_PX.1 + 7);
+    const MAX_CHANNEL: usize = u8::MAX as usize;
+    const GRID_COLUMN_COUNT: usize = 8;
+
+    /// `make_scene` gives a scene of `size_px` (BGRA, top row first) whose colour changes from
+    /// every pixel to the next, so that anything drawn over it shows.
+    ///
+    /// Example: `let scene_pixels: Vec<u8> = make_scene((640, 352));`
+    fn make_scene(size_px: (usize, usize)) -> Vec<u8> {
+        let mut pixels: Vec<u8> = Vec::with_capacity(size_px.0 * size_px.1 * BYTES_PER_PIXEL);
+        for y in 0..size_px.1 {
+            for x in 0..size_px.0 {
+                pixels.extend([
+                    (x * MAX_CHANNEL / size_px.0) as u8,
+                    (y * MAX_CHANNEL / size_px.1) as u8,
+                    ((x + y) % (MAX_CHANNEL + 1)) as u8,
+                    u8::MAX,
+                ]);
+            }
+        }
+        pixels
+    }
+
+    /// `make_rect` gives a flat rectangle between two corners (fractions of the screen) in a
+    /// half-clear orange.
+    ///
+    /// Example: `let rect: OverlayRect = make_rect([0.1, 0.1], [0.3, 0.2]);`
+    fn make_rect(min_frac: [f32; 2], max_frac: [f32; 2]) -> OverlayRect {
+        OverlayRect {
+            min_frac,
+            max_frac,
+            color: [1.0, 0.55, 0.1, 0.6],
+            style: FLAT_RECT_STYLE,
+            pulse: NO_RECT_PULSE,
+        }
+    }
+
+    /// `make_haloed_rect` gives `make_rect`'s rectangle with a drop shadow and a glow that reach
+    /// well beyond it.
+    ///
+    /// Example: `let rect: OverlayRect = make_haloed_rect([0.4, 0.4], [0.6, 0.5]);`
+    fn make_haloed_rect(min_frac: [f32; 2], max_frac: [f32; 2]) -> OverlayRect {
+        OverlayRect {
+            style: RectStyle {
+                shadow_frac: 0.06,
+                glow_frac: 0.05,
+                ..FLAT_RECT_STYLE
+            },
+            ..make_rect(min_frac, max_frac)
+        }
+    }
+
+    /// `make_styled_rect` gives `make_rect`'s rectangle slanted, with round corners, an outline,
+    /// gloss, shading and a small shadow.
+    ///
+    /// Example: `let rect: OverlayRect = make_styled_rect([0.4, 0.4], [0.6, 0.5]);`
+    fn make_styled_rect(min_frac: [f32; 2], max_frac: [f32; 2]) -> OverlayRect {
+        OverlayRect {
+            style: RectStyle {
+                corner_frac: 0.02,
+                outline_frac: 0.006,
+                gloss_frac: 0.5,
+                shadow_frac: 0.015,
+                slant_x_per_y: 0.6,
+                shade_frac: 0.3,
+                outline_color: [0.1, 0.9, 1.0, 1.0],
+                ..FLAT_RECT_STYLE
+            },
+            ..make_rect(min_frac, max_frac)
+        }
+    }
+
+    /// `make_pulsing_rect` gives a thin slanted bar that carries two pulses several times taller
+    /// than itself, along most of its length.
+    ///
+    /// Example: `let rect: OverlayRect = make_pulsing_rect([0.2, 0.5], [0.8, 0.52]);`
+    fn make_pulsing_rect(min_frac: [f32; 2], max_frac: [f32; 2]) -> OverlayRect {
+        let width_frac: f32 = max_frac[0] - min_frac[0];
+        OverlayRect {
+            style: RectStyle {
+                slant_x_per_y: 0.5,
+                ..FLAT_RECT_STYLE
+            },
+            pulse: RectPulse {
+                centers_x_frac: [
+                    min_frac[0] + 0.3 * width_frac,
+                    min_frac[0] + 0.7 * width_frac,
+                    0.0,
+                    0.0,
+                ],
+                opacities: [1.0, 0.6, 0.0, 0.0],
+                min_x_frac: min_frac[0] + 0.1 * width_frac,
+                max_x_frac: max_frac[0] - 0.05 * width_frac,
+                half_width_frac: 0.04,
+                half_height_frac: 0.05,
+                color: [0.3, 1.0, 0.4, 1.0],
+            },
+            ..make_rect(min_frac, max_frac)
+        }
+    }
+
+    /// `make_cases` gives the named sets of rectangles the tests draw; the first has none.
+    ///
+    /// Example: `for (name, rects) in make_cases() { ... }`
+    fn make_cases() -> Vec<(&'static str, Vec<OverlayRect>)> {
+        let full_grid: Vec<OverlayRect> = (0..MAX_OVERLAY_RECT_COUNT)
+            .map(|i| {
+                let column: f32 = (i % GRID_COLUMN_COUNT) as f32;
+                let row: f32 = (i / GRID_COLUMN_COUNT) as f32;
+                let min_frac: [f32; 2] = [0.03 + 0.12 * column, 0.04 + 0.12 * row];
+                let max_frac: [f32; 2] = [min_frac[0] + 0.09, min_frac[1] + 0.07];
+                match i % 4 {
+                    0 => make_rect(min_frac, max_frac),
+                    1 => make_haloed_rect(min_frac, max_frac),
+                    2 => make_styled_rect(min_frac, max_frac),
+                    _ => make_pulsing_rect(min_frac, max_frac),
+                }
+            })
+            .collect();
+        vec![
+            ("no rectangles", vec![]),
+            (
+                "one flat rectangle inside a tile",
+                vec![make_rect([0.105, 0.105], [0.125, 0.135])],
+            ),
+            (
+                "flat rectangles across tiles",
+                vec![
+                    make_rect([0.1, 0.1], [0.45, 0.3]),
+                    make_rect([0.3, 0.2], [0.9, 0.8]),
+                ],
+            ),
+            (
+                "a shadow and a glow beyond the rectangle",
+                vec![make_haloed_rect([0.4, 0.4], [0.6, 0.5])],
+            ),
+            (
+                "a slanted, outlined, glossy rectangle",
+                vec![make_styled_rect([0.2, 0.3], [0.7, 0.6])],
+            ),
+            (
+                "pulses taller than their bar",
+                vec![make_pulsing_rect([0.2, 0.5], [0.8, 0.52])],
+            ),
+            (
+                "rectangles over the screen's edges",
+                vec![
+                    make_haloed_rect([-0.1, -0.1], [0.08, 0.06]),
+                    make_styled_rect([0.9, 0.85], [1.2, 1.3]),
+                    make_pulsing_rect([0.6, 0.0], [1.1, 0.02]),
+                    make_haloed_rect([0.0, 0.97], [0.3, 1.0]),
+                ],
+            ),
+            ("as many rectangles as the overlay takes", full_grid),
+        ]
+    }
+
+    /// `draw_rects` gives the picture (RGBA, top row first) of `rects` over `make_scene`'s scene
+    /// at `size_px`, with the rectangles sorted into tiles or, with `marks_every_rect`, not.
+    ///
+    /// Example: `let pixels: Vec<u8> = draw_rects(&mut renderer, &rects, (640, 352), false);`
+    fn draw_rects(
+        renderer: &mut MetalRenderer,
+        rects: &[OverlayRect],
+        size_px: (usize, usize),
+        marks_every_rect: bool,
+    ) -> Vec<u8> {
+        let overlay: Overlay = Overlay {
+            dim_frac: 0.0,
+            mask: None,
+            rects,
+            wand: None,
+            blur_frac: 0.0,
+            hit: HitEffect::default(),
+            mask_height_frac: 0.0,
+            picture: None,
+            stretch_frac: 0.0,
+            minimap: None,
+            blueshift_frac: 0.0,
+        };
+        let mut pixels: Vec<u8> = vec![0; size_px.0 * size_px.1 * BYTES_PER_PIXEL];
+        renderer.marks_every_rect = marks_every_rect;
+        renderer
+            .render_overlay_to_pixels(&make_scene(size_px), &overlay, size_px, &mut pixels)
+            .expect("the overlay draws");
+        pixels
+    }
+
+    /// `count_different_pixels` gives how many pixels two pictures of one size differ in.
+    ///
+    /// Example: `assert_eq!(count_different_pixels(&sorted, &unsorted), 0);`
+    fn count_different_pixels(a: &[u8], b: &[u8]) -> usize {
+        assert_eq!(a.len(), b.len(), "the pictures have different sizes");
+        a.as_chunks::<BYTES_PER_PIXEL>()
+            .0
+            .iter()
+            .zip(b.as_chunks::<BYTES_PER_PIXEL>().0)
+            .filter(|(pixel_a, pixel_b)| pixel_a != pixel_b)
+            .count()
+    }
+
+    #[test]
+    fn sorted_rects_draw_as_unsorted() {
+        let mut renderer: MetalRenderer = MetalRenderer::New(false).expect("a GPU");
+        for size_px in [WHOLE_TILES_PX, PART_TILES_PX] {
+            for (name, rects) in make_cases() {
+                let unsorted: Vec<u8> = draw_rects(&mut renderer, &rects, size_px, true);
+                let sorted: Vec<u8> = draw_rects(&mut renderer, &rects, size_px, false);
+                assert_eq!(
+                    count_different_pixels(&sorted, &unsorted),
+                    0,
+                    "{name} at {size_px:?}: sorting the rectangles into tiles changed pixels"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rects_change_the_picture() {
+        let mut renderer: MetalRenderer = MetalRenderer::New(false).expect("a GPU");
+        let cases: Vec<(&'static str, Vec<OverlayRect>)> = make_cases();
+        let (_, no_rects) = &cases[0];
+        let bare: Vec<u8> = draw_rects(&mut renderer, no_rects, WHOLE_TILES_PX, false);
+        for (name, rects) in &cases[1..] {
+            let drawn: Vec<u8> = draw_rects(&mut renderer, rects, WHOLE_TILES_PX, false);
+            let boxes_px: usize = rects
+                .iter()
+                .map(|rect| {
+                    let width_frac: f32 = rect.max_frac[0].min(1.0) - rect.min_frac[0].max(0.0);
+                    let height_frac: f32 = rect.max_frac[1].min(1.0) - rect.min_frac[1].max(0.0);
+                    (width_frac * height_frac * (WHOLE_TILES_PX.0 * WHOLE_TILES_PX.1) as f32)
+                        as usize
+                })
+                .sum();
+            let changed_px: usize = count_different_pixels(&drawn, &bare);
+            assert!(
+                changed_px >= boxes_px / 2,
+                "{name}: only {changed_px} pixels changed, for boxes of {boxes_px}"
+            );
+        }
+        let haloed: OverlayRect = make_haloed_rect([0.4, 0.4], [0.6, 0.5]);
+        let with_halo: Vec<u8> = draw_rects(&mut renderer, &[haloed], WHOLE_TILES_PX, false);
+        let without_halo: Vec<u8> = draw_rects(
+            &mut renderer,
+            &[make_rect(haloed.min_frac, haloed.max_frac)],
+            WHOLE_TILES_PX,
+            false,
+        );
+        let box_px: usize = (0.2 * 0.1 * (WHOLE_TILES_PX.0 * WHOLE_TILES_PX.1) as f32) as usize;
+        assert!(
+            count_different_pixels(&with_halo, &without_halo) > box_px,
+            "the shadow and the glow should reach over more pixels than the rectangle has"
+        );
     }
 }

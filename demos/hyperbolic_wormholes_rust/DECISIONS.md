@@ -1270,6 +1270,38 @@
 - **Rationale:** you asked that `Escape` ask "do you want to exit?" instead of exiting, exiting only if you press
   OK.
 
+### D118. Hold Tab for the map, Esc for the menu, W-140 (hold Tab for the map, Esc for the menu)
+
+The user (2026-11-09): "one more request is to be able to click tab to see the map and instead if you press escape
+then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", and "the point is that
+users will want to see where on the map they are pretty often". This replaces D86's exit prompt.
+
+- **Choice:**
+  - **Map:** a new held action, `show_map` (`Tab`), shows the MAP page's picture and legend over the game, dimmed 60%
+    (the menu dims 80%), while it is held. Play goes on: moving, looking, aiming and shooting all still work. The
+    window reads whether it is held from the keyboard's state every frame, so a missed key-up can't leave the map up.
+    The menu, when open, covers it.
+  - **Menu:** `open_menu` moves to `Escape`. Opening the menu frees the mouse; `Escape` again (or the open-menu
+    control) closes it and captures the mouse again. `release_mouse` is gone: opening the menu is how to free the
+    mouse.
+  - **Quit:** the menu has a fifth page, QUIT, last, so `Esc` then `Q` reaches it from SCORES. `Return` or `Y` there
+    leaves the level (`MenuOutcome::LeaveLevel`, then `PlayOutcome::LeaveLevel` from `handle_event`): a level run
+    alone quits, and the one-window app (W-141, one window for the whole game) will go back to its map menu. The
+    window's close button still quits at once.
+  - **MATCH page:** inside the one-window app the menu also shows a MATCH page first, with the match's status as
+    lines the app supplies (`Menu::set_match_lines`); a level run alone supplies none, so the page doesn't show.
+  - **Shared:** `warped_shared::menu_and_map` (`MenuAndMap`) holds the menu, whether the map is held and what covers
+    the view, the same in every level; `exit_prompt.rs` is removed.
+  - **Saved settings:** a save from before (it has `release_mouse` and no `show_map`) is upgraded as it loads
+    (`key_bindings::upgrade_saved_names`): `show_map` gets `Tab`, and `open_menu` keeps its own controls other than
+    the old `Tab` and gains `release_mouse`'s (`Escape`). Any other unknown key still fails.
+- **Alternatives:**
+  - toggling the map with `Tab` (the user asked for it only while held);
+  - keeping D86's prompt behind the QUIT page (a second question after choosing QUIT and pressing `Return`);
+  - keeping `release_mouse` on another key (the menu already frees the mouse).
+- **Rationale:** the user's request; the QUIT page is itself the question D86 asked, so a stray `Escape` still
+  can't end a game.
+
 ### D87. Consoles pulse faster and faster while being turned off
 
 - **Choice:**
@@ -1414,14 +1446,14 @@
     `DEFAULT_PORT` if one announced itself, else the first heard, printing the others.
   - **Server log:** a join now prints the window's address as "their window's address", so it isn't mistaken for
     the server's port.
-  - **Shooting (W-78):** a player in a game on a server can shoot only once welcomed: not from the team screen,
+  - **Shooting (W-78):** a player in a game on a server can shoot only once welcomed: not from the lobby,
     while joining, or while out after a hit.
 - **Alternatives:**
   - a version number in the join message (part of W-58, another agent's);
   - a list of servers to pick from, when several announce themselves (more than this needed).
 - **Rationale:** you couldn't join with `1` or `2`, which turned out to be a join sent to a port no server listened
   on, and nothing said so. You asked to cover the cases where a server doesn't answer, and that you can't shoot
-  before leaving the team screen.
+  before leaving the lobby.
 
 ### D92. Playing is only on a game server
 
@@ -1984,6 +2016,260 @@
   instead of a server setting (which would let windows from before this change still join).
 - **Rationale:** you asked: "with a slight cooldown, you should be able to shoot as long as no keys are pressed. No
   movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
+
+### D110. Lunar Surface at full resolution: baked ground, culled structures and shared sunlight, W-131 (Lunar wormhole_exit slow at full size)
+
+- **Choice:** make the voxel renderer (`render_voxel.rs`, `render_voxel.metal`, `terrain.rs`, `voxel_world.rs`, the
+  same in `demos/warped_match_rust/` and, for the shader, `demos/dust_rust/`) faster with changes that keep the
+  pictures, profiled by switching parts of the shader off one at a time (shadows, shading, structures, terrain, beams):
+  - **Baked ground** (Dust's #420): the whole terrain height, 5 octaves, in a 0.25 m grid over the boundary's box
+    grown by 250 m (`BAKED_TERRAIN_REACH_M`), which walking, laser hits and the shader read alike; its slopes are
+    baked on the GPU at the same points (`bake_terrain_slopes`) and read bilinearly for the ground's normal, instead
+    of four 5-octave heights per pixel.
+  - **Structure groups:** static structures grouped by 12 m cells of Fermi (u, v), each with a bounding sphere, so a
+    ray or shadow ray tests a group's members only if it can reach the group (`trace_structures`).
+  - **Shapes a chord can reach:** a structure's sphere tracing evaluates only the shapes whose box (grown by the
+    hit tolerance, and by the penumbra's reach for shadow rays) the chord crosses (`get_shape_mask`).
+  - **Mesh BVHs nearer child first,** and a shadow ray stops at its first triangle.
+  - **Beams:** each beam's midpoint is packed once; in bent steps only the beams that come near the warp are
+    scanned (`get_beam_mask`); far lamps are skipped before their distance is measured.
+  - **Shared sunlight (the one heuristic):** each fine sample (every second pixel each way) on the ground traces its
+    sun shadow once; a pixel between four samples that are all fully in the sun, with no structure near their shadow
+    rays, takes full sun instead of tracing its own. Everything else (penumbra, shadow edges, structures, near misses)
+    is traced per pixel as before.
+- **Look:** before against after, 2560×1440, every bench view: see #450 for the table and the difference
+  pictures; the changes are sub-millimetre shifts of ground hits (the bake's bilinear heights, at most a few
+  millimetres off the 5-octave shape), which move the regolith's fine texture by a pixel here and there, and
+  sunlight 0.0003% brighter beside structures (`NEAR_STRUCTURE_LIT`).
+- **Gives up:** a shadow narrower than two pixels between four fully lit samples whose shadow rays pass no structure
+  is lost; no such shadow was found in the bench views (thin shadows are cast by structures, whose rays are near).
+- **Alternatives tried and not taken:** longer bent steps (Dust's 0.16 and 0.48 of the distance to the centre, or steps
+  that grow beyond 4 throat radii): `wormhole_exit` 49 → 36 or 41 ms, but the lens's rings move by a few pixels, so
+  they wait for the user; interpolating the sun between samples 4 pixels apart broke thin shadows into dashes; a 2 cm
+  limit on sharing kept them but lost most of the gain.
+- **Rationale:** the user wants 60 frames a second at full resolution in every level, and pictures that look the
+  same. `wormhole_exit` (4 m from a mouth, the lens filling the view) stays far over 16.7 ms: its rays take a hundred
+  or more bent steps each; in play the window's automatic render scale keeps it fast there.
+
+### D111. Safe terrain steps, the beam's haze between samples, lamp cutoffs once, W-131 (Lunar wormhole_exit slow at full size)
+
+- **Choice:** three more changes to `render_voxel.*` (Lunar Surface, the match's copy and Dust):
+  - **Safe terrain steps:** a camera ray's terrain march also steps `TERRAIN_SAFE_STEP_FRAC` (0.8) of its gap over
+    its descent plus the steepest slope near its 4 m block (`make_slope_bound_grid`, read by `get_safe_step_m`), when
+    that is longer than the old step; a Fermi coordinate moves no faster than the ray, so the step can't pass under
+    the ground. Shadow rays keep their steps, so the penumbra is unchanged.
+  - **Beam haze:** adaptive sampling interpolates pixels whose four samples see the same beam's haze, within 0.02,
+    with no core (`HALO_SMOOTH_DEPTH`), instead of tracing each.
+  - **Lamp cutoffs:** each lamp's cutoff cosh is packed once per frame.
+- **Look:** ground hits move within the bisection's tolerance, which moves the regolith's fine texture by a pixel here
+  and there (`red_spawn`: 3% of pixels past 8 of 255, as with the bake); elsewhere under 0.05%.
+- **Alternatives tried and not taken:** a grid of the highest ground near each block (steps over clear air only):
+  slower; growing terrain steps with the whole path, as Dust does: no gain on Lunar Surface.
+- **Rationale:** 2 to 6% off every view but `wormhole_exit`; `laser_into_wormhole` 17.5 → 16.6 ms at 2560×1440
+  (p99 17.0). The 3440×1440 views over 16.7 ms (16.9 to 21 ms) and `wormhole_exit` need more than this.
+
+### D112. Exact ground hits far from the origin, shadow safe steps, blocks of groups, W-131 (Lunar wormhole_exit slow at full size)
+
+- **Choice:** five more changes to `render_voxel.*` (Lunar Surface, the match's copy and Dust):
+  - **Fermi u from a logarithm:** `get_fermi` took u from atanh(z / w), which near the spawns (u ≈ 4.2 R, z / w ≈
+    0.9995) turns a float's rounding into several millimetres; ln((w + |z|) / √(1 + x² + y²)) is the same on the
+    hyperboloid and good to micrometres. Camera rays also end their bisection with a secant step.
+  - **Smoothness from the eye:** a float world point there is itself only good to about a millimetre, more than the
+    step between neighbouring pixels' hits on the near ground, so `is_cell_smooth` found the near ground and walls
+    rough and traced them pixel by pixel (a third of `red_spawn`'s time). A ray that went straight from the eye
+    (`STRAIGHT_RAY_BIT`) is now measured by its direction from the eye times its distance (`get_eye_point`), which is
+    exact; cells with a bent ray keep the world points.
+  - **Shadow safe steps:** a shadow ray's terrain march takes the camera ray's safe step, shortened so that its gap
+    can't fall below its least penumbra ratio so far (`hit.lit`) on the way: the penumbra is unchanged.
+  - **Shared full shadow:** a ground pixel between four fine samples whose sun rays all hit something takes their
+    shadow, as one between four fully lit samples already took their light (D110).
+  - **Blocks of groups:** the static structure groups (12 m cells) are packed by 4 × 4 blocks with a bounding sphere
+    each (`pack_structure_groups`), so a ray, above all a shadow ray, tests a block before its groups.
+- **Look:** the same, but where the ground hits moved: they are now on the ground rather than up to a bisection's
+  width under it, which moves the regolith's fine texture by a pixel here and there (`red_spawn`: 3.7% of pixels past
+  8 of 255, mean 1.1; `red_hangar` 0.9%; elsewhere under 0.7%). The shared shadow changed at most 0.003% of a view's
+  pixels; the blocks and the shadow steps none.
+- **Gives up:** a lit gap narrower than two pixels between four fully shadowed samples is lost; none was found in the
+  bench views.
+- **Not taken, for the user** (`wormhole_exit`, the lens filling the view; options sheet in the PR): a half-resolution
+  lens (cells whose four corners took 8 or more bent steps blend their corners' colours instead of tracing): 50 → 25.5
+  ms at 2560×1440, edges a little stepped; Dust's longer bent steps: 36.7 ms, rings move a few pixels; both: 21.2 ms;
+  the half-resolution lens tracing edges between surfaces: 34.4 ms; both, with the long late steps after 40 steps
+  instead of 90: 20.1 ms. None reaches 16.7 ms at 3440×1440 (24.6 ms at best).
+- **Rationale:** the user wants 60 frames a second at full size on the 3440×1440 display. At 3440×1440, 19 of 21 views
+  are now under 16.7 ms (before: 14); `wormhole_exit` and `laser_into_wormhole` (the lens) are left.
+
+### D113. A crouched player's robot stands on the ground, squashed, W-137 (crouched robots sink)
+
+- **Choice:** each window sends how far down a crouch its player is (0 to 1 in 15 steps) in the 4 spare high bits of
+  the wormholes byte of its state, which the server relays in its snapshots. Other windows raise the eye they receive
+  by the crouch's drop before placing the robot (`VoxelWorld::raise_crouched_eye`), so its feet stay on the ground,
+  and squash the drawn body (`AvatarModel::make_squashed`), its hit shapes and its head line toward the feet to the
+  crouched eye height's share of standing (0.6 crouched). The same in Dust, Snow Planet, the match and City Sphere
+  (City squashes its robots and lowers its torso and head spheres alike).
+- **Gives up:** a squashed robot is a shorter robot, not a crouching one: the body model has no crouch clip, and
+  bending its skeleton by hand was left out. Adding a clip would need a new animation asset, which needs the user's
+  approval.
+- **Compatibility:** the snapshot's length is unchanged, so windows and servers from before this change still play
+  with it: an older window ignores the new bits (and draws a crouched player sunk, as before), and an older server
+  relays nothing in them. A standing player's robot is drawn exactly as before.
+- **Rationale:** a crouched player's robot sank about 0.64 m into the ground (a standing eye height below its
+  lowered eye), and its hit shapes with it. The lead asked for this heuristic, for the user, who wants cheap
+  heuristics that look right.
+
+### D114. Lunar's lens at half resolution with Dust's longer bent steps (option D), W-131 (Lunar wormhole_exit slow at full size)
+
+- **Choice:** the user's option D from D112 (2026-11-09), in `render_voxel.metal` (Lunar Surface and the match's
+  copy):
+  - **Half-resolution lens:** `trace_ray` counts its bent steps (`BENT_STEPS_FIRST_BIT` in `surface.w`, up to 255).
+    `refine_pixels` blends the colours of a cell's four even pixels into its three odd ones, instead of tracing them,
+    when all four samples took at least `LENS_HALF_RES_STEPS` (8) bent steps: deep in a lens, where neighbouring
+    rays land far apart anyway.
+  - **Dust's longer bent steps:** `BEND_STEP_FRAC` 0.08 → 0.16 of the distance to the warp's centre, and
+    `LATE_BEND_STEP_FRAC` 0.24 → 0.48. `voxel_world.rs`'s `BEND_STEP_FRAC` (the CPU's laser paths, the clearance caps)
+    changes with it, so lasers still hit where they are drawn.
+- **Measured** (median GPU ms, best of 3 alternating rounds under the exclusive GPU lock, 2560×1440 / 3440×1440):
+  `wormhole_exit` 48.8 / 57.7 → 20.2 / 24.5; `laser_into_wormhole` 16.1 / 18.6 → 10.8 / 13.1; `wormhole` 13.1 / 15.6
+  → 9.9 / 12.2; views with a warp object in sight up to 3.3 ms faster, the rest within noise. At 3440×1440, 20 of 21
+  views are under 16.7 ms; `wormhole_exit` (24.5 ms) is left.
+- **Look:** a lens's most compressed rings are a little stepped and move a few pixels; nothing outside a warp's reach
+  changes (the pictures are identical there; the views without a warp object in sight are identical).
+- **Gives up:** detail finer than two pixels deep in a lens.
+- **Rationale:** the user chose it from D112's options sheet.
+
+### D115. A sharp centre with softer edges, W-136 (sharp centre, soft edges)
+
+- **Choice:** the window and the bench views draw a circle around the image's centre, `sharp_width_frac` of the
+  image's width across, exactly as before (adaptive sampling), and the rest at half resolution: there only the even
+  pixels (every second each way) are shaded and the others are blended from them, with no refinement. Beyond a second
+  circle, `half_width_frac` of the width across, only every fourth pixel each way is shaded (a quarter resolution).
+  The default (`DEFAULT_SHARP_CENTRE`) is the middle 66% sharp with the rest at half (option B); `--sharp-width-frac`
+  and `--half-width-frac` choose others (`inf` for none), and every other picture (the map's, tests) stays all sharp.
+  The same code is in Dust's and Snow Planet's renderers.
+- **How:** `get_fovea_level` gives each 4 × 4 pixel block its level from its centre's distance to the image's centre.
+  `fill_samples` skips the fine samples no half or sharp block needs (`is_sample_needed`, 8 pixels of margin);
+  `classify_cells` marks no cell outside the centre smooth and lists them all with their level; `resolve_pixels`
+  shades only the even pixels whose sample is needed and every fourth pixel; `refine_pixels` blends the rest
+  bilinearly from pixels `resolve_pixels` wrote, so no thread reads a pixel another writes in the same pass.
+- **Options measured** (Lunar Surface, 3440×1440, median GPU ms, best of 3 alternating rounds under the exclusive
+  lock; red_hangar / blue_hesco_rows / beacon / wormhole_exit): A all sharp 16.0 / 15.7 / 15.6 / 24.9; B middle 66%
+  sharp, rest half 15.5 / 13.9 / 14.8 / 24.6; C middle 50%, rest half 15.3 / 13.2 / 14.1 / 24.5; D middle 66%, half
+  to 100%, corners quarter 15.4 / 13.7 / 14.8 / 24.5; E middle 50%, half to 75%, rest quarter 14.8 / 12.7 / 13.6 /
+  23.4.
+- **Why the savings are small:** about 5.5 ms of a 3440×1440 frame doesn't depend on how many pixels are shaded
+  (filling and classifying the sample grid, bloom, tone mapping, the passes over every pixel), and the coarse pass
+  (every fourth pixel, always traced) costs 3-10 ms; even the whole image at a quarter takes 8.9 ms on red_hangar and
+  15.9 ms on wormhole_exit, whose lens fills the middle.
+- **Look:** the centre is the same picture (at most 1-2 of 255, through the bloom); outside it, edges between
+  surfaces are stepped at 2 pixels (half) or 4 pixels (quarter) and fine texture is softer.
+- **Gives up:** detail at the image's edges; nothing in the middle.
+- **Rationale:** the user (2026-11-09): "Try to at least have the ability to see a nice, good resolution for the
+  important things that are right in front of you." B keeps the centre identical and gives each heavy view a margin
+  under 16.7 ms; E is there for slower machines. The user picks.
+
+### D116. No aliasing: smooth soft edges and lenses, and FXAA, W-138 (no aliasing)
+
+- **Choice:** three changes to `render_voxel.*` (Lunar Surface and the match's copy; Dust and Snow Planet have the
+  first and third):
+  - **Smooth soft edges:** tone mapping (`tonemap_voxel`) reads each pixel through `get_soft_color`: outside W-136's
+    sharp circle it blends, over `SOFT_BAND_PX` (48 px), into a cubic B-spline of the 4 × 4 shaded pixels around it
+    (`get_spline_color`) on the half-resolution grid, and toward and beyond the quarter circle on the quarter grid.
+    The B-spline is a smooth, ring-free blur about two grid steps wide, so the edges show no steps.
+  - **Smooth lenses:** a pixel deep in a lens (its ray took at least 8 bent steps and shows no laser core) is
+    written with alpha `LENS_BLEND_ALPHA` (`get_lens_alpha`), and tone mapping shows it as the half-resolution
+    B-spline; a cell with a laser's core in it is traced at full resolution instead of blended, so the beam stays
+    sharp and unbroken.
+  - **FXAA:** tone mapping writes into an intermediate texture with the luma in alpha, and `fxaa_voxel` anti-aliases
+    it into the target with FXAA 3.11 (quality), the same as Dark Forest's.
+- **Cost** (median GPU ms at 3440x1440, best of 3 alternating rounds under the exclusive lock): 0.2-0.8 ms more per
+  view, 1.2 ms on `laser_into_wormhole` (its beam is now traced at full resolution in the lens); FXAA alone 0.1-0.3 ms.
+- **Not taken:** a quarter-resolution deep lens (fine samples deep in a lens copying the coarse ones, shown as the
+  quarter-resolution B-spline): `wormhole_exit` 25.5 → 19.2 ms at 3440x1440, still over 16.7 ms, with stars and the
+  lens's thin rings turned into soft blobs; smoothing from 4 bent steps instead of 8: no better.
+- **Rationale:** the user (2026-11-09): "there has to be enough blur to remove aliasing elsewhere", "aliasing is a
+  big issue", and the half-resolution lens "is worse ONLY BECAUSE it has aliasing".
+
+### D117. Option E is the default sharp centre, W-136 (sharp centre, soft edges) and W-138 (no aliasing)
+
+- **Choice:** `DEFAULT_SHARP_CENTRE` is option E of D115: the middle half of the width sharp, half resolution out to
+  three quarters of it, and a quarter beyond (was B: the middle 66% sharp, the rest at half).
+- **Rationale:** with D116's smoothing, E shows no steps at the edges, and it is 0.3-2.4 ms faster at 3440x1440 than B
+  (Lunar `blue_hesco_rows` 14.5 → 13.4 ms, Dust `laser_across_wind_eye` 17.3 → 15.0, Snow `wormhole` 20.2 → 17.8).
+  The user (2026-11-09): "you may lower resolution outside a circle around the crosshairs if that helps"; the lead
+  chose E from #469's sheets.
+
+### D119. 12 players a level server, snapshots in pages, W-155 (play against bots)
+
+- **Choice:** every level server (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest) takes 12
+  players, `warped_shared::level_net::MAX_PLAYER_COUNT` (was 8 in each `net.rs`): a 5v5 and a spare player for each
+  team. The snapshot goes out in pages of 6 players (each page: kind, page index, page count, player count, the
+  players, the game, their health bytes), at most 1129 of the 1200 bytes a page may take
+  (`MAX_SNAPSHOT_DATAGRAM_BYTES`); a window keeps the latest copy of each page (`level_net::SnapshotPages`).
+  `PROTOCOL_VERSION` is 2.
+- **Alternatives:** one snapshot of 2243 bytes for 12 players (it was already 1499 for 8, over a 1500-byte
+  Ethernet MTU, so IP split it); 16 players (3 pages); frames as f32 (122 bytes a player, still 1475 for 12).
+- **Rationale:** the user (W-155): "playing with multiple allied and enemy bots so that you can play 5v5 or smth
+  like that". Pages under 1200 bytes never fragment, so losing one fragment no longer loses the whole snapshot; a
+  lost page leaves its players one snapshot (1/60 s) behind.
+- **Compatibility:** a window or server from before this change can't join one after it, and says so: the join
+  carries `PROTOCOL_VERSION`, and the server refuses another ("the server ... runs game version 2, and this game is
+  version 1"). Rebuild every window and server from one commit. Saved settings and maps are unchanged, except Dark
+  Forest's map (two more spawns a team).
+- **Limits raised with it:** the voxel levels' marker materials (2 a player, 24), Dark Forest's lens (24 thrown
+  mouths, 40 in all, with the map's 10), the house demo's mouths (32) and boxes (112) and its spawn rings (3 of 8),
+  the app's and `play_with_bots.sh`'s bots (5 allies, 6 enemies). Dark Forest has 6 spawns a team (a back row of
+  two, seeded and mirrored like its props), and an online player respawns on the first team spawn no other player
+  stands on, starting from one their id picks; offline play keeps the farthest spawn from the robots.
+- **Posing:** every voxel level's window poses the other players' robots in parallel (`with_posed_avatars`), since
+  posing 11 robots on the CPU takes about 9 ms a frame (W-200, robots posed on the CPU); D120 packs them in
+  parallel too.
+- **Revisit if:** a level needs more than 12 players, or a player's record grows past 196 bytes (from 185; pages
+  would then hold 5).
+
+### D120. A 5v5 on one computer at 60 fps: HUD rectangles in tiles, robots packed in parallel, bots' hit pictures only when asked, W-155 (play against bots)
+
+- **Choice:** three changes in every voxel level (Lunar Surface, the match, Dust, Snow Planet, City Sphere):
+  - *HUD rectangles in tiles.* The shader's `mark_rect_tiles` sorts the HUD's rectangles (at most 64) into 32-pixel
+    tiles of the output, a bit a rectangle, and `apply_overlay` looks only at its tile's rectangles for each pixel.
+  - *Robots packed in parallel.* `write_avatar_buffers` packs each frame's posed robots (triangles and BVH nodes) in
+    parallel straight into the Metal buffers, instead of on one thread into vectors that were then copied.
+  - *Hit pictures only when asked.* A `--bot` saves its view at each hit only with `--bot-hit-pictures`; without it
+    the bot makes no renderer at all.
+- **Alternatives:** for the HUD, drawing the rectangles as triangles (a second kind of pass to keep in step with
+  the shader's styles), or fewer rectangles (the HUD needs them). For the pictures, keeping them on by default with
+  a flag to turn them off (the app's and `play_with_bots.sh`'s bots, which the players share a computer with, would
+  each need the flag), or drawing them smaller or on the CPU (still work nobody looks at while playing).
+- **Rationale:** the user's goal is every level at about 60 fps, and W-155 (play against bots) asks for a 5v5 with
+  bots, which run on the player's computer.
+  - The overlay pass looked at all 64 rectangles for every output pixel, about half of a frame at 2560x1440: alone
+    in Snow Planet at render scale 0.5, 104 fps before and 216 fps after. A GPU test in each level
+    (`sorted_rects_draw_as_unsorted`) checks the sorted picture equals the unsorted one pixel for pixel.
+  - Each bot drew a 1280x800 picture with its own Metal renderer and saved a PNG at every hit. In a busy 5v5 the
+    window's slow frames were its CPU part waiting (in Snow Planet's frames over 40 ms: 36 ms before the render
+    call and 18 ms encoding, against 0.9 and 0.55 ms normally, with the GPU's 11 ms unchanged), at the moments bot
+    processes took 2.4 to 4.5 cores each. Nothing reads the pictures; they are for a person checking what a bot
+    shot at.
+- **Measured:** one window at 2560x1440 (drawing 2560x1334, automatic render scale) on blue with 4 allied and 5
+  enemy bots on the same Apple M3 Pro (6 performance and 6 efficiency cores), friendly fire off and a 2 s respawn
+  so that everyone keeps fighting, 20 s after the first 5 s, with the tiles and the parallel packing in both
+  columns:
+
+  | Level | Hit pictures on: fps, p99, worst half second | Off: fps, median, p99, worst frame, frames over 16.7 ms, worst half second |
+  | --- | --- | --- |
+  | Snow Planet | 66-67 fps, 23-28 ms, 20-38 fps | 78.4 fps, 12.34 ms, 17.05 ms, 19.30 ms, 20 of 1568, 62 fps |
+  | Dust | 63-72 fps, 29-50 ms, 10-48 fps | 71.0 fps, 14.10 ms, 16.62 ms, 18.09 ms, 11 of 1419, 66 fps |
+  | Lunar Surface | 82.2 fps, 28.0 ms, 42 fps | 84.8 and 89.2 fps, 11.35 and 11.17 ms, 15.77 and 13.61 ms, 178.61 and 15.89 ms, 14 of 1696 and 0 of 1785, 30 and 82 fps |
+  | City Sphere (its bots never saved pictures) | 159.1 fps, 8.41 ms | 185.7 and 126.3 fps, 3.92 and 7.70 ms, 9.83 and 11.85 ms, 51.96 and 19.69 ms, 5 of 3629 and 4 of 2479, 108 and 76 fps |
+
+  Lunar Surface's first run had one hitch (two frames, 178.61 ms the longer) that the second run didn't repeat;
+  its cause wasn't found, and other programs on the computer (a browser, Spotlight's indexing) took one to two
+  cores throughout.
+- **Not done:** each bot still packs a 1280x800 view with every robot's mesh at each step only to find whom its
+  laser hits (about a tenth of a core a bot); Dark Forest's overlay has the same every-rectangle loop and its 5v5
+  wasn't measured; a 5v5 with the default settings (friendly fire on, 20 s respawn) wasn't measured after this
+  change.
+- **Revisit if:** a 5v5 on one computer drops under 60 fps again, the HUD needs more than 64 rectangles (a tile's
+  bits are a `u64`), or someone needs the bots' pictures in the app (then the app passes the flag).
 
 ## Workload
 

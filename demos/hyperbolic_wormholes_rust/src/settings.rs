@@ -13,9 +13,13 @@
 //! Must know:
 //! - Every key is required and unknown keys fail, so a typo can't silently keep a default. The only
 //!   exceptions are named: player keys removed since saves began (`REMOVED_PLAYER_KEYS`) are
-//!   dropped, and those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing.
+//!   dropped, those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing, and
+//!   so does the server's `surface` section (W-158), so older server settings files still load.
 //! - The built-in settings are the two files themselves, compiled in.
+//! - `PerPlayerSettings` exists only on macOS, where the game's window runs (its keys are SDL's);
+//!   the game server also builds for Linux.
 
+#[cfg(target_os = "macos")]
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::Path;
@@ -23,13 +27,35 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::key_bindings::KeyBindings;
+#[cfg(target_os = "macos")]
+use crate::key_bindings::{self, KeyBindings};
+pub use crate::play_settings::{
+    AimSettings, BeamSpeckleSettings, BlackHoleSettings, ConsoleSettings, FlashlightSettings,
+    GravitySettings, MapEdgeSettings, MovementSettings, RespawnSettings, RifleSettings,
+    ShootingSettings, SniperSettings, SpaceSettings, SprintEnergySettings, WhenHitSettings,
+    WormholeSettings,
+};
+#[cfg(target_os = "macos")]
+#[allow(unused_imports)]
+pub use crate::play_settings::{HeadBobSettings, MinimapCorner};
+#[cfg(target_os = "macos")]
+pub use crate::play_settings::{HitEffectSettings, MainMapSettings, MinimapSettings, ViewSettings};
+#[cfg(target_os = "macos")]
+use warped_shared::visuals::VisualsSettings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
+#[cfg(target_os = "macos")]
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 30] = [
+    "wormholes.sniper_hits_to_destroy",
+    "wormholes.rifle_hits_to_destroy",
+    "gravity.black_hole_acceleration_frac",
+    "gravity.black_hole_min_radius_m",
+    "gravity.black_hole_darkness_frac",
+    "gravity.acceleration_m_per_s_per_s",
+    "gravity.brake_m_per_s_per_s",
     "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
     "sniper.reload_s",
@@ -47,12 +73,15 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
-    "respawn.delay_s",
+    "respawn.start_s",
+    "respawn.step_s",
+    "shooting.drop_m_per_s_per_s",
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
     "black_hole.max_lens_rad",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
+#[cfg(target_os = "macos")]
 const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
@@ -69,267 +98,22 @@ const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 6] = [
+const ADDED_PLAYER_KEYS: [&str; 8] = [
+    "visuals",
     "keys.switch_view",
     "view.milky_way_brightness_frac",
     "view.head_bob.gun_walk_sway_m",
     "view.head_bob.gun_sprint_sway_m",
     "view.head_bob.rifle_walk_swing_rad",
     "view.head_bob.rifle_sprint_swing_rad",
+    "main_map",
 ];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-/// `MovementSettings` is walking and sprinting speed as multiples of the map's, a jump's height and
-/// time in the air as a fraction of the map's jump (gravity follows from the two), and crouching:
-/// its speed and eye height as fractions of walking's, and how long it takes to crouch or stand;
-/// and how long after the last movement key a player can shoot.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct MovementSettings {
-    pub walk_speed_per_map_speed: f64,
-    pub sprint_speed_per_map_speed: f64,
-    pub jump_height_m: f64,
-    pub jump_time_per_map_jump_time: f64,
-    pub crouch_speed_frac: f64,
-    pub crouch_eye_height_frac: f64,
-    pub crouch_s: f64,
-    pub shoot_after_moving_s: f64,
-}
-
-/// `SprintEnergySettings` is how long a full sprint bar lasts, and how long an empty one takes to
-/// refill while crouched and while walking or standing upright.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct SprintEnergySettings {
-    pub drain_s: f64,
-    pub refill_crouching_s: f64,
-    pub refill_walking_s: f64,
-}
-
-/// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, how long the
-/// bob takes to start or stop, and how the gun in hand sways with the steps while walking and
-/// while sprinting: how far it slides left and right, and how far a gun as long as the bolt-action
-/// rifle swings (its muzzle lagging the slide; shorter guns swing in proportion).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct HeadBobSettings {
-    pub walk_depth_m: f64,
-    pub sprint_depth_m: f64,
-    pub walk_steps_per_s: f64,
-    pub sprint_steps_per_s: f64,
-    pub fade_s: f64,
-    pub gun_walk_sway_m: f64,
-    pub gun_sprint_sway_m: f64,
-    pub rifle_walk_swing_rad: f64,
-    pub rifle_sprint_swing_rad: f64,
-}
-
-/// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
-/// to reload, how many hits eliminate a player, how its beam flies (speed, and how long each
-/// point stays lit), how far a shot strays from the crosshair (the mean of an exponential
-/// distribution, and a cap; `shot_noise.rs`), and the share of its beam's pixels that speckle each
-/// frame (the same: a mean and a cap).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct SniperSettings {
-    pub shot_s: f64,
-    pub reload_s: f64,
-    pub hits_to_eliminate: u8,
-    pub beam_speed_m_per_s: f64,
-    pub beam_trail_s: f64,
-    pub noise_mean_rad: f64,
-    pub noise_max_rad: f64,
-    pub beam_speckle_mean_frac: f64,
-    pub beam_speckle_max_frac: f64,
-}
-
-/// `RifleSettings` is gun 2: its fire rate, how long a shot hits, how its beam flies, overheating
-/// and cooling, the hits that eliminate a player, each shot's recoil, the most a shot strays
-/// from the crosshair, cold and at full heat, and the share of its beam's pixels that speckle each
-/// frame, cold and at full heat (`shot_noise.rs`).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct RifleSettings {
-    pub shots_per_s: f64,
-    pub pulse_s: f64,
-    pub beam_speed_m_per_s: f64,
-    pub beam_trail_s: f64,
-    pub shots_until_overheat: u32,
-    pub cool_down_s: f64,
-    pub head_hits_to_eliminate: u8,
-    pub body_hits_to_eliminate: u8,
-    pub recoil_up_rad: f64,
-    pub recoil_sideways_rad: f64,
-    pub recoil_settle_s: f64,
-    pub noise_start_rad: f64,
-    pub noise_max_rad: f64,
-    pub beam_speckle_start_frac: f64,
-    pub beam_speckle_max_frac: f64,
-}
-
-/// `BeamSpeckleSettings` is how a laser beam's speckled pixels look, with both guns: the shares of
-/// them painted black, turned white and dropping out (showing what is behind), which add up to 1.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct BeamSpeckleSettings {
-    pub black_frac: f64,
-    pub white_frac: f64,
-    pub dropout_frac: f64,
-}
-
-/// `ConsoleSettings` is how long holding `E` takes to turn off a console, and from how far.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct ConsoleSettings {
-    pub hold_to_disable_s: f64,
-    pub reach_m: f64,
-}
-
-/// `RespawnSettings` is how long a player who was hit waits before coming back.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct RespawnSettings {
-    pub delay_s: f64,
-}
-
-/// `WhenHitSettings` is how a hit slows the player who takes it: to a fraction of their speed, for
-/// a while.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct WhenHitSettings {
-    pub slow_speed_frac: f64,
-    pub slow_s: f64,
-}
-
-/// `HitEffectSettings` is how a hit looks to the player who takes it: the screen's edges turning
-/// red, shaking and blurring inward, all fading over `effect_s`.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct HitEffectSettings {
-    pub effect_s: f64,
-    pub red_frac: f64,
-    pub shake_px: f64,
-    pub blur_px: f64,
-}
-
-/// `FlashlightSettings` is the flashlight's cone (half its opening angle and the width of its soft
-/// edge), the distance at which its light falls to half, and its brightness against the sun's.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct FlashlightSettings {
-    pub cone_half_angle_rad: f64,
-    pub soft_edge_rad: f64,
-    pub range_m: f64,
-    pub brightness_frac: f64,
-}
-
-/// `AimSettings` is aiming (holding the aim control): how much closer things look with each gun at
-/// full zoom, and how long zooming fully in or out takes. The mouse turns the view more slowly by
-/// the same factor.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct AimSettings {
-    pub sniper_zoom: f64,
-    pub rifle_zoom: f64,
-    pub zoom_s: f64,
-}
-
-/// `WormholeSettings` is how a thrown wormhole mouth flies (its speed, how far above the aim it
-/// leaves, its gravity and how long it may fly before it fizzles), on voxel maps its size
-/// (Schwarzschild radius and reach; the house's mouths all share the house's size), how many shots
-/// of each gun destroy an enemy's pair, and how long a hit pair flashes red.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct WormholeSettings {
-    pub throw_speed_m_per_s: f64,
-    pub throw_up_rad: f64,
-    pub gravity_m_per_s_per_s: f64,
-    pub max_flight_s: f64,
-    pub schwarzschild_radius_m: f64,
-    pub reach_m: f64,
-    pub sniper_hits_to_destroy: u8,
-    pub rifle_hits_to_destroy: u8,
-    pub hit_flash_s: f64,
-}
-
-/// `MapEdgeSettings` is the map's soft edge on a map with a crater: how far up the crater's wall
-/// (0 at its foot, 1 at the rim) players start to slow down, and how far up their speed would
-/// reach 0, which they never get to (each step outward is cut by the share of the way they have
-/// come).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct MapEdgeSettings {
-    pub start_wall_frac: f64,
-    pub stop_wall_frac: f64,
-}
-
-/// `SpaceSettings` is how curved space is: its curvature (1 over the curvature radius) as a multiple
-/// of the map's own, from `MIN_CURVATURE_PER_MAP_CURVATURE` to `MAX_CURVATURE_PER_MAP_CURVATURE`
-/// (`Map::scale_curvature`).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct SpaceSettings {
-    pub curvature_per_map_curvature: f64,
-}
-
-/// `BlackHoleSettings` is the black hole that grows as consoles turn off (W-68) and slows time
-/// near it (W-107): how long it eases to a new size, its Schwarzschild radius and reach at full
-/// strength, its wide lens at full strength (the most it turns a ray, and its core radius as a
-/// share of the reach), how many times stronger than in general relativity time slows near it (0
-/// for not at all), and the slowest its time runs (a share of the time far away, above 0 so that
-/// nobody freezes).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct BlackHoleSettings {
-    pub transition_s: f64,
-    pub max_schwarzschild_radius_m: f64,
-    pub max_reach_m: f64,
-    pub max_lens_rad: f64,
-    pub lens_core_per_reach: f64,
-    pub time_dilation_per_general_relativity: f64,
-    pub min_time_rate_frac: f64,
-}
-
-/// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
-/// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
-/// shifts colour (light cyan forward, dark red backward) while moving through a wormhole's throat
-/// (0 to 1), how bright the Milky Way is (0 to 1), and the head bob.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct ViewSettings {
-    pub look_rad_per_px: f64,
-    pub motion_blur_s: f64,
-    pub edge_stretch_frac: f64,
-    pub wormhole_tint_frac: f64,
-    pub milky_way_brightness_frac: f64,
-    pub head_bob: HeadBobSettings,
-}
-
-/// `MinimapCorner` is the corner of the window the minimap sits in.
-#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum MinimapCorner {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-
-/// `MinimapSettings` is the minimap: whether it shows, the corner it sits in, its radius as a
-/// fraction of the window's height, and how far from the player it reaches (also the circle on
-/// the menu's map page).
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct MinimapSettings {
-    pub is_shown: bool,
-    pub corner: MinimapCorner,
-    pub radius_frac: f64,
-    pub range_m: f64,
-}
-
 /// `PlayerFile` is `player_settings.yaml` as written: the keys by name, the view and how a hit looks.
+#[cfg(target_os = "macos")]
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlayerFile {
@@ -337,14 +121,39 @@ struct PlayerFile {
     view: ViewSettings,
     hit_effects: HitEffectSettings,
     minimap: MinimapSettings,
+    main_map: MainMapSettings,
+    visuals: VisualsSettings,
 }
 
 /// `PerPlayerSettings` is everything in `player_settings.yaml`, with the keys read into controls.
+#[cfg(target_os = "macos")]
 pub struct PerPlayerSettings {
     pub keys: KeyBindings,
     pub view: ViewSettings,
     pub hit_effects: HitEffectSettings,
     pub minimap: MinimapSettings,
+    pub main_map: MainMapSettings,
+    pub visuals: VisualsSettings,
+}
+
+/// `SurfaceSettings` is Lunar Surface's own game setting (W-158, per-map game settings): how
+/// strongly the ground pulls players down, times the gravity the jump settings give, with the
+/// jump's launch speed kept, so 0.5 makes jumps twice as high and twice as long.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct SurfaceSettings {
+    pub gravity_per_jump_gravity: f64,
+}
+
+impl Default for SurfaceSettings {
+    /// `default` is the gravity the jump settings give, unchanged.
+    ///
+    /// Example: `let surface: SurfaceSettings = SurfaceSettings::default();`
+    fn default() -> SurfaceSettings {
+        SurfaceSettings {
+            gravity_per_jump_gravity: 1.0,
+        }
+    }
 }
 
 /// `ServerSettings` is everything in `server_settings.yaml`.
@@ -358,6 +167,8 @@ pub struct ServerSettings {
     pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    #[serde(default)]
+    pub shooting: ShootingSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
@@ -365,6 +176,10 @@ pub struct ServerSettings {
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
     pub black_hole: BlackHoleSettings,
+    #[serde(default)]
+    pub surface: SurfaceSettings,
+    #[serde(default)]
+    pub gravity: GravitySettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -525,6 +340,10 @@ impl ServerSettings {
             )
             .into());
         }
+        settings
+            .gravity
+            .check()
+            .map_err(|error| format!("settings {source}: {error}"))?;
         let min_time_rate_frac: f64 = settings.black_hole.min_time_rate_frac;
         if min_time_rate_frac > 1.0 {
             return Err(format!(
@@ -569,12 +388,16 @@ impl ServerSettings {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
-    /// `view.wormhole_tint_frac` and `view.milky_way_brightness_frac` at most 1. The keys in
+    /// `view.wormhole_tint_frac` and `view.milky_way_brightness_frac` at most 1, and `visuals` in its
+    /// ranges (`VisualsSettings::check`). The keys in
     /// `REMOVED_PLAYER_KEYS`, which older versions saved, are dropped (`drop_removed_keys`), and those in `ADDED_PLAYER_KEYS`, which
     /// older versions didn't save, take their built-in values when missing (`add_missing_keys`).
+    /// Keys saved before W-140 (hold Tab for the map, Esc for the menu) are upgraded
+    /// (`key_bindings::upgrade_saved_names`).
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
@@ -585,9 +408,10 @@ impl PerPlayerSettings {
         let defaults: serde_yaml::Value = serde_yaml::from_str(BUILTIN_PLAYER_YAML)
             .expect("the built-in player_settings.yaml is YAML (tested)");
         add_missing_keys(&mut yaml, &defaults, &ADDED_PLAYER_KEYS);
-        let file: PlayerFile =
+        let mut file: PlayerFile =
             serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
-        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
+        key_bindings::upgrade_saved_names(&mut file.keys);
+        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap, "main_map": file.main_map});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         for (key, value_frac) in [
             ("view.wormhole_tint_frac", file.view.wormhole_tint_frac),
@@ -603,11 +427,14 @@ impl PerPlayerSettings {
                 .into());
             }
         }
+        file.visuals.check(source)?;
         Ok(PerPlayerSettings {
             keys: KeyBindings::FromNames(&file.keys, source)?,
             view: file.view,
             hit_effects: file.hit_effects,
             minimap: file.minimap,
+            main_map: file.main_map,
+            visuals: file.visuals,
         })
     }
 
@@ -629,6 +456,8 @@ impl PerPlayerSettings {
             view: self.view.clone(),
             hit_effects: self.hit_effects.clone(),
             minimap: self.minimap.clone(),
+            main_map: self.main_map,
+            visuals: self.visuals,
         };
         serde_yaml::to_string(&file).expect("player settings serialize to YAML")
     }
@@ -656,9 +485,14 @@ mod tests {
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
     //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`, the four `view.head_bob` sway and swing keys) | present (built in), missing in an old save (gets its built-in value), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
+    //! | Menu and map keys (W-140, hold Tab for the map, Esc for the menu) | current (built in), saved before (`release_mouse`, `open_menu` on `Tab`: loads with `Escape` for the menu and `Tab` for the map), `release_mouse` beside `show_map` (fails) | `builtin_settings_read_and_survive_json`, `saves_from_before_the_held_map_open_the_menu_with_escape` |
+    //! | Visuals (W-51, basic visuals) | the identity (built in), a save without the section (gets the identity), a value out of its range (fails, naming it) | `saves_without_visuals_load_with_the_identity` |
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | `gravity` section (W-144) | left out (every file before it, built in: the shared values), one key (the others shared), 0 pull (allowed: none), pull of walking speed or more, full pull past its reach, a misspelt key (each fails) | `gravity_defaults_and_overrides` |
     //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | `shooting` section | present (built in, the old rules), missing in an old file (the old rules), a misspelt key (fails) | `shooting_switches_default_to_the_old_rules` |
+    //! | Respawn section | the growing rule (built in), an old file's flat `delay_s` (loads, flat), a negative wait (fails, naming it) | `builtin_settings_read_and_survive_json`, `an_old_flat_respawn_delay_still_loads` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -672,6 +506,53 @@ mod tests {
             settings
         );
         assert!(PerPlayerSettings::Builtin().view.look_rad_per_px > 0.0);
+    }
+
+    #[test]
+    fn an_old_flat_respawn_delay_still_loads() {
+        const OLD_DELAY_S: f64 = 3.0;
+        let start: usize = BUILTIN_SERVER_YAML
+            .find("\nrespawn:")
+            .expect("a respawn section");
+        let end: usize = start + BUILTIN_SERVER_YAML[start..].find("\n\n").expect("its end");
+        let old_yaml: String = format!(
+            "{}\nrespawn:\n  delay_s: {OLD_DELAY_S}{}",
+            &BUILTIN_SERVER_YAML[..start],
+            &BUILTIN_SERVER_YAML[end..]
+        );
+        let old: ServerSettings = ServerSettings::FromYaml(&old_yaml, "old").expect("an old file");
+        assert_eq!(
+            (old.respawn.start_s, old.respawn.step_s),
+            (OLD_DELAY_S, 0.0)
+        );
+        assert_eq!(old.respawn.get_wait_s(f64::from(u16::MAX)), OLD_DELAY_S);
+        let negative_yaml: String = BUILTIN_SERVER_YAML.replace("  start_s: 20.0", "  start_s: -1");
+        let error: String = ServerSettings::FromYaml(&negative_yaml, "negative")
+            .expect_err("a negative wait fails")
+            .to_string();
+        assert!(error.contains("respawn.start_s"), "{error}");
+    }
+
+    #[test]
+    fn shooting_switches_default_to_the_old_rules() {
+        assert_eq!(
+            ServerSettings::Builtin().shooting,
+            ShootingSettings::default()
+        );
+        let start: usize = BUILTIN_SERVER_YAML
+            .find("\nshooting:")
+            .expect("a shooting section");
+        let end: usize = start + BUILTIN_SERVER_YAML[start..].find("\n\n").expect("its end");
+        let old_yaml: String = format!(
+            "{}{}",
+            &BUILTIN_SERVER_YAML[..start],
+            &BUILTIN_SERVER_YAML[end..]
+        );
+        let old: ServerSettings = ServerSettings::FromYaml(&old_yaml, "old").expect("an old file");
+        assert_eq!(old.shooting, ShootingSettings::default());
+        let typo_yaml: String =
+            BUILTIN_SERVER_YAML.replace("  is_friendly_fire_on:", "  is_friendly_fire:");
+        assert!(ServerSettings::FromYaml(&typo_yaml, "typo").is_err());
     }
 
     #[test]
@@ -846,6 +727,55 @@ mod tests {
     }
 
     #[test]
+    fn gravity_defaults_and_overrides() {
+        let builtin: ServerSettings = ServerSettings::Builtin();
+        assert_eq!(builtin.gravity, GravitySettings::default());
+        let mut is_in_gravity: bool = false;
+        let without_gravity: String = BUILTIN_SERVER_YAML
+            .lines()
+            .filter(|line| {
+                if !line.starts_with(' ') && !line.is_empty() {
+                    is_in_gravity = line.starts_with("gravity:");
+                }
+                !is_in_gravity
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+        let left_out: ServerSettings =
+            ServerSettings::FromYaml(&without_gravity, "test").expect("no gravity section");
+        assert_eq!(left_out.gravity, GravitySettings::default());
+        let json_back: ServerSettings =
+            ServerSettings::FromJson(&builtin.to_json()).expect("the built-in settings as JSON");
+        assert_eq!(json_back, builtin);
+        let with_gravity = |section: &str| -> Result<ServerSettings> {
+            ServerSettings::FromYaml(&format!("{without_gravity}\ngravity: {section}\n"), "test")
+        };
+        let one_key: ServerSettings = with_gravity("{radius_m: 12.0}").expect("one key");
+        assert_eq!(
+            one_key.gravity,
+            GravitySettings {
+                radius_m: 12.0,
+                ..GravitySettings::default()
+            }
+        );
+        assert!(with_gravity("{acceleration_m_per_s_per_s: 0.0}").is_ok());
+        for bad in [
+            "{radius_m: 0.0}",
+            "{black_hole_speed_frac: 1.5}",
+            "{radius_mm: 12.0}",
+            "{reach_m: 24.0}",
+        ] {
+            let error: String = with_gravity(bad).expect_err(bad).to_string();
+            assert!(
+                error.contains("gravity")
+                    || error.contains("radius_mm")
+                    || error.contains("reach_m"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn min_time_rate_takes_above_0_to_1() {
         let with_values = |rate_frac: &str, dilation: &str| -> Result<ServerSettings> {
             let yaml: String = BUILTIN_SERVER_YAML
@@ -907,5 +837,65 @@ mod tests {
             .expect("a key that wasn't added later still fails when missing")
             .to_string();
         assert!(error.contains("flashlight"), "{error}");
+    }
+
+    #[test]
+    fn saves_from_before_the_held_map_open_the_menu_with_escape() {
+        const SHOW_MAP_LINE: &str = "  show_map: [Tab]";
+        const OPEN_MENU_LINE: &str = "  open_menu: [Escape]";
+        const OLD_RELEASE_MOUSE_LINE: &str = "  release_mouse: [Escape]";
+        let old_save: String = BUILTIN_PLAYER_YAML
+            .replacen(SHOW_MAP_LINE, OLD_RELEASE_MOUSE_LINE, 1)
+            .replacen(OPEN_MENU_LINE, "  open_menu: [Tab]", 1);
+        assert!(!old_save.contains("show_map") && old_save.contains("open_menu: [Tab]"));
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
+        assert!(
+            loaded
+                .keys
+                .matches(Action::OpenMenu, Control::Key(Scancode::Escape))
+        );
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let both: String = BUILTIN_PLAYER_YAML.replacen(
+            SHOW_MAP_LINE,
+            &format!("{SHOW_MAP_LINE}\n{OLD_RELEASE_MOUSE_LINE}"),
+            1,
+        );
+        let error: String = PerPlayerSettings::FromYaml(&both, "test")
+            .err()
+            .expect("release_mouse beside show_map still fails")
+            .to_string();
+        assert!(error.contains("release_mouse"), "{error}");
+    }
+
+    #[test]
+    fn saves_without_visuals_load_with_the_identity() {
+        assert_eq!(
+            PerPlayerSettings::Builtin().visuals,
+            VisualsSettings::IDENTITY
+        );
+        let mut is_in_visuals: bool = false;
+        let old_save: String = BUILTIN_PLAYER_YAML
+            .lines()
+            .filter(|line| {
+                if !line.is_empty() && !line.starts_with(' ') {
+                    is_in_visuals = line.starts_with("visuals:");
+                }
+                !is_in_visuals
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+        assert!(!old_save.contains("brightness:") && old_save.contains("keys:"));
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("a save without visuals loads");
+        assert_eq!(loaded.visuals, VisualsSettings::IDENTITY);
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let too_bright: String =
+            BUILTIN_PLAYER_YAML.replacen("  brightness: 1.0", "  brightness: 9.0", 1);
+        let error: String = PerPlayerSettings::FromYaml(&too_bright, "test")
+            .err()
+            .expect("a brightness of 9 fails")
+            .to_string();
+        assert!(error.contains("visuals.brightness"), "{error}");
     }
 }

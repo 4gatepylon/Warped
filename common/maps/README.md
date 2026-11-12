@@ -6,14 +6,20 @@ once and drawn and simulated the same way everywhere. Gameplay that changes duri
 state) is not part of a map.
 
 A map is a folder `common/maps/<name>/` holding `map.json`, a JSON manifest that [`map.schema.json`](map.schema.json)
-describes. `validate_map.py` checks a map against this page (`make validate-maps`).
+describes. `validate_map.py` checks a map against this page (`make validate-maps`). A map is a level's layout; the
+level itself (its engine, rules, settings overrides and how menus show it) is the `level.json` beside it, specified in
+[`LEVELS.md`](LEVELS.md), with `levels.json` naming the engines and the matches.
 
 | Map | Made by | What it is |
 | --- | --- | --- |
 | [`house_demo/`](house_demo/) | `demos/hyperbolic_wormholes_rust` (`--export-map`) | the Rust wormholes demo's house, rails and pylons in H³ (R = 8 m), three wormholes |
 | [`lunar_surface/`](lunar_surface/) | `demos/levels/lunar_surface/export_map.mjs` | the Lunar Surface level in H³ (R = 40 m), a crater, 25 smooth-shape structures, a black hole and a wormhole |
+| [`dust/`](dust/) | `demos/dust_rust/tools/make_dust_map.py` | the Dust level in H³ (R = 50 m), a desert basin under a sandstorm whose wind bends light, a wormhole pair |
+| [`snow_planet/`](snow_planet/) | `demos/snow_planet_rust/tools/make_map.py` | the Snow Planet level in flat E³ with a slowing edge, five black holes, a wormhole pair, one blizzard |
+| [`city_sphere/`](city_sphere/) | `demos/city_sphere_rust/tools/make_map.py` | the City Sphere level inside a hollow sphere in E³, streets under a glass shell |
+| [`dark_forest/`](dark_forest/) | `demos/dark_forest_rust/src/forest_layout.rs` (`--export-map`) | the Dark Forest level in E³, a bamboo maze with treehouses, ladders, bridges and five wormhole pairs, the bamboo going on past its slowing edge |
 
-Both are exported from the programs that first built them; the map files are what other programs read.
+Each is exported from the program that first built it; the map files are what other programs read.
 
 ## Conventions
 
@@ -56,17 +62,25 @@ Both are exported from the programs that first built them; the map files are wha
 | `ground` | `{"material": id, "tiling": {...}, "terrain": {...}}` (optional `tiling` and `terrain`, below) |
 | `structures` | structures of smooth shapes, optionally drawn as a model (below), optional |
 | `boxes` | boxes (below), optional |
+| `ladders` | climbable volumes (below), optional |
 | `warps` | black holes and wormhole mouths (below), optional |
 | `lights` | lamps (below), optional |
 | `sky` | the sky and the sun (below) |
 | `spawns` | where players start (below) |
 | `regions` | zones and the boundary (below), optional |
 | `appearance` | `{"style": name, ...}`: how the renderer details surfaces (below) |
+| `scatter` (optional) | `{"seed", "spacing_m", "grow_frac"}`: how the map's generator scattered its decorative plants (seed, grid step before jitter, chance a clear point grows one), so the layout can be regenerated or re-seeded |
+| `laser` (optional, old) | `{"rgb": [r, g, b]}`: the colour every team's lasers share on this map; without it, lasers take team colours. One of three old ways to give the laser colour, which moves to `level.json`'s `laser_color` ([`LEVELS.md`](LEVELS.md)) |
+| `atmosphere` (optional) | fog, blowing sand and wind (below) |
 
 ### Materials
 
 `{"id", "name", "color": [r, g, b], "kind"}`, ids from 0 to 255, each once. `kind` is `empty` (id 0 only), `solid`,
 `glass` (see-through for light and lasers; stops players) or `light` (solid and glowing in its own colour, unlit).
+
+A `light` material named `<team> console <n>` (`blue console 1`, numbered from 1 in each team) is a console of that
+team, and each structure or box made of one is one of the team's pylons ([`LEVELS.md`](LEVELS.md), Names engines
+read). Other names may mean something to a style (same page).
 
 ### Structures
 
@@ -93,6 +107,13 @@ coordinates q (meters):
 coordinate planes, whose faces are equidistant surfaces rather than planes), |p_a| ≤ sin(h_a / R) in S³, and
 |q_a| ≤ h_a in E³. `group` names what the box is part of ("the house", "a tree"), for hit reports and for renderers
 that cull groups at once.
+
+### Ladders
+
+`{"name", "frame", "half_size_m": [h_x, h_y, h_z]}`: a volume a player climbs while in it, a box like those above
+that isn't solid. The frame's -z axis points from the ladder into what it climbs (a player faces it to climb), and
+its top is the frame's origin plus h_y up. A renderer draws it however it likes (the Dark Forest draws a rope
+ladder); readers that don't climb can ignore it.
 
 ### Warps
 
@@ -127,6 +148,7 @@ distance d to its centre, the origin of its `frame`:
 `{"position": [x, y, z, w], "color": [r, g, b], "radius_m"}`: a lamp. At distance d from it, a surface facing it at
 angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/radius_m)²), times
 0.3 + 0.7 max(cos θ, 0), faded smoothly to nothing between 1.8 and 3 times `radius_m`.
+An optional `"flicker_frac"` (0 to 1) makes it a flame: its brightness wavers, dimming by up to that fraction.
 
 ### Sky
 
@@ -144,6 +166,61 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
   circle. Both are unit directions in the world origin's local frame, perpendicular to each other. How the band looks
   (brightness, colour, dust) is the appearance style's.
 - `fog_m` (optional): a surface d meters away keeps e^(−d/`fog_m`) of its colour, and the rest is `horizon_color`.
+- `snow_per_m3` (optional, 0 to 1): light snow falling everywhere, as the chance that a cubic meter of air holds a flake (Snow Planet, 0.04). A program without falling snow ignores it.
+
+### Sphere ground and shells
+
+For maps inside a sphere (City Sphere), in Euclidean space with the origin at the sphere's centre:
+
+- `ground.sphere` (optional): `{"radius_m"}` makes the ground the inside of the sphere of that radius instead of the
+  plane y = 0. Gravity points outward, away from the centre, so a player's up is toward the centre.
+- `shells` (optional): `[{"name", "radius_m", "thickness_m", "material", "walkable_side", "laser", "holes"}]`, thin
+  spherical shells about the centre, `thickness_m` thick, centred on `radius_m`. `walkable_side` is which face
+  players can stand on with gravity pulling them onto it (`inside`, the face toward the centre, `outside`, or `none`).
+  `laser` is what a shot that meets the shell does: `stop`, or `reflect_inside` (a shot coming from the side toward
+  the centre reflects about the shell's normal; one from outside stops). How many bounces and how far a shot goes are
+  the game's settings, not the map's. `holes` are `[{"direction": [x, y, z], "angular_radius_rad"}]`: the shell is
+  missing within that angle of the unit `direction`, so players and shots pass. A shell with `thickness_m` equal to its
+  `radius_m` is a solid ball.
+
+### Atmosphere
+
+`atmosphere` (optional, Dust): `{"fog", "sand", "wind"}`, each optional.
+
+- `fog`: `{"color", "start_m", "distance_m", "max_frac"}`: a sandstorm's haze of `color`, starting `start_m` from
+  the eye and thickening with e-folding distance `distance_m`, which hides at most `max_frac` of what is behind it.
+- `sand`: `{"gust_frac", "streak_frac", "sheet_frac"}`, each 0 to 1: how much blowing sand thickens the fog in gusts,
+  streaks near the eye and sheets drifting downwind.
+- `wind`: `{"direction", "log_index_gradient_per_m", "segment_m", "gust", "laser_gradient_per_view_gradient"}`: a
+  refractive index ln n = k d, with d the signed distance to the plane through the origin perpendicular to the
+  horizontal unit `direction` and k `log_index_gradient_per_m`, so light bends downwind; rays follow it in chords of
+  `segment_m`. `gust` (optional) `{"seed", "strength_frac", "size_m", "speed_m_per_s"}` varies its strength (not its
+  direction) by up to `strength_frac`, with three waves `size_m` across drifting downwind on the shared UTC clock.
+  `laser_gradient_per_view_gradient` (optional, default 1) is how many times more lasers bend than light.
+  `demos/dust_rust/README.md` gives the details.
+
+### Blizzards and the torus
+
+- `regions.blizzards` (optional, Snow Planet): `[{"name", "u_m", "v_m", "radius_m", "height_m", "speed_frac",
+  "freeze_health_per_s", "shot_reach_m", "fog_per_m", "snow_per_m3"}]`: an upright cylinder at Fermi (u, v), inside
+  which players move at `speed_frac` of their speed and lose `freeze_health_per_s` of their health a second, a laser
+  goes only `shot_reach_m` in, and the air holds fog and snow of those densities.
+- `space.torus_periods_m` (optional, euclidean only): `[x, z]`, the periods of a flat torus T² × ℝ along the world's
+  x and z. No shipped map has it now (W-145, no walls at map edges, made Snow Planet plain E³); Snow Planet's
+  looping world, which reads it, waits on its own branch (W-161, real toroidal flat space).
+
+### Variation
+
+- `variation` (optional): `{"seed": N}`, the seed of a map's small random variation (block offsets and heights,
+  panel tint and wear), so the same map looks the same in every program. A generator applies the same variation to
+  each team's half, so it stays fair.
+
+### Lasers
+
+- `lasers` (optional, old): the colour of every laser shot on this map, either `{"color": [r, g, b]}` for every
+  team (a golden-white map) or `{"team_colors": [[r, g, b], [r, g, b]]}`, blue's then red's. Without it, shots take
+  the game's team colours. It, `laser` and `appearance.laser_color` are three old ways to say one thing: the colour
+  moves to `level.json`'s `laser_color` ([`LEVELS.md`](LEVELS.md)), and a level may set it in one place only.
 
 ### Spawns
 
@@ -152,9 +229,23 @@ ground or on a structure) and their eye `player.eye_height_m` above it, facing t
 
 ### Regions
 
-`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"},
+`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind", "u_m", "v_m", "soft_edge_m"},
 "zone_walls": {"height_m", "thickness_m", "opacity_frac"}}`, in the world's Fermi coordinates: a team's zone is a band
-of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1 for the boundary `kind` `fermi_ellipse`, or |u| ≤ u_m and
+|v| ≤ v_m for `fermi_rectangle`. A zone may instead be a band of v (`"v_min_m"`, `"v_max_m"`, optional since
+version 1, for a map whose teams face each other across v, such as City Sphere); its walls then stand on its v
+edges, and below the u edges read v.
+
+No map has a wall at its edge (W-145, no walls at map edges); players slow without end past it instead
+(`demos/warped_shared_rust/src/map_edge.rs`): each step that would take them further into the edge is cut by
+(1 − e), e the edge fraction where it starts, from 0 where the slowing starts to 1 where speed would reach 0, so
+they never get there.
+
+- On a map with `ground.terrain` (a crater), the edge is up the crater's wall, by the server settings' `map_edge`
+  (`start_wall_frac`, `stop_wall_frac`).
+- `boundary.soft_edge_m` (optional, maps without terrain only): e is the distance past the playable area over
+  `soft_edge_m` (past an ellipse, the distance to first order: exact on its axes). Without it (and without terrain)
+  the boundary is a hard edge: a step past it that goes further out is refused.
 
 `zone_walls` (optional) marks each finite edge (`u_min_m` or `u_max_m`) of each blue or red zone with a wall in the
 team's colour that stops neither players nor lasers. Its middle is the points straight above the edge (Fermi u equal to
@@ -183,6 +274,8 @@ renderers choose the fade and the glow.
   `{"model": "ambient_sun", "ambient", "sun"}` (a constant plus Lambert sunlight) or
   `{"model": "lunar_lambert", "lommel_seeliger_frac", "ambient", "earthshine", "sun_intensity", "shadows": bool}`
   (that mix of Lommel–Seeliger and Lambert reflectance, with straight shadow rays toward the sun if `shadows`).
+  `appearance.laser_color` (optional, old, 0 to 1) is one laser colour every team fires on the map (Dust's golden
+  white, Snow Planet's green); without it each team fires its own colour (see Lasers).
 
 ## Models
 
@@ -223,4 +316,5 @@ make -C common/maps test
 ## Changing the format
 
 A change that existing readers can ignore (a new optional field, a new style) keeps `version`; any other change
-raises it, updates this page, the schema, the validator and every map and reader in the same stack of PRs.
+raises it, updates this page, the schema, the validator and every map and reader in the same stack of PRs. The same
+holds for `level.json` and `levels.json` ([`LEVELS.md`](LEVELS.md)).

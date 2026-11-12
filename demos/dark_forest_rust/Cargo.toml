@@ -1,0 +1,42 @@
+[package]
+name = "warped-dark-forest"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+sdl3 = { version = "0.22", features = ["build-from-source-static"] }
+glam = "0.34"
+half = "2"
+gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_materials_transmission", "KHR_texture_transform"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "hdr"] }
+objc2 = "0.6"
+block2 = "0.6"
+objc2-core-foundation = "0.3"
+objc2-foundation = "0.3"
+objc2-metal = "0.3"
+objc2-quartz-core = "0.3"
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.13.0"
+getrandom = "0.4.3"
+sha2 = "0.11.1"
+warped_shared = { path = "../warped_shared_rust" }
+
+[[bin]]
+name = "dark-forest"
+path = "src/main.rs"
+
+[[bin]]
+name = "dark-forest-server"
+path = "src/bin/dark_forest_server.rs"
+
+[[bin]]
+name = "download-assets"
+path = "src/bin/download_assets.rs"
+
+[[test]]
+name = "play_twice"
+path = "tests/play_twice.rs"
+harness = false

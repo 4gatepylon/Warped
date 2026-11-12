@@ -1,0 +1,137 @@
+# Dust decisions
+
+Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to weigh in on.
+
+1. **Wind as ln n = k·d (a planar gradient).** The simplest refractive field whose light bends one way
+   everywhere; k = 0.00144 /m (0.0012 until the user asked for "ever so slightly more wind") bends a ray ~7 cm over 10 m and ~7 m over 100 m. **User?** strength.
+2. **Fog replaces the haze** (start 4 m, e-folding 60 m, max 94%, sand colour) and ends rays at 304 m, which
+   also bounds the cost per pixel. **User?** thickness.
+3. **Blowing sand in the shader, not particles**: gusts in the fog and two shells of streaks near the camera,
+   drifting downwind at 9 m/s, about 1 ms a frame; particles would need a new draw pass. **User?** how strong.
+4. **Curvature factor 1.0** in `server_settings.yaml` (Dust's own R = 50 m from the WebGL prior art), not
+   Lunar's 1.5.
+5. **Layout**: mirrored halves, spawns 208 m apart, one fixed wormhole pair across the middle, mesas and ruins
+   for cover on long sight lines. **User?** size.
+6. **Bench views replaced** with Dust's (the Lunar list did not fit the map).
+7. **Wind chords of 48 m**, not 12 m: a 48 m chord strays from the curved ray by k·48²/8 = 0.35 m, invisible at
+   that range, and saves about 5 ms a frame.
+8. **Package and binary names kept** (`hyperbolic-wormholes`, `wormholes_server`) so the copy stays a clean diff.
+9. **Laser colour [1, 0.8, 0.3]** (display RGB) for every team, from the map file: the user asked for "slightly more
+   yellow", golden leaning to white; [1, 0.7, 0.25] before. **User?** shade.
+10. **Map picture straight down, not oblique**, so marks drawn at map coordinates land on what they mark; height
+    60 m, 3×3 supersampling, fog and wind off, sun fixed in the Fermi frame. Committed (0.8 MB) rather than
+    rendered at each start, which would need the GPU before the window opens. **User?** look.
+11. **Heavier storm strengths** (`atmosphere.sand`): gusts 50%, streaks 45%, sheets 35%, fog e-folding 50 m
+    (was 60 m), warmer fog [0.74, 0.55, 0.35]. Visibility stays about 250 m. **User?** strength. The wind's
+    strength does not yet gust in time and space (requested; needs a shared seed and server time in the protocol).
+12. **Prop jitter** up to 1.5 m, 0.3 rad and ±12% size, seed 121, mirrored across the middle so both teams get the
+    same cover. Pylons, consoles and spawns stay put; the wormhole mouths move by their own seed (item 19).
+    **User?** amount.
+13. **Ground-hit sand** tinted from the fog colour (grains 80%, puffs 120%), puffs drifting downwind at 3 m/s. In
+    the storm the puffs read darker than the lit sand around them. **User?** brighter.
+14. **Gusts in strength only**, from the map's seed and the shared UTC clock: ±20% (`strength_frac` 0.2) in
+    periods of 5–11 s, with wavelengths of thousands of meters so it is "roughly similar everywhere" (the user's
+    words). **User?** amount and speed.
+15. **Laser multiplier 2.4** (`laser_gradient_per_view_gradient`): the user asked for a bend you "can tell",
+    3–6 m over 50–80 m. Against the bent view, a laser across the wind lands 2.9 m downwind at 50 m and 8.4 m at
+    80 m; 2.0 would give about 2 m and 6 m. A test keeps the 50 m bend between 2 and 6 m. The crosshair no
+    longer shows where a long shot lands across the wind: players aim upwind. **User?** strength.
+16. **Storm sky in the shader**, only where a ray escapes (no texture, no geometry): haze bands, a brown storm
+    wall and mesa silhouettes. Alternating runs with it off and on differ by 0–1.3 ms a frame. **User?** look.
+17. **Speed by cutting quality** (the user: "get something working as soon as possible and performantly"): the
+    Metal renderer starts at render scale 0.6 (`METAL_RENDER_SCALE`, also the `--bench-views` default; the window
+    still auto-scales), terrain relief uses 3 noise octaves, not 5 (`OCTAVE_COUNT` in `terrain.rs` and
+    `TERRAIN_OCTAVES` in the shader must match, or server hits and pictures part), and rays end 2 fog depths after
+    a wormhole crossing, not 3. 2560x1440 medians, 20 frames: overview 22.8 → 11.6 ms (p99 23.2 → 13.8), wormhole
+    28.9 → 17.8 (29.4 → 20.0), wormhole_exit 30.0 → 17.6 (30.5 → 20.2), laser_into_wormhole 39.1 → 19.3
+    (39.8 → 20.0); the other 20 views are 8.5–15.8 ms. Still over 16.7 ms: the two wormhole views and the laser
+    into the wormhole. This VM's runs vary by up to ±20%.
+    - **For a future agent:** the costs measured are terrain height (noise octaves, in the primary march, the
+      shadow march and normals) and per-pixel shading; wind chords, the sand, the storm sky and fog length cost
+      little. The next step would be baking the whole terrain height into the existing 0.25 m `MoundGrid` buffer
+      (CPU and GPU read it the same way), then lower `--render-scale` only for the wormhole views. Item 18 did the
+      bake, and the render-scale cut is no longer needed.
+18. **The whole terrain height baked into a 0.25 m grid** (handoff known gap 1, Dust speed): `Terrain::bake_heights`
+    samples the terrain's shape (crater wall, rim noise, the 3 relief octaves and the mounds) every 0.25 m wherever a
+    ray from inside the boundary can reach before the fog ends it: the boundary's box grown by the fog's end
+    (4 m + 5 × 50 m = 254 m), so |u| ≤ 382 m and |v| ≤ 318 m, 3058 × 2546 points, 31 MB, baked in 0.07–0.16 s at
+    start-up on 12 busy cores. Its points are the mound grid's, so the mounds keep their exact heights. Walking, the
+    laser's hits, the ground puffs and the shader's primary and shadow marches all read it bilinearly; outside it
+    both fall back to the shape, so `OCTAVE_COUNT` and `TERRAIN_OCTAVES` must still match. The shader keeps the grid
+    in an R32Float texture and fetches a cell's four points with one `gather`, unfiltered, then interpolates them as
+    `terrain.rs` does; at the test's points (`the_shader_draws_the_ground_the_cpu_walks_and_hits_on`) the CPU and the
+    shader agree to 1e-7 m. Normals still come from the shape's height, because bilinear heights kink at every cell
+    edge, which would show in the light as a 0.25 m grid on the crater walls. **User?** none expected: nothing looks
+    different.
+    - **Look:** per view, the mean difference is 0.003–0.23 of 255 and at most 0.012% of pixels differ by more
+      than 8, at edges where a hit moved by under a millimetre. The laser views' puff of sand differs more (mean 0.52
+      and 0.33% of pixels in `laser_ground`), because its particles are seeded from the hit point.
+    - **Speed** (Apple M3 Pro, 18-core GPU, macOS 15.7.3, rustc 1.98.1): median GPU ms at 2560x1440, render scale
+      0.6, 30 frames a view, the best of 4 alternating rounds, while other agents built and ran bots on the
+      machine. `wormhole` 14.5 → 10.3 (p99 15.0 → 10.5), `wormhole_exit` 14.3 → 10.3 (14.8 → 10.6),
+      `laser_into_wormhole` 20.5 → 15.8 (21.1 → 16.4); the other 21 views 6.9–13.2 → 5.4–10.3. Every view's median
+      and p99 is now under 16.7 ms.
+    - **Where `laser_into_wormhole`'s time goes** (it has the least headroom; 60-frame runs with parts of the shot
+      left out, in rounds where `wormhole` was not slowed by other agents; without the shot it takes 10.6 ms, like
+      `wormhole`): the laser's 19 segments, scanned at every chord and every bend step inside the
+      mouth, about 4 ms; the puff of sand where it lands, about 1.8 ms; the laser's spot light, nothing measurable.
+      Hoisting each segment's midpoint and reach out of `scan_beams` would be the next saving with the same look.
+19. **Plays like Lunar Surface** (W-126, same play in every level). Dust's settings files are Lunar's line for line
+    but for two lines, and its play code is Lunar's; scripted play found two differences, both fixed:
+    - **Jump time:** Dust's map has Earth's gravity (9.81 m/s²) and Lunar's 6 m/s², and a jump's time is a fraction
+      of the map's, so a Dust jump rose as high (1.25 m) but lasted 0.35 s against Lunar's 0.58 s.
+      `jump_time_per_map_jump_time` is now 0.545, as on Snow Planet (same gravity), and a test compares the two
+      jumps under each level's own settings. Changing the setting, not the map's gravity, keeps the sand puffs, which
+      fall at the map's gravity, as they were.
+    - **Level mouths out of a walker's reach:** their centres hung 2.6 m above the sand, so a walker's eye passed a
+      metre under the throat and nobody walked through from any of 12 sides (Lunar's mouth A: all 12). They now sit
+      at eye height (1.6 m above the sand), and each moved up to 1 m by `MOUTH_SEED` (122, mouth B mirroring A), as
+      the user asks of anything moved on a map. **User?** they look a metre lower. The `laser_into_wormhole` bench
+      view stands on a dune 3 m above the mouth's sand, so it now aims 0.2 rad down at the mouth's centre
+      (`LASER_INTO_WORMHOLE_PITCH_RAD`); level, its laser passed over the lowered throat. Frame times (2560x1440,
+      best of 6 alternating rounds of 15 frames, Apple M3 Pro): `wormhole` 10.2 → 9.6 ms, `wormhole_exit` 10.2 → 9.9,
+      `laser_into_wormhole` 15.9 → 13.1; the other views within 0.2 ms of before.
+    - **Checked and found working** (tests in `parity_tests` and `play_tests`): every spawn on open sand with 20 m
+      clear ahead, for 8 players a team; 15 s of walking, sprinting, jumping and crouching in 12 headings from each
+      spawn, never blocked, sunk or past the edge; both ridges crossed on foot along six lines; every console turned
+      off with `E` from 8 sides of its pylon; both level mouths walked and shot through from 12 sides each; a thrown
+      pair walked and shot through. The wind and the laser's bend are untouched (their tests still pass).
+    - **Left as is:**
+      - `tools/make_dust_map.py` still places props on a 5-octave ground while the game draws 3 octaves (item 17);
+        no structure stands more than 3.5 cm off the game's ground, too little to see.
+      - `map_pictures/dust_r50m.png` predates item 17's renderer: a fresh render of the same map differs from it by
+        a mean of 3.3 of 255 (6.5% of pixels past 8), while lowering the mouths changes 0.35% of a fresh render's
+        pixels, around the mouths. Regenerating it (`make make-map-picture MAP=dust`) would change the map page's
+        look, so it waits for the user. **User?** Since W-134 (Dust map page picture stale) it is redrawn with
+        `make make-map-picture MAP=dust` (a mean of 3.4 of 255 from the old one, 6.9% of pixels past 8; two
+        renders in a row are identical).
+20. **Lunar Surface's renderer speed-ups, shared** (W-131, Lunar wormhole_exit slow at full size; Lunar Surface's
+    D110): the same shader and packing changes as `demos/hyperbolic_wormholes_rust/` (structure groups, only the
+    shapes a chord can reach, nearer-first mesh BVHs and any-hit mesh shadows, beam midpoints packed once and per-warp
+    beam masks, far lamps skipped, the baked ground's slopes for its normal, and the ground's sunlight shared between
+    fine samples that are all fully lit with no structure near their shadow rays). The look is the same (the PR's
+    difference table). At render scale 1, 2560×1440, every view but `laser_into_wormhole` is now about 16.5 ms or
+    less; the default render scale stays 0.6 (item 17), for the user to raise. **User?** default render scale 1.
+21. **Safe terrain steps, the beam's haze between samples, lamp cutoffs once** (W-131, Lunar wormhole_exit slow at
+    full size; Lunar Surface's D111), shared with Lunar Surface's renderer. At render scale 1 and 2560x1440:
+    `laser_into_wormhole` 21.0 → 20.2 ms, the other views 0 to 4% faster; at most 0.1% of pixels change by more than
+    8 of 255.
+22. **Exact ground hits far from the origin, shadow safe steps, blocks of groups** (W-131, Lunar wormhole_exit slow at
+    full size; Lunar Surface's D112), shared with Lunar Surface's renderer; the map picture's straight-down rays keep
+    measuring smoothness by their points. At render scale 1, 4 to 13% faster: at 2560x1440 every view but
+    `laser_into_wormhole` (20.2 → 19.4 ms) takes at most 15.3 ms; at 3440x1440, 16 of 24 views are under 16.7 ms
+    (before: 14), the rest 17.0–22.9 ms. At most 0.005% of pixels change by more than 8 of 255.
+23. **A sharp centre with softer edges** (W-136, sharp centre, soft edges; Lunar Surface's D115), the same code as
+    Lunar Surface's renderer: the middle 66% of the width is drawn exactly as before and the rest at half
+    resolution (the even pixels shaded, the rest blended), by default in the window and the bench views
+    (`--sharp-width-frac`, `--half-width-frac`). At render scale 1, 3440x1440, median GPU ms: `salt_flats_long`
+    17.5 → 14.8, `laser_ground` 17.4 → 14.9, `laser_across_wind_eye` 19.9 → 16.5, `laser_across_wind_above` 17.0 →
+    16.6; still over 16.7: `wormhole` 18.1, `wormhole_exit` 17.9, `crater_wall` 18.0, `laser_into_wormhole` 21.6.
+    The default render scale stays 0.6 (the user, 2026-11-09).
+24. **No aliasing** (W-138, no aliasing; Lunar Surface's D116), the same code as Lunar Surface's renderer without its
+    half-resolution lens: outside the sharp centre tone mapping shows a cubic B-spline of the half- or
+    quarter-resolution pixels, blended in over 48 px, so the soft edges show no steps, and FXAA 3.11 anti-aliases the
+    whole image. At render scale 1, 3440x1440: 0.4-0.8 ms more per view.
+25. **Option E is the default sharp centre** (W-136, sharp centre, soft edges; Lunar Surface's D117): the middle half of
+    the width sharp, half resolution out to three quarters, a quarter beyond, all smoothed (item 24). At render scale
+    1, 3440x1440: 0.1-2.3 ms faster than B (`laser_across_wind_eye` 17.3 → 15.0 ms, `salt_flats_long` 15.5 → 13.6).

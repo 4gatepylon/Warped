@@ -18,7 +18,8 @@
       "additionalProperties": false,
       "properties": {
         "kind": {"enum": ["hyperbolic", "spherical", "euclidean"]},
-        "curvature_radius_m": {"type": "number", "exclusiveMinimum": 0}
+        "curvature_radius_m": {"type": "number", "exclusiveMinimum": 0},
+        "torus_periods_m": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2, "maxItems": 2}
       },
       "if": {"properties": {"kind": {"enum": ["hyperbolic", "spherical"]}}},
       "then": {"required": ["curvature_radius_m"]},
@@ -59,6 +60,12 @@
       "additionalProperties": false,
       "properties": {
         "material": {"$ref": "#/$defs/material_id"},
+        "sphere": {
+          "type": "object",
+          "required": ["radius_m"],
+          "additionalProperties": false,
+          "properties": {"radius_m": {"type": "number", "exclusiveMinimum": 0}}
+        },
         "tiling": {
           "type": "object",
           "required": ["kind", "cells_per_side"],
@@ -153,6 +160,19 @@
         }
       }
     },
+    "ladders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "frame", "half_size_m"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "frame": {"$ref": "#/$defs/frame"},
+          "half_size_m": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 3, "maxItems": 3}
+        }
+      }
+    },
     "warps": {
       "type": "array",
       "items": {
@@ -178,6 +198,44 @@
         ]
       }
     },
+    "lasers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "color": {"$ref": "#/$defs/color"},
+        "team_colors": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/color"}}
+      },
+      "oneOf": [{"required": ["color"]}, {"required": ["team_colors"]}]
+    },
+    "variation": {"type": "object", "additionalProperties": false, "required": ["seed"], "properties": {"seed": {"type": "integer", "minimum": 0, "maximum": 4294967295}}},
+    "shells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "radius_m", "thickness_m", "material", "walkable_side", "laser", "holes"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "radius_m": {"type": "number", "exclusiveMinimum": 0},
+          "thickness_m": {"type": "number", "exclusiveMinimum": 0},
+          "material": {"$ref": "#/$defs/material_id"},
+          "walkable_side": {"enum": ["inside", "outside", "none"]},
+          "laser": {"enum": ["stop", "reflect_inside"]},
+          "holes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["direction", "angular_radius_rad"],
+              "additionalProperties": false,
+              "properties": {
+                "direction": {"$ref": "#/$defs/vector3"},
+                "angular_radius_rad": {"type": "number", "exclusiveMinimum": 0}
+              }
+            }
+          }
+        }
+      }
+    },
     "lights": {
       "type": "array",
       "items": {
@@ -187,7 +245,8 @@
         "properties": {
           "position": {"$ref": "#/$defs/vector4"},
           "color": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 3, "maxItems": 3},
-          "radius_m": {"type": "number", "exclusiveMinimum": 0}
+          "radius_m": {"type": "number", "exclusiveMinimum": 0},
+          "flicker_frac": {"type": "number", "minimum": 0, "maximum": 1}
         }
       }
     },
@@ -225,7 +284,8 @@
         "clouds": {"type": "boolean"},
         "zenith_color": {"$ref": "#/$defs/color"},
         "horizon_color": {"$ref": "#/$defs/color"},
-        "fog_m": {"type": "number", "exclusiveMinimum": 0}
+        "fog_m": {"type": "number", "exclusiveMinimum": 0},
+        "snow_per_m3": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },
     "spawns": {
@@ -246,12 +306,14 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["team", "u_min_m", "u_max_m"],
+            "oneOf": [{"required": ["team", "u_min_m", "u_max_m"]}, {"required": ["team", "v_min_m", "v_max_m"]}],
             "additionalProperties": false,
             "properties": {
               "team": {"enum": ["blue", "red", "middle"]},
               "u_min_m": {"type": ["number", "null"]},
-              "u_max_m": {"type": ["number", "null"]}
+              "u_max_m": {"type": ["number", "null"]},
+              "v_min_m": {"type": ["number", "null"]},
+              "v_max_m": {"type": ["number", "null"]}
             }
           }
         },
@@ -260,9 +322,10 @@
           "required": ["kind", "u_m", "v_m"],
           "additionalProperties": false,
           "properties": {
-            "kind": {"const": "fermi_ellipse"},
+            "kind": {"enum": ["fermi_ellipse", "fermi_rectangle"]},
             "u_m": {"type": "number", "exclusiveMinimum": 0},
-            "v_m": {"type": "number", "exclusiveMinimum": 0}
+            "v_m": {"type": "number", "exclusiveMinimum": 0},
+            "soft_edge_m": {"type": "number", "exclusiveMinimum": 0}
           }
         },
         "zone_walls": {
@@ -274,7 +337,45 @@
             "thickness_m": {"type": "number", "exclusiveMinimum": 0},
             "opacity_frac": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
           }
+        },
+        "blizzards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "u_m", "v_m", "radius_m", "height_m", "speed_frac", "freeze_health_per_s", "shot_reach_m", "fog_per_m", "snow_per_m3"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string"},
+              "u_m": {"type": "number"},
+              "v_m": {"type": "number"},
+              "radius_m": {"type": "number", "exclusiveMinimum": 0},
+              "height_m": {"type": "number", "exclusiveMinimum": 0},
+              "speed_frac": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+              "freeze_health_per_s": {"type": "number", "minimum": 0},
+              "shot_reach_m": {"type": "number", "minimum": 0},
+              "fog_per_m": {"type": "number", "minimum": 0},
+              "snow_per_m3": {"type": "number", "minimum": 0}
+            }
+          }
         }
+      }
+    },
+    "scatter": {
+      "type": "object",
+      "required": ["seed", "spacing_m", "grow_frac"],
+      "additionalProperties": false,
+      "properties": {
+        "seed": {"type": "integer", "minimum": 0},
+        "spacing_m": {"type": "number", "exclusiveMinimum": 0},
+        "grow_frac": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "laser": {
+      "type": "object",
+      "required": ["rgb"],
+      "additionalProperties": false,
+      "properties": {
+        "rgb": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 3, "maxItems": 3}
       }
     },
     "appearance": {
@@ -282,7 +383,9 @@
       "required": ["style", "lighting"],
       "additionalProperties": false,
       "properties": {
+        "laser_color": {"$ref": "#/$defs/color"},
         "style": {"type": "string"},
+        "laser_color": {"$ref": "#/$defs/color", "description": "One laser colour (display RGB, 0 to 1) for every team on this map; without it, each team fires its own colour."},
         "lighting": {
           "oneOf": [
             {
@@ -305,6 +408,57 @@
               }
             }
           ]
+        }
+      }
+    },
+    "atmosphere": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fog": {
+          "type": "object",
+          "required": ["color", "start_m", "distance_m", "max_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "color": {"$ref": "#/$defs/color"},
+            "start_m": {"type": "number", "minimum": 0},
+            "distance_m": {"type": "number", "exclusiveMinimum": 0},
+            "max_frac": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "sand": {
+          "type": "object",
+          "description": "How strong the fog's blowing sand is: gusts thickening the fog, streaks near the eye, sheets drifting downwind (each 0 to 1).",
+          "required": ["gust_frac", "streak_frac", "sheet_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "gust_frac": {"type": "number", "minimum": 0, "maximum": 1},
+            "streak_frac": {"type": "number", "minimum": 0, "maximum": 1},
+            "sheet_frac": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "wind": {
+          "type": "object",
+          "required": ["direction", "log_index_gradient_per_m", "segment_m"],
+          "additionalProperties": false,
+          "properties": {
+            "direction": {"$ref": "#/$defs/vector3"},
+            "log_index_gradient_per_m": {"type": "number"},
+            "segment_m": {"type": "number", "exclusiveMinimum": 0},
+            "laser_gradient_per_view_gradient": {"type": "number", "minimum": 0, "description": "How many times more strongly lasers bend than light (default 1, light and lasers alike)."},
+            "gust": {
+              "type": "object",
+              "description": "Gusts: the wind's strength (not its direction) times 1 plus up to strength_frac, from three waves size_m across seeded by seed, drifting downwind at speed_m_per_s, on the shared UTC clock.",
+              "required": ["seed", "strength_frac", "size_m", "speed_m_per_s"],
+              "additionalProperties": false,
+              "properties": {
+                "seed": {"type": "integer", "minimum": 0},
+                "strength_frac": {"type": "number", "minimum": 0, "maximum": 1},
+                "size_m": {"type": "number", "exclusiveMinimum": 0},
+                "speed_m_per_s": {"type": "number"}
+              }
+            }
+          }
         }
       }
     }

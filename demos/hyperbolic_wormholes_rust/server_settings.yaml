@@ -10,6 +10,9 @@
 #     `make serve-game` or `make host-game` (`--server-settings`). Every key is required, unknown keys
 #     fail, and numbers must be above 0 unless their note says 0 is allowed. Each name ends in its
 #     unit: `_m` meters, `_s` seconds, `_rad` radians, `_per_s` per second.
+#     The `gravity` section (W-144: how black holes and wormhole mouths pull walkers) may be left
+#     out or give only some of its keys; the rest take the values every level shares, from
+#     `warped_shared`'s `GravitySettings`.
 #
 # Example:
 #     cp server_settings.yaml fast.yaml  # edit fast.yaml, then:
@@ -18,6 +21,8 @@
 movement:
   walk_speed_per_map_speed: 2.0  # Walking speed, times the map's (Lunar Surface: 5 m/s).
   sprint_speed_per_map_speed: 2.0  # Sprinting speed, times the map's (Lunar Surface: 9 m/s).
+  sprint_up_m_per_s_per_s: 15.0  # W-202: how fast the legs speed up from walking to the sprint's top speed while Shift is held.
+  sprint_down_m_per_s_per_s: 15.0  # W-202: how fast they slow back to walking speed once Shift is let go or the energy runs out.
   jump_height_m: 1.25  # How high a jump rises. Blocks are 1 m tall.
   jump_time_per_map_jump_time: 0.3333333333333333  # Time in the air, times the map's (1.73 s); sets gravity.
   crouch_speed_frac: 0.5  # Speed while crouching (holding Ctrl), as a fraction of walking speed.
@@ -67,8 +72,19 @@ consoles:
   hold_to_disable_s: 10.0  # Seconds of holding E that turn off one of the other team's consoles.
   reach_m: 3.0  # How close a player must be to a console to turn it off.
 
-respawn:
-  delay_s: 3.0  # Seconds a player who was hit waits before coming back (0 for at once).
+respawn:  # How long a player who was hit waits before coming back: start_s, plus step_s for every period_s
+  # since the level (its round) started (W-142 (growing respawn time)). A file with only delay_s still loads, as
+  # a flat wait.
+  start_s: 20.0  # Seconds of waiting when the level starts (0 for at once).
+  step_s: 10.0  # Seconds more for every period_s the level has gone on (0 for a flat wait).
+  period_s: 300.0  # Seconds between steps (above 0).
+
+shooting:  # The game master's switches for shots (true or false). A file without this section plays as below.
+  can_shoot_while_jumping: false  # Whether a jump lets a player shoot; if not, shots wait movement.shoot_after_moving_s after it.
+  can_shoot_while_walking: false  # Whether walking upright lets a player shoot (walking crouched always does).
+  can_shoot_while_sprinting: false  # Whether sprinting lets a player shoot.
+  is_friendly_fire_on: true  # Whether a shot hurts teammates (a teammate eliminated counts a death, no kill).
+  drop_m_per_s_per_s: 0.0  # How fast shots fall, as a ball thrown at the gun's beam speed would (0 for straight shots).
 
 when_hit:  # How a hit slows the player who takes it (how it looks is each player's own choice).
   slow_speed_frac: 0.5  # Their walking and sprinting speed while slowed, as a fraction (1 for not slowed).
@@ -96,8 +112,8 @@ wormholes:  # Q throws your purple wormhole mouth, then your green one, and so o
   max_flight_s: 4.0  # Seconds it may fly before it fizzles without landing.
   schwarzschild_radius_m: 1.6  # Lunar Surface: the mouth's size (the house's mouths are all the house's size).
   reach_m: 6.0  # Lunar Surface: how far its bending reaches; reaches of warps may not overlap.
-  sniper_hits_to_destroy: 2  # Sniper shots through an enemy's mouths (either one) that destroy both.
-  rifle_hits_to_destroy: 5  # Rifle shots through an enemy's mouths (either one) that destroy both.
+  sniper_hits_to_destroy: 0  # Sniper shots through an enemy's mouths (either one) that destroy both; 0: shots never destroy thrown wormholes (W-166).
+  rifle_hits_to_destroy: 0  # Rifle shots through an enemy's mouths (either one) that destroy both; 0: never (W-166).
   hit_flash_s: 0.25  # Seconds both mouths of a pair flash red after a hit.
 
 space:  # How curved Lunar Surface is (the house demo keeps its own); a window that joins builds the map by the server's.
@@ -105,9 +121,23 @@ space:  # How curved Lunar Surface is (the house demo keeps its own); a window t
 
 black_hole:  # On Lunar Surface, each console turned off grows the black hole, and time runs slower near it (W-68, W-107).
   transition_s: 4.0  # Seconds the black hole takes to grow to a new size after a console turns off (or a new game starts).
-  max_schwarzschild_radius_m: 2.0  # The black part's Schwarzschild radius at full strength (the map's at none): it grows only a little.
+  max_schwarzschild_radius_m: 2.4  # The black part's Schwarzschild radius at full strength (the map's 1.44 m at none): it grows only a little.
   max_reach_m: 28.0  # How far the black hole bends light and slows time at full strength (the map's reach at none); under 31 m keeps clear of mouth A's reach.
   max_lens_rad: 0.35  # Its wide lens at full strength (none at none): the most it turns a ray, in radians. It distorts the view around the black part without growing it.
   lens_core_per_reach: 0.35  # The wide lens's core radius, as a share of the reach: rays passing that far from the centre turn the most.
-  time_dilation_per_general_relativity: 15.0  # How many times stronger than in general relativity time slows near it (1 for real, 0 for none).
+  time_dilation_per_general_relativity: 7.6  # How many times stronger than in general relativity time slows near it (1 for real, 0 for none); 7.6 keeps time under the lowered, larger black hole as slow as it was (0.73 of normal, 0.48 at full strength).
   min_time_rate_frac: 0.1  # The slowest a player's time runs near it, as a share of time far away (above 0, so nobody freezes).
+
+gravity:  # How black holes and wormhole mouths pull players (W-202): the built-in values every level shares.
+  radius_m: 5.0  # W-202: how far from a warp's centre its pull reaches (2.5 bodies of 2 m).
+  acceleration_m_per_s_per_s: 11.9  # W-202: how hard a warp pulls inside that radius (0 for none); a fall from the radius reaches a thrown mouth's throat at 9 m/s.
+  profile: constant  # W-202: how the pull varies from the throat out to the radius: constant, stronger_near_mouth or harmonic.
+  brake_m_per_s_per_s: 15.0  # W-202: how fast the drift the pull gave a player dies away outside every radius (0 for never).
+  black_hole_radius_per_radius: 2.0  # W-202: a black hole's pull reaches this many times radius_m from its centre (10 m).
+  black_hole_acceleration_frac: 0.5  # W-202: a black hole pulls with this share of acceleration_m_per_s_per_s (0 for none), upward too.
+  black_hole_speed_frac: 0.75  # W-202: the share of the legs' speed left inside a black hole's radius (above 0, at most 1).
+  black_hole_min_radius_m: 3.0  # W-202: inside this distance from its centre a black hole pulls no further and holds players out (0 for none).
+  black_hole_darkness_frac: 0.85  # W-168: how dark the view gets by the minimum radius, from the edges in (0 for none, at most 1).
+
+surface:  # Lunar Surface's own game setting (W-158); a file without this section takes these values.
+  gravity_per_jump_gravity: 1.0  # How hard the ground pulls players down, times what the jump settings give; the jump's speed stays, so 0.5 jumps twice as high and long.

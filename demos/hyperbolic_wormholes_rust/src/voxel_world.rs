@@ -16,18 +16,20 @@
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
+use rayon::prelude::*;
 use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
+use warped_shared::map_edge;
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
-use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
+use crate::map::{Map, PlayerSettings, get_console_team, to_direction, to_frame, to_point};
 use crate::mesh::MeshModel;
-use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
+use crate::net::MAX_CONSOLE_COUNT;
 use crate::physics::Input;
 use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
 use crate::shapes::{Shape, ShapeKind, find_hit_mu};
@@ -36,14 +38,21 @@ use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
+use warped_shared::gravity::{HyperbolicWarp, add_pull};
+use warped_shared::laser_drop::{DROP_PIECE_M, get_drop_curvature_per_m, turn_hyperbolic};
+use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
+use warped_shared::pull_dynamics::{
+    WarpPulls, get_hyperbolic_warp_pulls, ramp_legs_speed, step_drift, turn_drift,
+};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
 pub const MARKER_NAME: &str = "a thrown wormhole";
-const MAX_MARKER_COUNT: usize = 16;
+const MAX_MARKER_COUNT: usize = 2 * crate::net::MAX_PLAYER_COUNT;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
-pub(crate) const BEND_STEP_FRAC: f64 = 0.08;
+const BAKED_TERRAIN_REACH_M: f64 = 250.0;
+pub(crate) const BEND_STEP_FRAC: f64 = 0.16;
 const CONSOLE_PULSE_HZ: f64 = 1.0;
 const CONSOLE_FRENZY_PULSE_HZ: f64 = 8.0;
 const CONSOLE_PULSE_EASE_TIME_CONSTANT_S: f64 = 0.3;
@@ -87,12 +96,13 @@ const FLY_CLIMB_PER_S: f64 = 0.8;
 const MIN_FLY_CLIMB_M_PER_S: f64 = 5.0;
 const FLY_SPRINT_PER_FLY: f64 = 40.0 / 14.0;
 const NEARBY_REACH_M: f64 = 6.0;
+const WAY_PROBE_STEP_M: f64 = 0.25;
 const INSIDE_MOUTH_PER_THROAT: f64 = 5.0;
 const INSIDE_MOUTH_SCALE: f64 = 1.8;
 const LASER_MAX_LENGTH_M: f64 = 480.0;
 const LASER_MAX_ITERATIONS: usize = 4000;
 const LASER_MUZZLE_M: f64 = 3.0;
-pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
+pub use warped_shared::weapons::MUZZLE_M;
 const BEAM_TOLERANCE_M: f64 = 0.02;
 const MAX_DRAWN_BEAM_DISTANCE_M: f64 = 160.0;
 const BEAM_CLIP_BISECTION_COUNT: usize = 40;
@@ -102,6 +112,10 @@ const TINY: f64 = 1e-12;
 const AVATAR_HEAD_FROM_M: f64 = 1.5;
 const AVATAR_HEIGHT_M: f64 = 2.0;
 const GROUND_PROBE_M: f64 = 0.1;
+/// `AvatarBody` is a player's body as `with_avatars` adds it: its feet frame, the index of its
+/// colour, and its height as a share of standing (less while crouched, W-137 (crouched robots
+/// sink)).
+pub type AvatarBody = (DMat4, usize, f64);
 const AVATAR_SHAPES: [Shape; 2] = [
     Shape {
         kind: ShapeKind::Cylinder,
@@ -125,8 +139,10 @@ const AVATAR_SHAPES: [Shape; 2] = [
 /// the voxel bytes, its map model (`mesh`, which lasers hit) or posed body (`avatar_mesh`, an index
 /// into the world's `avatar_meshes`, only drawn: lasers hit its shapes), its bounding sphere
 /// (radius in curvature units), whether its glowing shapes are dark (`is_dark`: a pylon whose
-/// console is off), and the palette entry of its body's team colour (`body_material`, for a
-/// player's or a corpse's body: `render_voxel.metal` turns the body model's teal into it).
+/// console is off), the palette entry of its body's team colour (`body_material`, for a
+/// player's or a corpse's body: `render_voxel.metal` turns the body model's teal into it), and a
+/// player's body's height as a share of standing (`avatar_height_frac`: less while crouched; 1
+/// for anything else).
 #[derive(Clone)]
 pub struct VoxelStructure {
     pub name: String,
@@ -139,6 +155,7 @@ pub struct VoxelStructure {
     pub radius: f64,
     pub is_dark: bool,
     pub body_material: Option<u8>,
+    pub avatar_height_frac: f64,
 }
 
 /// `VoxelWarp` is a black hole or a wormhole mouth: its frame, m and reach in curvature units,
@@ -274,12 +291,10 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
         .materials
         .iter()
         .filter_map(|m| {
-            let team: usize = TEAM_NAMES
-                .iter()
-                .position(|name| m.name.starts_with(&format!("{name} console ")))?;
+            let team: u32 = get_console_team(m)?;
             Some(Console {
                 material: m.id,
-                team: team as u32,
+                team,
                 color: m.color,
                 pulse: ConsolePulse::Resting(),
                 pylon: None,
@@ -549,6 +564,24 @@ fn renormalize_frame(body: DMat4) -> DMat4 {
     DMat4::from_cols(r, DVec4::Y, t, g)
 }
 
+/// `make_terrain` reads a map's terrain and bakes its height over the map's boundary box grown by
+/// `BAKED_TERRAIN_REACH_M`, where the rays of a player inside the boundary meet the ground; a map
+/// without a boundary keeps it unbaked.
+///
+/// Example: `let terrain = make_terrain(&map);`
+fn make_terrain(map: &Map) -> Option<Terrain> {
+    let terrain: Terrain = Terrain::FromMap(map.ground.terrain.as_ref()?);
+    let boundary: Option<&crate::map::Boundary> =
+        map.regions.as_ref().and_then(|r| r.boundary.as_ref());
+    Some(match boundary {
+        Some(boundary) => terrain.bake_heights([
+            boundary.u_m + BAKED_TERRAIN_REACH_M,
+            boundary.v_m + BAKED_TERRAIN_REACH_M,
+        ]),
+        None => terrain,
+    })
+}
+
 /// `find_material` gives the id of the material with `name`, or -1.
 ///
 /// Example: `let glass = find_material(map, "glass");`
@@ -603,6 +636,7 @@ fn make_structure(
         radius: radius + BOUND_MARGIN_M / r,
         is_dark: false,
         body_material: None,
+        avatar_height_frac: 1.0,
     }
 }
 
@@ -797,7 +831,7 @@ impl VoxelWorld {
         let mut world: VoxelWorld = VoxelWorld {
             name: map.name.clone(),
             r,
-            terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
+            terrain: make_terrain(map),
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),
             consoles: team_consoles,
@@ -880,7 +914,8 @@ impl VoxelWorld {
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
-    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
+    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows),
+    /// under that gravity times `surface.gravity_per_jump_gravity` (the jump's speed kept).
     ///
     /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
     pub fn set_settings(&mut self, settings: ServerSettings) {
@@ -894,7 +929,8 @@ impl VoxelWorld {
             jump_m_per_s,
             ..self.map_player
         };
-        self.gravity_m_per_s2 = jump_m_per_s / half_jump_s;
+        self.gravity_m_per_s2 =
+            jump_m_per_s / half_jump_s * settings.surface.gravity_per_jump_gravity;
         self.settings = settings;
     }
 
@@ -916,28 +952,32 @@ impl VoxelWorld {
             .is_none()
     }
 
-    /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame
-    /// and an avatar colour index): a cylinder and a head in its own material, so it is lensed and
-    /// hit by lasers like any structure, and drawn as such.
+    /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame,
+    /// an avatar colour index and a height share): a cylinder and a head in its own material,
+    /// squashed to the height share, so it is lensed and hit by lasers like any structure, and
+    /// drawn as such.
     ///
     /// Example: `let shared = world.with_avatars(&[(feet, 2)], &colors);`
-    pub fn with_avatars(&self, bodies: &[(DMat4, usize)], colors: &[[f32; 3]]) -> VoxelWorld {
+    pub fn with_avatars(&self, bodies: &[AvatarBody], colors: &[[f32; 3]]) -> VoxelWorld {
         let mut shared: VoxelWorld = self.clone();
-        for &(feet, color_index) in bodies {
-            shared.add_avatar(feet, color_index, colors, None);
+        for &(feet, color_index, height_frac) in bodies {
+            shared.add_avatar(feet, color_index, colors, None, height_frac);
         }
         shared
     }
 
     /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
-    /// in `poses` (a clip and a time in it, one per body); lasers still hit the shapes. After the
+    /// in `poses` (a clip and a time in it, one per body; posed in parallel, a step of
+    /// `POSE_STEP_S` at a time and shared between bodies in the same step, since posing is most of a
+    /// frame with 10 players: W-200, robots posed on the CPU), squashed to its height share; lasers
+    /// still hit the shapes. After the
     /// bodies come `corpses` (a feet frame, an avatar colour index and a pose each), only drawn:
     /// lasers pass through them.
     ///
     /// Example: `let shared = world.with_posed_avatars(&[(feet, 2)], &[(AvatarClip::Idle, 0.0)], &[], &colors);`
     pub fn with_posed_avatars(
         &self,
-        bodies: &[(DMat4, usize)],
+        bodies: &[AvatarBody],
         poses: &[(AvatarClip, f64)],
         corpses: &[(DMat4, usize, (AvatarClip, f64))],
         colors: &[[f32; 3]],
@@ -950,48 +990,63 @@ impl VoxelWorld {
             poses.len()
         );
         let mut shared: VoxelWorld = self.clone();
-        for (&(feet, color_index), &(clip, time_s)) in bodies.iter().zip(poses) {
-            let posed: MeshModel = self.body.make_posed(clip, time_s);
-            shared.add_avatar(feet, color_index, colors, Some(posed));
+        let posed_bodies: Vec<Arc<MeshModel>> = bodies
+            .par_iter()
+            .zip(poses)
+            .map(|(&(_, _, height_frac), &(clip, time_s))| {
+                self.body.get_stepped_pose(clip, time_s, height_frac)
+            })
+            .collect();
+        for (&(feet, color_index, height_frac), posed) in bodies.iter().zip(posed_bodies) {
+            shared.add_avatar(feet, color_index, colors, Some(posed), height_frac);
         }
         for &(feet, color_index, (clip, time_s)) in corpses {
-            let posed: MeshModel = self.body.make_posed(clip, time_s);
+            let posed: Arc<MeshModel> = self.body.get_stepped_pose(clip, time_s, 1.0);
             let drawn: Option<(usize, &MeshModel)> = Some((shared.avatar_meshes.len(), &posed));
             let mut corpse: VoxelStructure =
                 make_structure("corpse", feet, shared.shapes.len(), &[], drawn, self.r);
             corpse.avatar_mesh = corpse.mesh.take();
             corpse.body_material = Some(shared.set_avatar_color(color_index, colors));
-            shared.avatar_meshes.push(Arc::new(posed));
+            shared.avatar_meshes.push(posed);
             shared.push_structure(corpse);
         }
         shared
     }
 
-    /// `add_avatar` adds a body standing on `feet` in avatar colour `color_index`, drawn as
-    /// `posed` if given, and puts it in the list of every warp it comes within reach of.
+    /// `add_avatar` adds a body standing on `feet` in avatar colour `color_index`, its shapes
+    /// squashed toward the feet to `height_frac` of their height, drawn as `posed` if given, and
+    /// puts it in the list of every warp it comes within reach of.
     ///
-    /// Example: `shared.add_avatar(feet, 2, &colors, None);`
+    /// Example: `shared.add_avatar(feet, 2, &colors, None, 1.0);`
     fn add_avatar(
         &mut self,
         feet: DMat4,
         color_index: usize,
         colors: &[[f32; 3]],
-        posed: Option<MeshModel>,
+        posed: Option<Arc<MeshModel>>,
+        height_frac: f64,
     ) {
         let material: u8 = self.set_avatar_color(color_index, colors);
         let first_shape: usize = self.shapes.len();
-        self.shapes
-            .extend(AVATAR_SHAPES.map(|shape| Shape { material, ..shape }));
+        let squash: DVec3 = DVec3::new(1.0, height_frac, 1.0);
+        self.shapes.extend(AVATAR_SHAPES.map(|shape| Shape {
+            material,
+            centre: shape.centre * squash,
+            half: shape.half * squash,
+            round_m: shape.round_m.min(shape.half.y * height_frac),
+            ..shape
+        }));
         let body: &[Shape] = &self.shapes[first_shape..];
         let drawn: Option<(usize, &MeshModel)> = posed
-            .as_ref()
+            .as_deref()
             .map(|model| (self.avatar_meshes.len(), model));
         let mut avatar: VoxelStructure =
             make_structure("player", feet, first_shape, body, drawn, self.r);
         avatar.avatar_mesh = avatar.mesh.take();
         avatar.body_material = Some(material);
+        avatar.avatar_height_frac = height_frac;
         if let Some(model) = posed {
-            self.avatar_meshes.push(Arc::new(model));
+            self.avatar_meshes.push(model);
         }
         self.push_structure(avatar);
     }
@@ -1248,6 +1303,41 @@ impl VoxelWorld {
         Some(self.get_material_at(inside, &[hit.structure?]))
     }
 
+    /// `is_way_clear` says whether a player's body `body`, its eye `h_m` up, could walk
+    /// `distance_m` straight ahead as `VoxelPlayer::step` moves it: at every `WAY_PROBE_STEP_M` of
+    /// the way, inside the boundary and free of blocks or only a walkable rise up. A walking bot
+    /// probes its way with it.
+    ///
+    /// Example: `if world.is_way_clear(player.body, player.h_m, 1.5) { ... }`
+    pub fn is_way_clear(&self, body: DMat4, h_m: f64, distance_m: f64) -> bool {
+        let step_count: usize = (distance_m / WAY_PROBE_STEP_M).ceil() as usize;
+        (1..=step_count).all(|i| {
+            let along_m: f64 = distance_m * i as f64 / step_count as f64;
+            let ahead: DMat4 = renormalize_frame(body * make_boost(AXIS_Z, -along_m / self.r));
+            let nearby: Vec<usize> = self.find_nearby_structures(ahead.col(AXIS_W), NEARBY_REACH_M);
+            !self.is_outside_boundary(ahead.col(AXIS_W))
+                && (!self.is_body_blocked(ahead, h_m, &nearby)
+                    || self.find_walk_rise_m(ahead, h_m, &nearby).is_some())
+        })
+    }
+
+    /// `raise_crouched_eye` gives the eye frame a player whose eye frame is `eye` (from the
+    /// network) and who is `crouch_frac` of the way down a crouch would have standing: raised
+    /// along the vertical by the drop crouching gave it, so the body under it stands on the
+    /// ground (W-137 (crouched robots sink)). It is `eye` itself when not crouched.
+    ///
+    /// Example: `let standing_eye = world.raise_crouched_eye(player.frame, player.crouch_frac);`
+    pub fn raise_crouched_eye(&self, eye: DMat4, crouch_frac: f64) -> DMat4 {
+        let drop_m: f64 = self.player.eye_height_m
+            * (1.0 - get_crouched_height_frac(crouch_frac, &self.settings.movement));
+        if drop_m == 0.0 {
+            return eye;
+        }
+        let seen: VoxelPlayer = VoxelPlayer::FromEye(self, eye);
+        let at_eye: DMat4 = seen.body * make_boost(AXIS_Y, seen.h_m / self.r);
+        at_eye * make_boost(AXIS_Y, drop_m / self.r) * invert_lorentz(at_eye) * eye
+    }
+
     /// `is_eye_supported` says whether a player whose eye frame is `eye` (from the network) stands
     /// on something: their body, `GROUND_PROBE_M` lower, would meet the ground or a block.
     ///
@@ -1283,12 +1373,12 @@ impl VoxelWorld {
     }
 
     /// `is_head_hit` says whether point x, on an avatar (structure `k`, from `with_avatars`), is in
-    /// its top cell, its head.
+    /// its top cell, its head (lower by the body's height share while crouched).
     ///
     /// Example: `let is_head = shared.is_head_hit(k, spot);`
     pub fn is_head_hit(&self, k: usize, x: DVec4) -> bool {
         let p: DVec4 = self.structures[k].inverse * x;
-        p.y / p.w * self.r >= AVATAR_HEAD_FROM_M
+        p.y / p.w * self.r >= AVATAR_HEAD_FROM_M * self.structures[k].avatar_height_frac
     }
 
     /// `get_material_at` gives the material of the cell holding point x among `candidates`, or 0.
@@ -1359,9 +1449,10 @@ impl VoxelWorld {
         };
         let [u_m, v_m, _] = self.get_fermi_coordinates(x);
         let edge = &self.settings.map_edge;
-        ((terrain.get_wall_frac(u_m, v_m) - edge.start_wall_frac)
-            / (edge.stop_wall_frac - edge.start_wall_frac))
-            .clamp(0.0, 1.0)
+        map_edge::get_edge_frac(
+            terrain.get_wall_frac(u_m, v_m) - edge.start_wall_frac,
+            edge.stop_wall_frac - edge.start_wall_frac,
+        )
     }
 
     /// `is_outside_boundary` says whether a point is past the map's edge: on a map with terrain,
@@ -1542,6 +1633,26 @@ impl VoxelWorld {
         self.warps
             .iter()
             .position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
+    }
+
+    /// `get_warp_pulls` gives what every warp, the map's and the linked thrown mouths, does to a
+    /// player whose body's frame is `body` and whose eye is `eye` (W-202, pull toward wormholes
+    /// and black holes in the game settings; `pull_dynamics::get_hyperbolic_warp_pulls`): the
+    /// pull in the body's axes, the slowing and darkening near a black hole, and whether a black
+    /// hole's minimum radius holds the player out.
+    ///
+    /// Example: `let pulls: WarpPulls = world.get_warp_pulls(player.body, eye);`
+    pub fn get_warp_pulls(&self, body: DMat4, eye: DVec4) -> WarpPulls {
+        let warps: Vec<HyperbolicWarp> = self
+            .warps
+            .iter()
+            .map(|warp| HyperbolicWarp {
+                centre: warp.centre,
+                radius_m: warp.m * self.r,
+                is_mouth: warp.is_mouth,
+            })
+            .collect();
+        get_hyperbolic_warp_pulls(&self.settings.gravity, body, eye, self.r, &warps)
     }
 
     /// `get_time_rate_frac` gives how fast time runs at x (W-107), as a share of time far from every
@@ -1741,7 +1852,8 @@ impl VoxelWorld {
     }
 
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between the
-    /// warps, bent inside them, through throats, to a block, the ground, a horizon or
+    /// warps (falling by the server settings' `shooting.drop_m_per_s_per_s` in pieces of
+    /// `DROP_PIECE_M`, `laser_drop.rs`), bent inside them, through throats, to a block, the ground, a horizon or
     /// `LASER_MAX_LENGTH_M` (through glass). The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where
     /// the window draws the tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
@@ -1749,6 +1861,15 @@ impl VoxelWorld {
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
     pub fn trace_laser(&self, camera: DMat4) -> Shot {
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
+        let drop_per_m: f64 = get_drop_curvature_per_m(
+            self.settings.shooting.drop_m_per_s_per_s,
+            self.settings.sniper.beam_speed_m_per_s,
+        );
+        let drop_piece_s: f64 = if drop_per_m > 0.0 {
+            DROP_PIECE_M / self.r
+        } else {
+            f64::INFINITY
+        };
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
         let mut pieces: Vec<Vec<DVec4>> = vec![vec![x]];
@@ -1760,8 +1881,15 @@ impl VoxelWorld {
                 break;
             }
             let Some(w) = inside else {
-                let (s_end, entering) = self.find_warp_entry(x, v, max_s - travelled);
-                if let Some(found) = self.trace_scene(x, v, s_end, None) {
+                let s_max: f64 = (max_s - travelled).min(drop_piece_s);
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_max);
+                }
+                let (s_end, entering) = self.find_warp_entry(x, v, s_max);
+                if let Some(found) = self
+                    .trace_scene(x, v, s_end, None)
+                    .filter(|found| found.s.is_finite())
+                {
                     pieces
                         .last_mut()
                         .expect("a piece")
@@ -1775,6 +1903,12 @@ impl VoxelWorld {
                 x = xn;
                 travelled += s_end;
                 pieces.last_mut().expect("a piece").push(x);
+                if drop_per_m > 0.0 {
+                    v = turn_hyperbolic(x, v, drop_per_m, self.r, 0.5 * s_end);
+                    if entering.is_none() {
+                        continue;
+                    }
+                }
                 if entering.is_none() {
                     break;
                 }
@@ -1783,6 +1917,9 @@ impl VoxelWorld {
             };
             let ds: f64 = self.choose_bend_step(self.compute_bend(w, x, v).1);
             let (v0, x1, v1, rho) = self.step_bent(w, x, v, ds);
+            if !(ds.is_finite() && rho.is_finite()) {
+                break;
+            }
             if let Some(found) = self.trace_scene(x, v0, ds, Some(w)) {
                 pieces
                     .last_mut()
@@ -1900,6 +2037,15 @@ pub struct VoxelPlayer {
     pub is_on_ground: bool,
     pub energy_frac: f64,
     pub is_sprinting: bool,
+    /// `legs_m_per_s` is the speed the legs give on foot (W-202): it rises from walking speed to
+    /// the sprint's top speed while sprinting and falls back when not (0 until the first step).
+    pub legs_m_per_s: f64,
+    /// `drift_m_per_s` is the velocity the warps' pull has given the player (W-202), along the
+    /// body's right (x) and back (z) axes.
+    pub drift_m_per_s: DVec3,
+    /// `black_hole_depth_frac` is how deep the player is in a black hole's pull (W-168): 0 at
+    /// its edge or outside, 1 at its minimum radius; the window darkens the view by it.
+    pub black_hole_depth_frac: f64,
     pub bob_phase_rad: f64,
     pub bob_frac: f64,
     pub slowed_s: f64,
@@ -1924,6 +2070,9 @@ impl VoxelPlayer {
             is_on_ground: true,
             energy_frac: 1.0,
             is_sprinting: false,
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
+            black_hole_depth_frac: 0.0,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -1975,6 +2124,9 @@ impl VoxelPlayer {
             is_on_ground: true,
             energy_frac: 1.0,
             is_sprinting: false,
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
+            black_hole_depth_frac: 0.0,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2011,6 +2163,9 @@ impl VoxelPlayer {
             is_on_ground: h_m.is_none(),
             energy_frac: 1.0,
             is_sprinting: false,
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
+            black_hole_depth_frac: 0.0,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2044,6 +2199,9 @@ impl VoxelPlayer {
             is_on_ground: false,
             energy_frac: 1.0,
             is_sprinting: false,
+            legs_m_per_s: 0.0,
+            drift_m_per_s: DVec3::ZERO,
+            black_hole_depth_frac: 0.0,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
@@ -2098,7 +2256,9 @@ impl VoxelPlayer {
     ///
     /// Example: `player.look(12.0, -3.0);`
     pub fn look(&mut self, dx_px: f64, dy_px: f64) {
-        self.body *= make_rotation(AXIS_X, AXIS_Z, dx_px * LOOK_RAD_PER_PX);
+        let turn: DMat4 = make_rotation(AXIS_X, AXIS_Z, dx_px * LOOK_RAD_PER_PX);
+        self.body *= turn;
+        self.drift_m_per_s = turn_drift(self.drift_m_per_s, turn);
         self.pitch_rad =
             (self.pitch_rad - dy_px * LOOK_RAD_PER_PX).clamp(-MAX_PITCH_RAD, MAX_PITCH_RAD);
     }
@@ -2152,6 +2312,11 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying;
     /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
+    /// pulled along the ground toward black holes and wormhole mouths (`get_warp_pull`, W-202: the
+    /// pull builds a drift inside a warp's radius, kept through a mouth and braked outside every
+    /// radius; a move a wall refuses ends the drift; a black hole pulls wider, weaker and upward
+    /// too, slows the legs, and holds the player out of its minimum radius), the legs' speed rising to the sprint's top
+    /// speed and falling back (`ramp_legs_speed`),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to the spawn
     /// of index `spawn_index`, the player's team),
     /// slowing down without end on the way out up the crater's wall (`get_edge_frac`: each step
@@ -2175,46 +2340,51 @@ impl VoxelPlayer {
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
         let len: f64 = forward.hypot(side);
         let settings: PlayerSettings = world.player;
-        let (energy, bob) = (&world.settings.sprint_energy, &world.head_bob);
-        let crouch_step: f64 = dt_s / world.settings.movement.crouch_s;
-        let crouch_target: f64 = f64::from(u8::from(input.crouch));
-        self.crouch_frac += (crouch_target - self.crouch_frac).clamp(-crouch_step, crouch_step);
-        let wants_to_sprint: bool = input.sprint && !input.crouch && len > 0.0;
-        self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
-        let energy_change_per_s: f64 = match (wants_to_sprint, input.crouch) {
-            (true, _) => -1.0 / energy.drain_s,
-            (false, true) => 1.0 / energy.refill_crouching_s,
-            (false, false) => 1.0 / energy.refill_walking_s,
+        let mut state: MoveState = MoveState {
+            crouch_frac: self.crouch_frac,
+            energy_frac: self.energy_frac,
+            is_sprinting: self.is_sprinting,
+            bob_phase_rad: self.bob_phase_rad,
+            bob_frac: self.bob_frac,
+            slowed_s: self.slowed_s,
         };
-        self.energy_frac = (self.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
-        let is_walking: bool = len > 0.0 && !self.is_flying && self.is_on_ground;
-        let bob_target: f64 = f64::from(u8::from(is_walking));
-        self.bob_frac += (bob_target - self.bob_frac).clamp(-dt_s / bob.fade_s, dt_s / bob.fade_s);
-        if is_walking {
-            let hz: f64 = if self.is_sprinting {
-                bob.sprint_steps_per_s
-            } else {
-                bob.walk_steps_per_s
-            };
-            self.bob_phase_rad =
-                (self.bob_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
-        }
-        let slow_frac: f64 = if self.slowed_s > 0.0 {
-            world.settings.when_hit.slow_speed_frac
-        } else {
-            1.0
-        } * if input.crouch && !self.is_flying {
-            world.settings.movement.crouch_speed_frac
-        } else {
-            1.0
+        let move_input: MoveInput = MoveInput {
+            is_moving: len > 0.0,
+            is_sprint_held: input.sprint,
+            is_crouch_held: input.crouch,
+            is_flying: self.is_flying,
+            is_on_ground: self.is_on_ground,
         };
-        self.slowed_s = (self.slowed_s - dt_s).max(0.0);
+        let rules: MoveRules = MoveRules {
+            movement: &world.settings.movement,
+            energy: &world.settings.sprint_energy,
+            when_hit: &world.settings.when_hit,
+            head_bob: &world.head_bob,
+        };
+        let slow_frac: f64 = state.step(&move_input, &rules, dt_s);
+        MoveState {
+            crouch_frac: self.crouch_frac,
+            energy_frac: self.energy_frac,
+            is_sprinting: self.is_sprinting,
+            bob_phase_rad: self.bob_phase_rad,
+            bob_frac: self.bob_frac,
+            slowed_s: self.slowed_s,
+        } = state;
         let speed_m_per_s: f64 = slow_frac
             * match (self.is_flying, self.is_sprinting) {
                 (true, true) => settings.fly_m_per_s * FLY_SPRINT_PER_FLY,
                 (true, false) => settings.fly_m_per_s,
-                (false, true) => settings.sprint_m_per_s,
-                (false, false) => settings.walk_m_per_s,
+                (false, _) => {
+                    self.legs_m_per_s = ramp_legs_speed(
+                        self.legs_m_per_s.max(settings.walk_m_per_s),
+                        self.is_sprinting,
+                        settings.walk_m_per_s,
+                        settings.sprint_m_per_s,
+                        &world.settings.movement,
+                        dt_s,
+                    );
+                    self.legs_m_per_s
+                }
             };
         let eye: DVec4 = (self.body * make_boost(AXIS_Y, self.h_m / r)).col(AXIS_W);
         let warp: Option<usize> = world.find_warp_inside(eye);
@@ -2230,15 +2400,46 @@ impl VoxelPlayer {
             };
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
-        let has_moved: bool = len > 0.0;
-        let walked_m_per_s: f64 = if has_moved {
+        let pulls: WarpPulls = if self.is_flying {
+            WarpPulls::NONE
+        } else {
+            world.get_warp_pulls(self.body, eye)
+        };
+        let speed_m_per_s: f64 = speed_m_per_s * pulls.legs_speed_frac;
+        self.black_hole_depth_frac = pulls.black_hole_depth_frac;
+        self.drift_m_per_s = if self.is_flying {
+            DVec3::ZERO
+        } else {
+            let along_ground: Option<DVec3> = pulls
+                .pull_m_per_s_per_s
+                .map(|pull| DVec3::new(pull.x, 0.0, pull.z));
+            let drift: DVec3 = pulls.hold_out(step_drift(
+                self.drift_m_per_s,
+                along_ground,
+                world.settings.gravity.brake_m_per_s_per_s,
+                dt_s,
+            ));
+            DVec3::new(drift.x, 0.0, drift.z)
+        };
+        let lift_m_per_s_per_s: f64 = pulls.pull_m_per_s_per_s.map_or(0.0, |pull| pull.y);
+        self.vertical_m_per_s = pulls
+            .hold_out(DVec3::Y * (self.vertical_m_per_s + lift_m_per_s_per_s * dt_s))
+            .y;
+        let pull_m_per_s: [f64; 2] = [self.drift_m_per_s.x, self.drift_m_per_s.z];
+        let walk_dir: [f64; 2] = if len > 0.0 {
+            [side / len, -forward / len]
+        } else {
+            [0.0, 0.0]
+        };
+        let step_move: Option<([f64; 2], f64)> = add_pull(walk_dir, speed_m_per_s, pull_m_per_s);
+        let has_moved: bool = step_move.is_some();
+        let walked_m_per_s: f64 = if len > 0.0 {
             speed_m_per_s * forward / len
         } else {
             0.0
-        };
-        if has_moved {
-            let dir: [f64; 2] = [side / len, -forward / len];
-            let distance_m: f64 = speed_m_per_s * dt_s;
+        } - pull_m_per_s[1];
+        if let Some((dir, move_m_per_s)) = step_move {
+            let distance_m: f64 = move_m_per_s * dt_s;
             if let Some(w) = warp.filter(|&w| world.warps[w].is_mouth) {
                 (body_new, h_new, crossed) = self.move_optically(world, dir, distance_m, w);
             } else {
@@ -2250,10 +2451,9 @@ impl VoxelPlayer {
                     )
                 };
                 let edge_frac: f64 = world.get_edge_frac(self.body.col(AXIS_W));
-                body_new = move_m(distance_m);
-                if world.get_edge_frac(body_new.col(AXIS_W)) > edge_frac {
-                    body_new = move_m(distance_m * (1.0 - edge_frac));
-                }
+                body_new = map_edge::take_step(distance_m, edge_frac, move_m, |body: &DMat4| {
+                    world.get_edge_frac(body.col(AXIS_W))
+                });
             }
         }
         let messages: Vec<String> = crossed
@@ -2331,6 +2531,9 @@ impl VoxelPlayer {
             self.is_on_ground = dh < 0.0;
             self.vertical_m_per_s = 0.0;
         }
+        if has_moved && self.body != body_new {
+            self.drift_m_per_s = DVec3::ZERO;
+        }
         StepReport {
             messages,
             forward_m_per_s: if self.body == body_new {
@@ -2380,6 +2583,9 @@ mod tests {
     //! | Thrown pair | walked into (the walker comes out of the other mouth), shot into (the laser goes through, naming the mouth's warp), flashing (both mouths) | `a_thrown_pair_carries_walkers_and_lasers` |
     //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
     //! | Marker | inside a thrown mouth's reach (in its list, hit by a laser) | `a_marker_is_listed_and_hit` |
+    //! | Shot's drop (W-157 (bullet drop, by game setting)) | none (straight into the sky), steep (comes down onto the ground, shorter) | `shots_fall_by_the_settings_drop` |
+    //! | Walk near a thrown mouth (W-202) | one step toward it (walking plus one step of pull), away (walking less one step of pull), standing (the drift of one step, closer to it); standing just inside the radius for 6 s (swings through the mouths at least twice, as fast as a fall from the radius gives); the body turned a quarter (the drift keeps its size, along the other axis) | `warps_pull_walkers_toward_them` |
+    //! | Distance from every warp | past the pull's radius (each walk and standing as with no thrown mouths, bit for bit) | `warps_pull_walkers_toward_them` |
 
     use super::*;
     use crate::geometry::orthonormalize_frame;
@@ -2436,6 +2642,11 @@ mod tests {
     const WALK_THROUGH_STEP_COUNT: usize = 120;
     const BLACK_HOLE_NEIGHBOUR_U_M: f64 = -20.0;
     const MARKER_RADIUS_M: f64 = 0.3;
+    const SWING_STEP_COUNT: usize = 360;
+    const PULL_NEAR_OUT_M: f64 = 1.5;
+    const PULL_EDGE_M: f64 = 0.2;
+    const PULL_TEST_OUT_M: f64 = 5.0;
+    const PULL_TEST_TOLERANCE_M_PER_S: f64 = 0.01;
 
     /// `make_block_world` gives the Lunar Surface world with flat ground and nothing on it but a
     /// box `height_m` tall, 1 m deep and 6 m long at u = -80 m, and a spot on the ground
@@ -2565,6 +2776,87 @@ mod tests {
             yaw_rad: 0.0,
         };
         (world, [place(OPEN_V_M), place(OPEN_V_M - OPEN_GAP_M)])
+    }
+
+    #[test]
+    fn warps_pull_walkers_toward_them() {
+        let (mut world, pair) = make_open_world();
+        world.set_thrown_wormholes(&[pair]);
+        let (walk_m_per_s, gravity) = (world.player.walk_m_per_s, world.settings.gravity.clone());
+        let pull_m_per_s_per_s: f64 = gravity.acceleration_m_per_s_per_s;
+        let radius_m: f64 = world.warps[world.static_warp_count].m * world.r;
+        let start_from = |world: &VoxelWorld, out_m: f64| -> VoxelPlayer {
+            let start: [f64; 2] = [OPEN_U_M, OPEN_V_M + out_m];
+            VoxelPlayer::AtView(world, start, [OPEN_U_M, OPEN_V_M], None, 0.0)
+        };
+        let step_from = |world: &VoxelWorld, out_m: f64, input: &Input| -> (VoxelPlayer, f64) {
+            let mut player: VoxelPlayer = start_from(world, out_m);
+            let report: StepReport = player.step(world, input, STEP_S, 0);
+            (player, report.forward_m_per_s)
+        };
+        let (forward, back, still) = (
+            Input {
+                forward: true,
+                ..Input::default()
+            },
+            Input {
+                back: true,
+                ..Input::default()
+            },
+            Input::default(),
+        );
+        let near_m: f64 = radius_m + PULL_NEAR_OUT_M;
+        assert!(near_m < gravity.radius_m);
+        let one_step_m_per_s: f64 = pull_m_per_s_per_s * STEP_S;
+        let (_, toward_m_per_s) = step_from(&world, near_m, &forward);
+        assert!(
+            (toward_m_per_s - (walk_m_per_s + one_step_m_per_s)).abs()
+                < PULL_TEST_TOLERANCE_M_PER_S,
+            "{toward_m_per_s}"
+        );
+        let (_, away_m_per_s) = step_from(&world, near_m, &back);
+        assert!(
+            (-away_m_per_s - (walk_m_per_s - one_step_m_per_s)).abs() < PULL_TEST_TOLERANCE_M_PER_S,
+            "{away_m_per_s}"
+        );
+        let (drifted, drift_m_per_s) = step_from(&world, near_m, &still);
+        assert!((drift_m_per_s - one_step_m_per_s).abs() < PULL_TEST_TOLERANCE_M_PER_S);
+        assert!(
+            (drifted.drift_m_per_s.length() - one_step_m_per_s).abs() < PULL_TEST_TOLERANCE_M_PER_S
+        );
+        let mouth: DVec4 = world.warps[world.static_warp_count].centre;
+        let start: VoxelPlayer = start_from(&world, near_m);
+        assert!(
+            get_distance(drifted.body.col(AXIS_W), mouth)
+                < get_distance(start.body.col(AXIS_W), mouth)
+        );
+        let mut swinging: VoxelPlayer = start_from(&world, gravity.radius_m - PULL_EDGE_M);
+        let (mut pass_count, mut top_m_per_s) = (0, 0.0_f64);
+        for _ in 0..SWING_STEP_COUNT {
+            let report: StepReport = swinging.step(&world, &still, STEP_S, 0);
+            pass_count += report.messages.len();
+            top_m_per_s = top_m_per_s.max(swinging.drift_m_per_s.length());
+        }
+        let fall_m_per_s: f64 = (2.0 * pull_m_per_s_per_s * (gravity.radius_m - radius_m)).sqrt();
+        assert!(
+            pass_count >= 2,
+            "a player who touches nothing swings: {pass_count} passes"
+        );
+        assert!(
+            top_m_per_s > 0.7 * fall_m_per_s && top_m_per_s < 1.3 * fall_m_per_s,
+            "{top_m_per_s}"
+        );
+        let mut turned: VoxelPlayer = drifted;
+        turned.look(std::f64::consts::FRAC_PI_2 / LOOK_RAD_PER_PX, 0.0);
+        assert!((turned.drift_m_per_s.length() - drifted.drift_m_per_s.length()).abs() < 1e-12);
+        assert!(turned.drift_m_per_s.x.abs() > 0.99 * drifted.drift_m_per_s.length());
+        let far_m: f64 = gravity.radius_m + PULL_TEST_OUT_M;
+        let without: VoxelWorld = make_open_world().0;
+        for input in [&forward, &back, &still] {
+            let (pulled, pulled_m_per_s) = step_from(&world, far_m, input);
+            let (alone, alone_m_per_s) = step_from(&without, far_m, input);
+            assert_eq!((pulled.body, pulled_m_per_s), (alone.body, alone_m_per_s));
+        }
     }
 
     #[test]
@@ -2795,14 +3087,14 @@ mod tests {
         let horizon_m: f64 = hole.m * world.r * settings.time_dilation_per_general_relativity;
         assert_eq!(rate_at(&world, 0.0), min_frac);
         assert_eq!(rate_at(&world, 0.9 * horizon_m), min_frac);
-        let near_frac: f64 = rate_at(&world, 0.25 * reach_m);
+        let near_frac: f64 = rate_at(&world, 0.4 * reach_m);
         let far_frac: f64 = rate_at(&world, 0.75 * reach_m);
         assert!(min_frac < near_frac && near_frac < far_frac && far_frac < 1.0);
         assert_eq!(rate_at(&world, reach_m), 1.0);
         assert_eq!(rate_at(&world, 2.0 * reach_m), 1.0);
         let mut grown: VoxelWorld = world.clone();
         grown.grow_black_hole(1.0);
-        assert!(rate_at(&grown, 0.25 * reach_m) < near_frac);
+        assert!(rate_at(&grown, 0.4 * reach_m) < near_frac);
     }
 
     #[test]
@@ -2997,6 +3289,41 @@ mod tests {
         assert_eq!(
             world.get_mouth_depth_frac(at(black_hole, black_hole.reach / 2.0)),
             0.0
+        );
+    }
+
+    #[test]
+    fn shots_fall_by_the_settings_drop() {
+        const STEEP_DROP_M_PER_S_PER_S: f64 = 2000.0;
+        const GENTLE_DROP_M_PER_S_PER_S: f64 = 300.0;
+        let mut world: VoxelWorld = load_lunar_surface();
+        let camera: DMat4 =
+            VoxelPlayer::AtView(&world, [-107.0, 0.0], [0.0, 0.0], None, SKY_PITCH_RAD)
+                .get_camera_frame(&world);
+        let straight: Shot = world.trace_laser(camera);
+        let mut falling_settings: ServerSettings = world.settings.clone();
+        falling_settings.shooting.drop_m_per_s_per_s = STEEP_DROP_M_PER_S_PER_S;
+        world.set_settings(falling_settings);
+        let falling: Shot = world.trace_laser(camera);
+        assert!(straight.spot.is_none(), "a shot into the sky hits nothing");
+        assert!(falling.spot.is_some(), "a falling shot comes down");
+        assert!(falling.length_m < straight.length_m);
+        let mut gentle_settings: ServerSettings = ServerSettings::Builtin();
+        gentle_settings.shooting.drop_m_per_s_per_s = GENTLE_DROP_M_PER_S_PER_S;
+        let mut map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the map");
+        map.scale_curvature(gentle_settings.space.curvature_per_map_curvature)
+            .expect("the built-in curvature");
+        let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        world.set_settings(gentle_settings);
+        let into_wormhole: Shot = world.trace_laser(
+            VoxelPlayer::AtView(&world, [-22.0, 40.5], [-14.0, 40.0], None, 0.0)
+                .get_camera_frame(&world),
+        );
+        assert!(!into_wormhole.through.is_empty(), "the shot goes through");
+        assert!(
+            into_wormhole.length_m.is_finite(),
+            "{}",
+            into_wormhole.length_m
         );
     }
 

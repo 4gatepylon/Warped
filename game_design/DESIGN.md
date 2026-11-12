@@ -25,27 +25,9 @@ and in progress.
 
 ## Terms
 
-| Term | Meaning |
-| --- | --- |
-| Team | Blue or red, ≈5 players each. A game holds at most 8 players for now. |
-| Match | One game between the two teams, played across the levels of one map. |
-| Map | A line of levels: the blue levels, one purple level in the middle, then the red levels. |
-| Level | One playable space. A blue or red level belongs to that team; the purple level to neither. |
-| Depth | How far a level is from the purple level: 0 for purple, then 1, 2, … outward. |
-| Round | One play of one level, which one team wins. |
-| Wavefront | A team's next level to win on the other team's side. It only moves deeper. |
-| Attacker | The team whose wavefront is being played. |
-| Defender | The team that owns the level being played. |
-| Lobby | The screen a player joins on: it shows each team's head count, and the player picks a team. |
-| Spawn | Where a team's players enter a level. |
-| Pylon | One of a team's 2 or 3 objectives in a level, near its spawn. |
-| Console | One part of a pylon. The opposing team deactivates consoles to win the level. |
-| Zone | One of a level's three regions: the blue zone, the middle zone and the red zone. |
-| Route | One way across the middle zone, from one side to the other. |
-| Floor | One walkable layer inside a level. |
-| Warp object | A black hole or a wormhole. Level designers place them, and each player throws a pair of wormhole mouths of their own (see [Thrown wormholes](#thrown-wormholes)). |
-| Energy | What sprinting uses up. It refills over time, twice as fast while crouched. |
-| Map edge | The soft edge of a level: players slow down without end as they climb it, so they never leave. |
+[`GLOSSARY.md`](GLOSSARY.md) holds the official terms of the game, one meaning each. Read it first. This document
+still says *game* in places for what the glossary calls a *match*, and *map edge* for a *level edge*; fix those
+when you edit them.
 
 ## Match
 
@@ -70,8 +52,8 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 
 ### Winning a level
 
-- Each team has a spawn and, near it, its pylons: 3 on Dust and Lunar Surface, 2 on every other
-  level. The two spawns are on opposite sides of the level.
+- Each team has a spawn and, near it, its pylons: 3 on Dust and Lunar Surface, 2 on Snow Planet and
+  Dark Forest, and 1 on City Sphere, so the count rises from the middle level outward. The two spawns are on opposite sides of the level.
 - A team wins a level by deactivating every console on the opposing team's pylons, as in capture
   the flag. The [wavefront](#wavefront) then decides which level is played next.
 - A pylon with more consoles takes longer to deactivate.
@@ -85,7 +67,7 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 
 | Parameter | Value |
 | --- | --- |
-| Pylons per team per level | Set per level: 3 on Dust and Lunar Surface, 2 on the others (see [Levels](#levels)) |
+| Pylons per team per level | Set per level: 3 on Dust and Lunar Surface, 2 on Snow Planet and Dark Forest, 1 on City Sphere (see [Levels](#levels)) |
 | Consoles per pylon | 1 on every level |
 | Control to deactivate a console | Hold `E` while aiming at it from within 3 m |
 | Time to deactivate one console | 10 s |
@@ -124,19 +106,36 @@ For example:
 
 - A player joins a game server and lands in the lobby, which shows each team's head count. `1`
   joins blue and `2` joins red. A player can't shoot until the server has let them in.
-- Friendly fire is on: a shot eliminates a teammate as it would an enemy, but only an enemy counts
-  as a kill.
+- A game server on the internet has a password, which its operator shares with the players; the server admits only
+  players who prove they know it, and the password itself never crosses the network.
+- Friendly fire is a game setting, on by default (`shooting.is_friendly_fire_on`, W-156 (friendly fire, by game
+  setting); the user: "add setting in game settings to toggle whether or not friendly fire is possible"). When on, a
+  shot eliminates a teammate as it would an enemy, but only an enemy counts as a kill; when off, a shot doesn't
+  hurt teammates. A bot never hurts a teammate, whatever the setting: a bot whose laser meets a teammate holds its
+  fire and steps aside (W-155 (play against bots)).
 - The game counts each player's kills and deaths, shown on the scoreboard (see [Screen](#screen)).
 
 ### Respawning
 
-A player who is eliminated sees their view darken with "YOU DIED" and a countdown, and comes back
-after the respawn time on a ring around their team's spawn, never on top of another player, with
-full health and energy. A player can't choose to respawn early.
+A player who is eliminated sees their view darken with "YOU DIED", a countdown and a bar that fills
+over the wait, and comes back after the respawn time on a ring around their team's spawn, never on
+top of another player, with full health and energy. A player can't choose to respawn early.
+
+The respawn time grows the longer a level goes on, so dying costs more later (W-142 (growing respawn
+time). In the user's words: "Respawns will happen on a cadence, and every n steps, it will increase in
+time linearly so that it takes longer to respawn as time progresses. This means that as time
+progresses, the stakes get basically higher to dying versus earlier on. The respawn rates should
+start at you being stuck dead for 20 seconds, and they should go up linearly every five minutes by 10
+seconds on a given level in the map." A player eliminated `t` seconds after the level (its round)
+started waits `start_s + step_s × floor(t / period_s)`; the level's server decides the wait and sends
+it with the elimination, so the countdown and bar show the server's wait. A new game on the level
+starts the clock again.
 
 | Parameter | Value |
 | --- | --- |
-| Respawn time | 3 s (`respawn.delay_s`) |
+| Respawn time at the level's start | 20 s (`respawn.start_s`) |
+| Added every period | 10 s (`respawn.step_s`) |
+| Period | 5 minutes (`respawn.period_s`) |
 
 ## Levels
 
@@ -149,7 +148,7 @@ full health and energy. A player can't choose to respawn early.
 | Gravity | Down, onto the ground | Down | Outward, onto the sphere | Down | Down, onto the ground, ≈30 m/s² |
 | Warp objects | Yes | Yes | No | Yes | 1 black hole, 1 wormhole |
 | Size | Very large | Large | Smallest | Large | Very large: 256 m × 144 m playable |
-| Pylons per team | 3 | 2 | 2 | 2 | 3 |
+| Pylons per team | 3 | 2 | 1 | 2 | 3 |
 | Consoles per pylon | 1 | 1 | 1 | 1 | 1 |
 | Combat focus | Long range | Mid range | Close quarters | Mid range | Long range |
 | Zone layout | Open | Paired bands | Bands | Paired bands | Open |
@@ -162,6 +161,10 @@ full health and energy. A player can't choose to respawn early.
   pulls them outward onto its surface. With no warp objects, light travels in straight lines.
 - **T² × ℝ:** flat space whose two horizontal axes loop back around (a torus) and whose vertical
   axis goes on forever. The loops are large. The warp objects curve space around them.
+  - **Caveat, work in progress:** the levels described as toroidal here (Snow Planet and Dark
+    Forest) are not actually toroidal yet. In the Rust game both are plain flat (Euclidean) space
+    whose edge is a [map edge](#map-edge) that slows players without end; looping them around is a
+    work in progress (Snow Planet's looping world waits on its own branch).
 - **Hyperbolic:** hyperbolic space with warp objects. The pylons are far apart. Gravity pulls
   players down onto the ground, along the ground's normal under them; players never get far above
   the ground, so that simple rule is enough. Lunar Surface is a bounded patch of this space: its
@@ -176,14 +179,16 @@ full health and energy. A player can't choose to respawn early.
 
 ### City Sphere
 
-- The blue spawn and its two pylons sit close together. The red spawn and pylons are blue's
-  reflected through the sphere's center, so the two sides sit at antipodes.
+- Each team has one pylon, on the glass level in an exposed spot with no cover around it.
+  The red spawn and pylon are blue's reflected through the sphere's center, so the two sides sit
+  at antipodes.
 - Walls divide the space into close quarters.
-- City Sphere has two floors: the sphere's surface, and the surface of a smaller sphere with the
-  same center, which players walk up to. Gravity pulls outward on both floors.
-- The inner floor is glass and roofs the whole outer floor. Players on either floor see each other
-  through it but can't shoot through it.
-- City Sphere may change to one floor, or to a roof that is only partly glass.
+- City Sphere has two surfaces to walk on: the floor, the sphere's surface, and the glass level,
+  the surface of a smaller sphere with the same center, which players walk up to. Gravity pulls
+  outward on both.
+- The glass level is glass and roofs the whole floor. Players on the floor and on the glass level
+  see each other through it but can't shoot through it.
+- City Sphere may change to the floor alone, or to a roof that is only partly glass.
 
 ### Lunar Surface
 
@@ -197,7 +202,7 @@ The level as the Rust game builds it, from the map
   more than 45 m on red's side, and the middle zone, 90 m long, between them. Each team zone's edge
   is a faint see-through wall in the team's colour, 6 m high and 0.6 m thick, that stops neither
   players nor lasers.
-- A black hole hangs about 17 m above the middle of the level; its pull reaches 24 m. A player who falls into
+- A black hole hangs about 7.5 m above the middle of the level (it bends light out to 24 m; its pull reaches 10 m, so about 8 m around the spot under it on the ground). A player who falls into
   it goes back to their spawn.
 - Each console turned off, on either team's pylons, grows the black hole over 4 s, up to full strength with one
   console left. Its black part grows only a little (Schwarzschild radius 1.2 m to 2 m), while the area it distorts
@@ -210,7 +215,7 @@ The level as the Rust game builds it, from the map
 - One wormhole joins a ridge to the red landing pad. Its mouths are 15 m in reach.
 - Each player throws their own pair of wormhole mouths ([Thrown wormholes](#thrown-wormholes)): `Q` throws the
   purple one, then the green one, and nothing more once both are down. A lone mouth glows as a ball until its
-  partner lands: shooting your own or a teammate's ball does nothing, and one shot at an enemy's ball destroys it.
+  partner lands; shooting any mouth does nothing to it.
 - Blue's side has a concrete bunker (a kazemat) at its spawn, rows of Hesco barriers, a relay mast, supply crates and
   a solar array. The middle has derelict field bunkers, a comms dome, a crater walkway, a relay mast, a solar array
   and crates. Red's side has Hesco barriers, a habitat module, a dome, a bunker garage as its spawn hangar, a
@@ -242,10 +247,22 @@ Every level follows these rules:
   with corners to defend.
 - On most levels, one route is a big open area, joined to at least one other route by a connector.
 - The blue and red zones are easy to cross widthwise, so a team can rotate quickly between routes.
+- Each team zone's edge is a team boundary plane in every level (W-148, team boundary planes in every level): a
+  faint see-through wall that glows slightly in the team's colour, brightest at its foot, and stops neither
+  players nor lasers. What is seen through one shimmers like air over hot ground (W-149, shimmer through boundary
+  planes): the picture behind it wobbles a little, rising and changing all the time, in every level alike. The
+  shimmer is only where a wall covers the view, so it stops once you have crossed the wall and look away from it.
+  The boundary takes the shape that fits the level's space: planes across the other levels' length, and in City
+  Sphere, inside a sphere, a dome over each team's pylon on the glass level. A team's area there is inside its dome
+  and everything else is the middle; each dome spans 0.2 of the way round the glass level (21.4 m across), which the
+  game master can change (`team_domes.circumference_frac`), and it is fainter seen from inside than from outside.
+- City Sphere's glass level is lit by the glowing ribs of its glass shell, which pulse (W-203, dimmer, pulsing
+  lights on City Sphere's glass): from 0.3 to 0.7 of their full brightness and back every 16 s, rising for 10 s
+  and falling for 6 s. The game master can change the two bounds, the period and the rising share (`glass_lights`).
 
 | Zone layout | Shape |
 | --- | --- |
-| Bands | The spawns sit at antipodes. The middle zone is a wide band around the sphere, halfway between them, and the blue and red zones are thinner bands on either side of it. |
+| Bands | The spawns sit at antipodes. The middle zone is a wide band around the sphere, halfway between them, and the blue and red zones are thinner bands on either side of it. (City Sphere's team areas are now domes over the pylons, above; its spawns are in the middle.) |
 | Paired bands | The zones are bands across one looping axis. Going all the way around that axis passes every zone twice, so each zone is a pair of bands: the two halves of a team's zone meet at its spawn, and the two middle bands are two separate ways to the other side. |
 | Open | The zones are bands across the level's length, with the spawns far apart, and walls, obstacles and hills shape the routes. |
 
@@ -278,10 +295,20 @@ Speeds are set per level as a multiple of the level map's own speeds (`movement`
 Players can sprint, with head bob, as in other first-person shooters. Sprinting uses up energy,
 which has nothing to do with the guns' heat.
 
+- Sprinting speeds up and slows down (W-202): while Shift is held with energy left, the legs' speed rises from
+  walking speed to the sprint's top speed at 15 m/s² (`movement.sprint_up_m_per_s_per_s`); the moment Shift is let
+  go or the energy runs out it falls back at 15 m/s² (`movement.sprint_down_m_per_s_per_s`). Walking itself starts
+  and stops at once, in every level.
+
 - Energy drains at a steady rate while a player sprints, and refills at a steady rate while they
   don't: as fast as it drains while crouched, and half as fast while walking or standing.
 - Energy never goes above full. A player who runs out of energy can't sprint.
-- A player can't shoot while sprinting.
+- By default a player can't shoot while jumping, walking upright or sprinting: a shot waits 0.25 s after the
+  last such move (`movement.shoot_after_moving_s`); walking crouched doesn't hold a shot. Each of the three is a
+  game setting (`shooting.can_shoot_while_jumping`, `can_shoot_while_walking`, `can_shoot_while_sprinting`; W-147
+  (shooting while moving, by game setting); the user: "the ability to toggle via game settings whether you can shoot
+  while jumping, and seperately while moving laterally (i.e. while walking) and seperately while sprinting"), and
+  bots follow the same rule.
 
 | Parameter | Value |
 | --- | --- |
@@ -290,13 +317,62 @@ which has nothing to do with the guns' heat.
 | Time to refill from empty while walking or standing | 15 s |
 | Energy at spawn | Full |
 
+### Gravity toward warps
+
+Black holes and wormhole mouths pull players along the ground (W-202, pull toward wormholes and black holes in
+the game settings): the level's own warps, and the thrown mouths once linked. Inside a radius of a warp's centre a
+player is accelerated straight toward it, by the same amount everywhere inside the radius. A player can walk near a
+warp and be fine, but too close the pull wins and the player goes through.
+
+- The pull builds up a drift, a velocity added to the player's walk. Inside a radius nothing brakes it; outside
+  every radius it dies away quickly.
+- Going through a mouth keeps the speed: the player comes out of the other mouth as fast as it went in, and that
+  mouth's pull then slows it. A player who touches nothing swings back and forth through the pair.
+- The pull is weaker than sprinting speeds up, so a sprinting player always gets away.
+- The pull points at the warp along the ground; a warp overhead pulls by the part of its direction along the
+  ground. A warp whose horizon is wider than the radius doesn't pull.
+- A move a wall refuses ends the drift. Flying players are not pulled.
+- A black hole pulls differently from a mouth: over twice the radius, with half the strength, and in all three
+  directions, so one overhead also lifts (a player in the air can still walk). Inside its radius a player's legs
+  give only 0.75 of their speed, which still lets a sprinting player get away. Inside its minimum radius it pulls
+  no further and holds players out, so nobody is pulled in. The view darkens as a player gets closer (W-168, fading
+  out into a black hole): the edges go black and blur, reaching further in, and the whole picture dims, up to 0.85
+  dark at the minimum radius. Lunar Surface's black hole was made 1.2 times bigger and lowered to 7.5 m (W-202), so
+  its pull and darkening reach the ground as Snow Planet's do; time under it runs as slowly as before the move.
+- The game server's settings hold it (`gravity` in `server_settings.yaml`), and the game master can change it.
+- The user approved these numbers after playing with them (2026-11-10). They are game settings only: nothing in a
+  level changes them while playing. The equations are in `demos/warp_pull_js/EQUATIONS.md`.
+- Every level has the same pull, drift, sprint and darkening ("all of the planets should use snow planet physics"):
+  Dust, Snow Planet, Lunar Surface, the match, City Sphere and Dark Forest. Dark Forest's bots are not pulled.
+
+| Parameter | Value |
+| --- | --- |
+| Radius | 5 m from the warp's centre, 2.5 bodies (`gravity.radius_m`) |
+| Strength | 11.9 m/s² (`gravity.acceleration_m_per_s_per_s`): a fall from the radius reaches a thrown mouth's throat at 9 m/s |
+| Shape | the same everywhere inside the radius (`gravity.profile`: `constant`; also `stronger_near_mouth`, `harmonic`) |
+| Braking outside every radius | 15 m/s² (`gravity.brake_m_per_s_per_s`) |
+| Black hole's radius | 2 times the radius, 10 m (`gravity.black_hole_radius_per_radius`) |
+| Black hole's strength | 0.5 of the strength (`gravity.black_hole_acceleration_frac`) |
+| Legs' speed near a black hole | 0.75 (`gravity.black_hole_speed_frac`) |
+| Black hole's minimum radius | 3 m from its centre (`gravity.black_hole_min_radius_m`) |
+| Darkness at the minimum radius | 0.85 (`gravity.black_hole_darkness_frac`) |
+
 ### Map edge
 
-A level has no wall at its edge. On Lunar Surface the crater's wall is the edge: from its foot,
-each step a player takes outward is cut by the share of the way they have climbed toward halfway
-up, so they slow down without end and never get past halfway. Their view stretches out from the
-middle of the screen as they slow, as if they were stretched ever further. Walking back in is at
-full speed.
+No level has a wall at its edge. Every level slows players the same way past its playable area
+(Zeno's paradox): each step a player takes outward is cut by the share of the way they have come
+toward a stopping line, so they slow down without end and never reach it. Walking back in, or
+along the edge, is at full speed.
+
+- **Lunar Surface and Dust:** the crater's wall is the edge: the slowing starts at its foot and the
+  stopping line is halfway up. The view stretches out from the middle of the screen as players
+  slow, as if they were stretched ever further.
+- **Snow Planet:** the edge is a band 12 m wide outside the playable ellipse, over open snow, with
+  the same stretching view.
+- **Dark Forest:** the edge is a band 12 m wide outside the playable rectangle, and the bamboo
+  forest goes on 30 m past the edge, so a player walking off the map always sees trees ahead,
+  never empty space.
+- **City Sphere:** a closed sphere, so it has no edge.
 
 ## Controls
 
@@ -318,33 +394,38 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | `E` (held) | Deactivate a console of the opposing team's pylons (see [Winning a level](#winning-a-level)) |
 | `Q` | Throw your purple wormhole mouth, the next press your green one, then purple again, and so on (see [Thrown wormholes](#thrown-wormholes)) |
 | `1`, `2` (in the lobby) | Join the blue or the red team |
-| `Tab` | Open or close the menu (see [Screen](#screen)). The player stands still while it is open, but the game goes on. |
+| `Tab` (held) | Show the satellite map (the whole level, live, see [Screen](#screen)) over the game while held; the game goes on and the player can still move and look. Letting go hides it. |
+| `Esc` | Open or close the menu (see [Screen](#screen)), which frees the mouse while it is open; its QUIT page leaves the game. The player stands still while it is open, but the game goes on. |
 | `Q`, `E` (in the menu) | Turn to the menu's previous or next page |
 | `Up`, `Down`, `Return`, `Left`, `Right` (in the menu) | Pick a setting, rebind a key (`Return`, then the new key), change a number |
 | `-`, `=` | Lower or raise the render resolution |
-| `Esc` | Free the mouse; with the mouse free, ask "Do you want to exit?" (`Return` or `Y` exits, `Esc` or `N` goes back to the game) |
 
 ## Screen
 
 The screens a player meets, in order:
 
+- **Main menu** (the Mac app, opened without flags): a list of the online games on the server the app was built for,
+  joining a server by the address the player types (its IP and port, remembered for next time), joining a game on
+  this Wi-Fi, and Quit, each game on either map. A game on a server asks once for its password (empty for a
+  server without one) and keeps it; a server that refuses it, or runs another version, stops the window with a
+  pop-up saying why, and the main menu comes back.
 - **Loading:** before the first frame, a black screen titled LOADING names what is loading (the surface textures,
   the shaders, each gun) over a bar like the console bar, filling as it goes.
-- **Lobby** (the team screen): it says CONNECTING until the server answers, then CONNECTED with how many players
+- **Lobby**: it says CONNECTING until the server answers, then CONNECTED with how many players
   each team has. `1` joins blue and `2` joins red; it then says JOINING THE GAME until the server lets the player
   in. A player can't shoot from the lobby.
 - **Connection banners:** when a window can't play on its server, a banner says why, and the terminal says what to
   do:
   - NO ANSWER FROM THE SERVER: nothing came back for 2 s;
   - SERVER RUNS ANOTHER VERSION: the server's messages don't fit this build, so rebuild both from the same commit;
-  - THE GAME IS FULL: the server already has 8 players.
+  - THE GAME IS FULL: the server already has 12 players.
 - **In play:** the crosshair, bars and minimap below, and the other players as figures in their team's colour.
 - **Death:** the view darkens and says YOU DIED with a countdown until the player respawns (see
   [Respawning](#respawning)).
 - **Win:** when a team has won, every player sees `<TEAM> TEAM WINS`, and a new game starts when the server's
-  operator presses `Enter` in its terminal.
-- **Exit:** `Esc` frees the mouse; `Esc` again asks "Do you want to exit?", and `Return` or `Y` quits while `Esc` or
-  `N` goes back to the game.
+  operator presses `Enter` in its terminal, or, on a server in the cloud, 10 s after the win.
+- **Exit:** `Esc` opens the menu; on its QUIT page (`Q` from SCORES, where it opens) "Do you want to leave the
+  game?" leaves with `Return` or `Y`, and `Esc` goes back to the game.
 
 What a player sees while playing:
 
@@ -362,8 +443,19 @@ What a player sees while playing:
   `player_settings.yaml` (`minimap`).
 - **Console bar:** while a player holds `E` on a console, a bar below the crosshair fills over the
   10 s it takes, and they can't shoot (see [Winning a level](#winning-a-level)).
-- **Menu** (`Tab`), with four pages under a tab bar; it opens on SCORES, and `Q` and `E` turn the
-  pages. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
+- **Satellite map, while `Tab` is held:** the whole level from above, live, over the dimmed game, which goes on
+  taking the player's input, until `Tab` is let go. It has the MAP page's marks, plus the player as a disk pointing
+  the way they face, every other player in the game, near or far, as a dot in their team's colour, and a circle of
+  the player's fog of war range around them (`main_map.fog_of_war_range_m` in `player_settings.yaml`, 60 m by
+  default), outside which the picture is darker and blurred: the fog of war. A legend line names the marks.
+- **Menu** (`Esc`, which frees the mouse; `Esc` again closes it and captures the mouse): its name on the first line,
+  the names of its five pages on the line under it (the open one in brackets), then the page. It opens on SCORES.
+  The left and right arrows, `Q` and `E`, or a click on a page's name turn the pages. On SETTINGS, `Down` or `Up`
+  goes from the pages' names into the rows, where the left and right arrows change the chosen number instead, and
+  past the first or last row comes back to the names. A `?` at the right of the first line shows the menu's keys
+  while the mouse is over it; the keys aren't shown otherwise. Inside the one-window app a sixth page, MATCH, comes
+  first, with the match's status (the current level, the round, which team attacks and the scores), and the menu
+  opens on it. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
   bindings say, so a bad binding can always be fixed. The player stands still while it is open,
   but the game goes on.
   - SCORES: the player count, and each player's team, kills and deaths in this game, sorted by
@@ -372,16 +464,18 @@ What a player sees while playing:
   - SETTINGS: the player's own settings, one row each: every key binding (`Return`, then the new
     key, button or wheel; `Esc` cancels), then numbers changed with `Left` and `Right` (mouse look
     speed, motion blur, head bob walking and sprinting, how red, shaky and blurred a hit looks,
-    the wormhole colour's strength and the Milky Way's brightness), then a row that saves them to
+    the wormhole colour's strength, the Milky Way's brightness, and the picture's brightness,
+    contrast, saturation and gamma, which change only how the finished picture looks on that
+    player's screen, W-51, basic visuals, and the satellite map's fog of war range), then a row that saves them to
     `~/.config/warped/player_settings.yaml` (or the `--player-settings` file), which later games
     load. A line below says what changed or went wrong.
-  - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole
-    mouths, the black hole, the spawns, the zones' edges and the map edge, the player as a disk
-    pointing the way they face, a circle of the minimap's reach around them (the rest darker and
-    blurred), and every other player in the game, near or far, as a dot in their team's colour.
-    A legend line names the marks.
+  - MAP: the paper map, the whole level from above and all of it clear, with the ground's relief,
+    structures, consoles, wormhole mouths, the black hole, the spawns, the zones' edges and the
+    map edge. It is not live: no players are on it. A legend line names the marks.
   - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
     and the libraries the game is built on.
+  - QUIT: "Do you want to leave the game?"; `Return` or `Y` leaves it (a level run alone quits; the one-window app
+    goes back to its map menu), and `Esc` goes back to the game.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the
   screen shakes (each player's own setting).
 - **Motion blur:** a slight one (each player's own setting).
@@ -390,8 +484,12 @@ What a player sees while playing:
 ## Bullets, lasers and light
 
 - Warp objects bend light, so players see the world bent around them.
-- A shot is a laser beam: a light ray from the gun's tip, with no drop. Its front flies out at
+- A shot is a laser beam: a light ray from the gun's tip, with no drop by default. Its front flies out at
   250 m/s, and each point of it fades soon after the front passes.
+- Bullet drop is a game setting, off by default (`shooting.drop_m_per_s_per_s`, W-157 (bullet drop, by game
+  setting); the user: "add setting in game settings for bullet drop"): above 0, every shot's path curves down as a
+  ball thrown at the beam's speed would fall (toward the floor in City Sphere), the drawn beam follows it, and
+  every window traces it alike from the server's settings.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
 - A player moving through a wormhole's throat sees the world's colours shift for a moment, as if moving near light
@@ -409,7 +507,7 @@ anywhere in the level.
   `Q` does nothing until the pair is gone (death or destruction); a throw that fizzles can be
   thrown again.
 - **Flight:** a mouth is lobbed from the player's hand a little above the crosshair and curves down
-  under its own gravity. It drops to the floor below whatever it hits, and hovers there at eye
+  under its own gravity. It drops to the ground below whatever it hits, and hovers there at eye
   height, facing back the way it flew.
 - **Fizzling:** a throw fizzles if it hasn't landed within its flight time, or if it lands too close
   to a wall or another warp object (their reaches may not overlap).
@@ -419,11 +517,14 @@ anywhere in the level.
   - the view through a thrown mouth is tinted its colour;
   - a mouth in flight, or down while its partner isn't, glows as a small ball;
   - every player sees every player's mouths, and anyone can walk or shoot through them.
-- **Death:** a player's mouths disappear when they die.
-- **Shooting an enemy's mouths:** a shot that goes through an enemy's linked mouth makes both of
-  that enemy's mouths flash red; enough hits destroy the pair. A shot that hits an enemy's lone
-  mouth's ball (down, its partner not yet thrown) destroys it at once. A shot at a player's own or
-  a teammate's mouths, or at a ball still in flight, does nothing.
+- **Once per level:** a player throws one pair in a level and no more (W-199, one wormhole per player per level).
+  The mouths stay where they are when their thrower dies, so respawning gives no new pair. A throw that fizzles
+  doesn't use the mouth up.
+- **Shots don't destroy mouths** (W-166, clear rules for destroying thrown wormholes): a shot through a linked
+  mouth is carried through it and does nothing to the pair, whoever threw it; a shot at a lone mouth's ball does
+  nothing either. The game master can turn destroying back on by setting the hits below above 0.
+- **Not built yet:** switching an enemy's pair off by holding `E` on a mouth, and a pair staying when its thrower
+  leaves the level (it still goes with them).
 
 | Parameter | Value |
 | --- | --- |
@@ -433,8 +534,8 @@ anywhere in the level.
 | Longest flight before it fizzles | 4 s (`wormholes.max_flight_s`) |
 | A mouth's size on Lunar Surface | 1.6 m Schwarzschild radius (`wormholes.schwarzschild_radius_m`); on the house, the house's mouths' size |
 | How far its bending reaches on Lunar Surface | 6 m (`wormholes.reach_m`) |
-| Hits that destroy an enemy's pair | 2 sniper shots or 5 rifle shots (`wormholes.sniper_hits_to_destroy`, `wormholes.rifle_hits_to_destroy`) |
-| Hits that destroy an enemy's lone mouth | 1 shot of either gun |
+| Hits that destroy an enemy's pair | 0 for both guns: never (`wormholes.sniper_hits_to_destroy`, `wormholes.rifle_hits_to_destroy`) |
+| Hits that destroy an enemy's lone mouth | never |
 | Red flash after each hit | 0.25 s (`wormholes.hit_flash_s`) |
 
 ## Weapons
@@ -478,8 +579,6 @@ time to kill.
 ## Open questions
 
 - **Consoles:** whether a hit that doesn't eliminate the player interrupts a deactivation.
-- **Respawning:** whether the respawn time should grow as a round goes on. An earlier design had
-  20 s at the start of a round plus 10 s every 5 minutes.
 - **Sprinting:** whether a kill should refill the killer's energy, as an earlier design had.
 - **Hyperbolic levels:** the topology of Dust.
 - **Warp objects:** how many black holes and wormholes each level but Lunar Surface has, and where.

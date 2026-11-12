@@ -19,16 +19,29 @@ make join-game SERVER=127.0.0.1
 - Playing is only on a game server: `make serve-game` runs one (Lunar Surface by default), and every player joins
   it with `make join-game` (`SERVER=127.0.0.1` on the same computer, or the address the server prints). There is no
   local demo or host-and-play command; without a server, only the tools below run.
-- Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
-  `Esc` or `N` goes back to the game). The window's close button quits at once.
+- Started without flags (a double-click on the app, or `cargo run --release`), the game opens on a main menu:
+  the online games (from the app's `online_games.txt`), a server by the address the player types (`IP:port`,
+  remembered for next time), or a game on this Wi-Fi, on either map. It runs
+  the chosen game as itself with that game's flags, logs it to `~/Library/Logs/Warped/`, and shows a pop-up if
+  it fails. An online game asks once for the game's password and keeps it in
+  `~/Library/Application Support/Warped/game_password`; a server that refuses it makes the game ask again.
+- Click to capture the mouse. `Esc` opens the menu and frees the mouse, and `Esc` again closes it and captures the
+  mouse; the menu's QUIT page leaves the game with `Return` or `Y`. The window's close button quits at once.
+- Hold `Tab` to see the whole map over the game (the menu's MAP page, below): the game goes on and you can still move
+  and look; let go to hide it (W-140, hold Tab for the map, Esc for the menu).
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
-  choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
-  (`--player-settings`) to `make join-game`.
-- `Tab` opens the menu on its SCORES page (below); `E` turns to the settings page, of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
+  choices (mouse speed, head bob, motion blur, how a hit looks, and `visuals`: the picture's brightness, contrast,
+  saturation and gamma, each 1 for none, applied to the finished picture only, W-51, basic visuals); a copy is
+  passed with `PLAYER_SETTINGS=mine.yaml` (`--player-settings`) to `make join-game`.
+- `Esc` opens the menu on its SCORES page (below); `E` or the right arrow turns to the settings page, of those choices: `Down` goes into its rows and `Up`/`Down` pick one (past the first or last row, back to the pages' names), `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
-  (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
+  (or the `--player-settings` file), which later games load by themselves. `Esc` closes it. Your player
   stands still while it is open, but the game goes on.
-- `Q` and `E` turn the menu's pages: SCORES, SETTINGS (above), MAP and CREDITS. MAP is the whole map from above with you on it as a disk in
+- The menu's name is on its first line, with a `?` at the right whose help (the menu's keys) shows while the mouse
+  is over it, and the pages' names are on the line under it, the open one in brackets. The left and right arrows
+  (while no row of the settings page is chosen), `Q` and `E`, or a click on a page's name turn the menu's pages:
+  SCORES, SETTINGS (above), MAP, CREDITS and QUIT (`Return` or `Y` leaves the
+  game; in the one-window app, back to its map menu). MAP is the whole map from above with you on it as a disk in
   your team's colour pointing the way you face: the ground's relief, structures brighter the higher they are,
   consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
   zones' edges (dashed) and the playable boundary. The map is drawn in its Fermi coordinates
@@ -117,7 +130,7 @@ make join-game SERVER=127.0.0.1
   structures away from the middle line spread apart along it. At 2, surfaces more than about 90 m from the middle
   speckle. The house demo keeps its own curvature (D100).
 - `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
-  on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
+  on frames that take more than about 10 ms of GPU time (close to a mouth, or in a busy game), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
 - The HUD shows the frame rate, the render time and, with Metal, the GPU's own time and the render scale; with Metal
   it is in the window's title.
@@ -159,6 +172,23 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   and `--view` (1 is full strength, with one console left; W-68, `black_hole_growth.rs`); otherwise it follows the
   consoles. Time runs slower near the black hole (W-107, D108): the HUD shows how fast yours runs.
 
+## Mac app
+
+```bash
+make package-mac-app
+make package-mac-app ONLINE_GAMES=online_games.txt
+```
+
+- `make package-mac-app` builds `.build/Warped/Warped.app` (the game with its maps built in, the icon from
+  [`app/app_icon.png`](app/app_icon.png), [`app/Info.plist`](app/Info.plist) with macOS 13 and the Local Network
+  note), signs it ad hoc and zips it with [`app/how_to_open.txt`](app/how_to_open.txt) into `.build/Warped.zip`.
+- The app carries the fps_demo's surface textures in `Contents/Resources/assets/`, and `fps_demo_assets.rs`
+  (`../warped_shared_rust/`) reads them from there when the game runs from the app. The revolver is built into the
+  program (`viewmodel.rs`), not shipped as files, as its Sketchfab Standard license asks; the menu's CREDITS page
+  credits its author.
+- `ONLINE_GAMES=` copies an `online_games.txt` into the app for its main menu (`main_menu.rs` says the format); the
+  cloud deploy writes it.
+
 ## Play together
 
 Everyone on the same network can play in one game. A game server, without a window, keeps the players in step;
@@ -175,26 +205,43 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
-  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature); it sends them to every
-  player who joins.
+  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature, and Lunar Surface's own
+  `surface.gravity_per_jump_gravity`: the ground's pull times what the jump settings give, the jump's speed kept,
+  W-158); it sends them to every player who joins.
+- `GAME_PASSWORD_FILE=password.txt` (`--game-password-file`) gives a server a password, and players the same file:
+  the server challenges each join and admits only players who prove they know it, without the password crossing
+  the network, and refuses a game of another version with a clear message. Without it anyone can join, which
+  suits a local network.
+- `make build-server-bundle` builds the server alone (`wormholes_server`, from `src/bin/`) for x86-64 Linux into
+  `.build/server_bundle.tar.gz`, one static program with the maps built in, to upload to a server in the cloud. It
+  takes `--port`, `--map`, `--server-settings` and `--game-password-file` like `--serve`, and starts a new game
+  10 s after a team wins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
   (the Terminal, say) when asked; without it, other computers can't reach the game and `auto` finds nothing.
+- `WARPED_LOOPBACK_ONLY=1` keeps a server, window or bot, and every program it starts, on this computer: it
+  listens on 127.0.0.1 and sends its announcement there instead of broadcasting it, so macOS never asks for
+  network permission. Every test run uses it (`cargo test` without it); leave it unset to play across computers.
 - Joining opens a lobby with each team's head count; `1` joins blue and `2` joins red (bots join the smaller team).
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
-  view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
+  view darkens and says "YOU DIED" with a countdown and a bar filling over the wait, and they come back at their spawn
+  point after the server's respawn wait: 20 s, 10 s more for every 5 minutes the level has gone on (`respawn` in
+  `server_settings.yaml`, W-142 (growing respawn time)).
 - On Lunar Surface each team has three pylons, each a beacon that is its own console, and a team wins by turning off all
-  three of the other team's beacons (hold `E` on one for 10 s within 3 m). A beacon glows and beams its team colour up
-  while it is on.
+  three of the other team's beacons (hold `E` on one for 10 s within 3 m). The server checks that too: it takes a hold
+  only from a player whose view meets the beacon within 3 m, with half a meter of slack (`console_reach.rs`), so no
+  window turns a beacon off from afar. A beacon glows and beams its team colour up while it is on.
   Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
   just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
   go dark when off. After a win, `Enter` in the server's terminal starts a new game.
-- Up to 8 players. The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
-- `--join <address> --bot --exit-after-s <seconds>` plays by itself without a window (it walks until another player
-  is within 12 blocks, then turns toward them and fires), to test a game; it saves its view at each hit under
-  `.artifacts/bot/<run_id>/`.
+- Up to 12 players (`warped_shared::level_net::MAX_PLAYER_COUNT`, the same in every level). The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
+- `--join <address> --bot --exit-after-s <seconds>` plays by itself without a window (it walks to the nearest
+  enemy and fires once it sees them; it never hurts a teammate, and steps out from behind one its laser meets), to
+  test a game or to play against. With
+  `--bot-hit-pictures` it also saves its view at each hit under `.artifacts/bot/<run_id>/`; drawing those takes GPU
+  and CPU time from the players on the same computer, so it is off by default (D120).
 
 ## Measure
 
@@ -228,12 +275,32 @@ make run-autopilot
   `--route warp-tour` circles the black hole and both wormhole mouths the same way, from 80% of each one's reach to
   10% (19 m to 2.4 m from the black hole, 12 m to 1.5 m from a mouth) and back, over 600 frames each.
 
+## In the one-window app
+
+W-141 (one window for the whole game): this crate is a library, `lunar_surface_level` (`src/lib.rs`), and `src/main.rs` only runs
+it. The one-window app ([`../warped_mvp_rust/`](../warped_mvp_rust/)) calls `lunar_surface_level::play_level`
+(`warped_shared::app::play_level_fn_t`) with its window and Metal device, the level server's address, the team
+(`--team`) and the player's settings file. Lunar Surface then plays in that window until the match's round ends
+(`RoundOver`), the player confirms the menu's QUIT page (`LeaveLevel`) or closes the window (`CloseWindow`), and frees
+its renderer's GPU resources before it returns. Run alone, the program plays through the same frame loop
+(`warped_shared::level_loop`) in a window of its own (`warped_shared::metal_window`), exactly as before.
+`RUN_GPU_TESTS=1 cargo test --release --test in_one_window` checks the entry point in an offscreen window (it uses the
+GPU).
+
 ## How it works
 
+- [`../warped_shared_rust/`](../warped_shared_rust/README.md): the code every Rust level shares, used as a
+  library: `geometry.rs`, the gun held in hand (`viewmodel.rs`), the HUD's bars and overlay types, the maps'
+  models and the robot body, the smooth shapes, the key bindings, and finding assets.
+- **Gravity toward warps** (W-144, `gravity` in the server settings, the shared rule in
+  [`../warped_shared_rust/src/gravity.rs`](../warped_shared_rust/src/gravity.rs)): `VoxelPlayer::step` adds the pull
+  of every black hole and wormhole mouth, the map's and the linked thrown ones (`VoxelWorld::get_warp_pull_m_per_s`,
+  along the geodesic to each, across the body's up), to the walk: faster toward a warp, slower away, a slow drift
+  standing still. Bots step by the same rule.
 - `thrown_wormholes.rs`: each player's purple and green mouths: the lobbed throw, where a mouth hovers once down,
   and which colour is next. Each map adds the linked pairs as mouths of its own (after the map's), and
   `net.rs` sends every player's mouths in each snapshot.
-- `geometry.rs`: Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
+- `geometry.rs` (shared): Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
 - `world.rs`: the scene: hyperbolic boxes grouped in clusters, and the wormholes' mouths with their gluing maps.
 - `scene_data.rs`: each frame, packs the scene into rows of float 4-vectors, one row in the camera's coordinates and
   one per mouth, so a ray that goes through a mouth stays in small coordinates (the same layout as the WebGL demo's
@@ -258,7 +325,8 @@ make run-autopilot
   skips blocks a bent step can't reach.
 - `dust.rs`: the dust and mist a shot throws up where it hits the ground, which `render_voxel.metal` draws in the
   world (D81).
-- `main.rs`: the command line, the SDL3 window and HUD, and the benchmark and autopilot runs.
+- `lib.rs`: the command line, the level's session and its frame loop (`play_level` for the one-window app),
+  the HUD, and the benchmark and autopilot runs; `main.rs` runs it alone.
 
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the
 distance itself, which saves most of the `asinh` calls that dominated the first CPU profile. And a ray only checks
@@ -367,6 +435,13 @@ with adaptive sampling (and tracing every pixel):
 | red pylon | 5.8 (6.1) | ridge | 6.5 (8.3) |
 | overlook | 6.1 (5.2) | habitat row | 6.2 (6.5) |
 | laser into the wormhole | 18.7 (32.6) | | |
+
+Those times predate the bigger map, its models and the 1.5× curvature: on 2026-11-08 the same views took 13 to 109
+ms at 2560×1440. D110 (W-131, Lunar wormhole_exit slow at full size) baked the ground and culled what each ray tests,
+with the same pictures: measured under the agents' exclusive GPU lock (median GPU ms, best of 3 alternating rounds of
+20 frames, Apple M3 Pro, macOS 15.7.3, rustc 1.98.1), 19 of the 21 views now take 8 to 16.5 ms at 2560×1440 (before:
+13 to 42), with p99 within 0.4 ms of the median; `laser_into_wormhole` takes 17.5 (40.7) and `wormhole_exit` 49.5
+(109.0). At 3440×1440, 12 views are under 16.7 ms; the rest take 16.8 to 22 ms and `wormhole_exit` 59.
 
 In a full-screen window (2560×1336, automatic scale, `--view`), every view runs at 72 fps or more, all at full
 resolution but the wormhole exit, at render scales 0.96 to 0.98: blue spawn 181 fps, middle 166, Einstein ring 152,

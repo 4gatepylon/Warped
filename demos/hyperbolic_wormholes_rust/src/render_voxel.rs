@@ -2,12 +2,16 @@
 //! `VoxelWorld` (with any avatars), the laser beams and the dust of shots into the ground
 //! (`dust.rs`) into buffers each frame and traces them into the render texture that
 //! `render_metal.rs` upscales and presents, every pixel or with the house's adaptive sampling
-//! (`render_metal.rs`'s `encode_adaptive_sampling`).
+//! (`render_metal.rs`'s `encode_adaptive_sampling`), sharp in the middle of the image and softer
+//! toward its edges (`SharpCentre`, W-136, sharp centre, soft edges), and in the player's visuals
+//! (`VoxelFrame::set_visuals`, W-51, basic visuals).
 //!
-//! Interface: `VoxelUniforms`, `VoxelFrame::Build`, `VoxelGpu`.
+//! Interface: `VoxelUniforms`, `SharpCentre`, `ALL_SHARP`, `DEFAULT_SHARP_CENTRE`,
+//! `VoxelFrame::Build`, `VoxelFrame::set_sharp_centre`, `VoxelFrame::set_visuals`, `VoxelGpu`.
 //!
 //! Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &[], (1280, 800));`
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -17,23 +21,24 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
-    MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLLibrary, MTLPixelFormat, MTLResourceOptions,
-    MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLLibrary, MTLOrigin, MTLPixelFormat,
+    MTLRegion, MTLResourceOptions, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
+    MTLTextureUsage,
 };
 
 use crate::dust::DustCloud;
-use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
+use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, minkowski_dot};
 use crate::mesh::MeshModel;
 use crate::render_mesh::{
-    FIRST_AVATAR_ROOT_CODE, GpuNode, GpuTriangle, MeshGpu, NO_MESH, get_first_materials,
-    get_mesh_roots, pack_avatar_meshes,
+    FIRST_AVATAR_ROOT_CODE, MeshGpu, NO_MESH, get_avatar_bytes, get_avatar_roots,
+    get_first_materials, get_mesh_roots, write_avatar_buffers,
 };
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
 };
 use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
-use crate::terrain::MoundGrid;
+use crate::terrain::{HeightGrid, get_fermi_coordinates};
 use crate::thrown_wormholes::{GREEN_COLOR, HIT_FLASH_COLOR, PURPLE_COLOR, WormholeColor};
 use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
@@ -42,6 +47,8 @@ use crate::voxel_world::{
     BeamSegment, MAX_MATERIAL_COUNT, VoxelWarp, VoxelWorld, clip_beam_to_map,
 };
 use crate::zone_walls::{GpuZoneWalls, MAX_ZONE_WALL_COUNT};
+use warped_shared::boundary_planes::{BOUNDARY_PLANES_METAL, get_shimmer_clock_s};
+use warped_shared::visuals::{GpuPlayerVisuals, PLAYER_VISUALS_METAL};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -61,8 +68,15 @@ const MEANS_BUFFER_INDEX: usize = 27;
 const DUST_BUFFER_INDICES: [usize; 2] = [29, 30];
 const AVATAR_BUFFER_INDICES: [usize; 2] = [8, 10];
 const HAND_LIGHT_BUFFER_INDEX: usize = 28;
+const VISUALS_BUFFER_INDEX: usize = 15;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
+const TERRAIN_HEIGHTS_TEXTURE_INDEX: usize = 16;
+const TERRAIN_SLOPES_TEXTURE_INDEX: usize = 17;
+const TERRAIN_SLOPE_BOUNDS_TEXTURE_INDEX: usize = 18;
+const TERRAIN_CEILING_CELLS: usize = 16;
+const LIGHT_CUTOFF_FRAC: f64 = 3.0;
+const BYTES_PER_FLOAT: usize = 4;
 const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
 const MILKY_WAY_TEXTURE_INDEX: usize = 3;
 const MILKY_WAY_TEXTURE_PX: (usize, usize) = (4096, 1024);
@@ -78,6 +92,9 @@ const RIFLE_BEAM_CODE: u32 = 2;
 const BEACON_BEAM_CODE: u32 = 4;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const MS_PER_S: f64 = 1000.0;
+const GROUP_CELL_M: f64 = 12.0;
+const GROUP_MARGIN_M: f64 = 0.05;
+const SUPER_GROUP_CELLS: i64 = 4;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -122,15 +139,66 @@ pub struct VoxelUniforms {
     pub terrain: [f32; 4],
     pub relief: [f32; 4],
     pub mound_grid: [f32; 4],
+    pub height_grid: [f32; 4],
     pub flashlight_position: [f32; 4],
     pub flashlight_direction: [f32; 4],
     pub flashlight: [f32; 4],
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
+    pub structure_groups: [i32; 4],
     pub beam_speckle: [f32; 4],
     pub zone_walls: GpuZoneWalls,
     pub milky_way_pole: [f32; 4],
     pub milky_way_core: [f32; 4],
+    pub fovea: [f32; 4],
+}
+
+/// `SharpCentre` is how much of the image is drawn sharp, W-136 (sharp centre, soft edges): pixels
+/// within `sharp_width_frac` of the image's width across (a circle around its centre) at full
+/// resolution, those within `half_width_frac` at half resolution each way (the even pixels shaded,
+/// the rest blended from them) and the rest at a quarter (every fourth pixel each way shaded).
+/// `f64::INFINITY` keeps every pixel sharp.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SharpCentre {
+    pub sharp_width_frac: f64,
+    pub half_width_frac: f64,
+}
+
+/// `ALL_SHARP` draws every pixel at full resolution, as before W-136 (sharp centre, soft edges);
+/// every frame starts with it, so pictures such as a map's stay sharp.
+pub const ALL_SHARP: SharpCentre = SharpCentre {
+    sharp_width_frac: f64::INFINITY,
+    half_width_frac: f64::INFINITY,
+};
+
+/// `DEFAULT_SHARP_CENTRE` is what the window and the bench views draw unless told otherwise
+/// (option E of W-136, sharp centre, soft edges): the middle half of the width sharp, half
+/// resolution out to three quarters of it, and a quarter beyond, all smoothed (W-138, no aliasing).
+pub const DEFAULT_SHARP_CENTRE: SharpCentre = SharpCentre {
+    sharp_width_frac: 0.5,
+    half_width_frac: 0.75,
+};
+
+impl SharpCentre {
+    /// `get_fovea` gives the shader's `fovea` for an image `size_px` wide and high: the sharp and
+    /// half-resolution radii in pixels.
+    ///
+    /// Example: `let fovea: [f32; 4] = DEFAULT_SHARP_CENTRE.get_fovea((2560, 1440));`
+    fn get_fovea(&self, size_px: (usize, usize)) -> [f32; 4] {
+        assert!(
+            self.sharp_width_frac > 0.0 && self.half_width_frac >= self.sharp_width_frac,
+            "SharpCentre: the sharp width ({}) must be positive and at most the half-resolution width ({})",
+            self.sharp_width_frac,
+            self.half_width_frac
+        );
+        let half_width_px: f64 = 0.5 * size_px.0 as f64;
+        [
+            (self.sharp_width_frac * half_width_px) as f32,
+            (self.half_width_frac * half_width_px) as f32,
+            0.0,
+            0.0,
+        ]
+    }
 }
 
 const _: () = assert!(
@@ -182,15 +250,34 @@ struct GpuWarp {
 struct GpuLight {
     position: [f32; 4],
     color_radius: [f32; 4],
+    cutoff: [f32; 4],
 }
 
-/// `GpuBeam` is the shader's `BeamSegment`.
+/// `GpuBeam` is the shader's `BeamSegment`: its ends, its midpoint and its length, glow and code.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct GpuBeam {
     a: [f32; 4],
     b: [f32; 4],
+    mid: [f32; 4],
     info: [f32; 4],
+}
+
+impl GpuBeam {
+    /// `FromSegment` packs a beam segment with the rest of its `info` (speckle share, glow, code)
+    /// after its length, and its midpoint, which the shader's `scan_beams` tests chords against.
+    ///
+    /// Example: `let beam = GpuBeam::FromSegment(&segment, [0.0, 1.0, 0.0]);`
+    #[allow(non_snake_case)]
+    fn FromSegment(segment: &BeamSegment, info: [f32; 3]) -> GpuBeam {
+        let half_s: f64 = 0.5 * segment.length;
+        GpuBeam {
+            a: to_f32(segment.a),
+            b: to_f32(segment.b),
+            mid: to_f32(half_s.cosh() * segment.a + half_s.sinh() * segment.b),
+            info: [segment.length as f32, info[0], info[1], info[2]],
+        }
+    }
 }
 
 /// `GpuDustBurst` is the shader's `DustBurst`.
@@ -242,12 +329,14 @@ pub struct VoxelFrame {
     beams: Vec<GpuBeam>,
     clearance: Arc<ClearanceGrids>,
     surfaces: Vec<[f32; 4]>,
-    mound_grid: Option<Arc<MoundGrid>>,
+    mound_grid: Option<Arc<HeightGrid>>,
+    height_grid: Option<Arc<HeightGrid>>,
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
     meshes: Arc<Vec<MeshModel>>,
-    avatar_triangles: Vec<GpuTriangle>,
-    avatar_nodes: Vec<GpuNode>,
+    avatar_meshes: Vec<Arc<MeshModel>>,
+    avatar_first_material: i32,
+    visuals: GpuPlayerVisuals,
 }
 
 /// `get_beacon_beams` gives each beacon's beam: from the top of the model of each structure drawn
@@ -284,11 +373,7 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
         beams.extend(
             clip_beam_to_map(&[segment], world.r)
                 .into_iter()
-                .map(|s| GpuBeam {
-                    a: to_f32(s.a),
-                    b: to_f32(s.b),
-                    info: [s.length as f32, 0.0, BEAM_BRIGHTNESS * on_frac, code as f32],
-                }),
+                .map(|s| GpuBeam::FromSegment(&s, [0.0, BEAM_BRIGHTNESS * on_frac, code as f32])),
         );
     }
     beams
@@ -297,8 +382,107 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
 ///
 /// Example: `let grid = get_mound_grid(&world.terrain);`
-fn get_mound_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<MoundGrid>> {
+fn get_mound_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<HeightGrid>> {
     terrain.as_ref().and_then(|t| t.mound_grid.as_ref())
+}
+
+/// `get_height_grid` gives a terrain's baked height grid, if it has one.
+///
+/// Example: `let grid = get_height_grid(&world.terrain);`
+fn get_height_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<HeightGrid>> {
+    terrain.as_ref().and_then(|t| t.height_grid.as_ref())
+}
+
+/// `make_bounding_sphere` gives the centre and radius (curvature units) of a sphere around
+/// spheres given by their centres and radii, grown by `GROUP_MARGIN_M`.
+///
+/// Example: `let (centre, radius) = make_bounding_sphere(&spheres, world.r);`
+fn make_bounding_sphere(spheres: &[(DVec4, f64)], r: f64) -> (DVec4, f64) {
+    let sum: DVec4 = spheres.iter().map(|&(centre, _)| centre).sum();
+    let centre: DVec4 = sum / (-minkowski_dot(sum, sum)).sqrt();
+    let radius: f64 = spheres
+        .iter()
+        .map(|&(member, member_radius)| get_distance(centre, member) + member_radius)
+        .fold(0.0, f64::max)
+        + GROUP_MARGIN_M / r;
+    (centre, radius)
+}
+
+/// `pack_structure_groups` appends to `lists` the world's static structures grouped by the
+/// `GROUP_CELL_M` cell of Fermi (u, v) their centre is in, the groups ordered by the
+/// `SUPER_GROUP_CELLS` × `SUPER_GROUP_CELLS` block of cells they lie in: each group's header (its
+/// centre, then the cosh of a radius that holds its members' bounding spheres, the index in
+/// `lists` of its first member and how many it has), then each block's header (its centre, then
+/// the cosh of a radius that holds its groups' spheres, its first group's number and how many it
+/// has), then each member's index. It gives what the shader's `trace_structures` reads: the group
+/// count, the first group header's index, the static count and the block count (whose headers
+/// follow the groups').
+///
+/// Example: `let groups = pack_structure_groups(&world, &mut lists);`
+fn pack_structure_groups(world: &VoxelWorld, lists: &mut Vec<[f32; 4]>) -> [i32; 4] {
+    let mut cells: BTreeMap<(i64, i64, i64, i64), Vec<usize>> = BTreeMap::new();
+    for (k, st) in world.structures[..world.static_structure_count]
+        .iter()
+        .enumerate()
+    {
+        let [u_m, v_m, _] = get_fermi_coordinates(st.centre, world.r);
+        let i: i64 = (u_m / GROUP_CELL_M).floor() as i64;
+        let j: i64 = (v_m / GROUP_CELL_M).floor() as i64;
+        let cell = (
+            i.div_euclid(SUPER_GROUP_CELLS),
+            j.div_euclid(SUPER_GROUP_CELLS),
+            i,
+            j,
+        );
+        cells.entry(cell).or_default().push(k);
+    }
+    let first_header: usize = lists.len();
+    let mut group_spheres: Vec<(DVec4, f64)> = Vec::new();
+    let mut blocks: BTreeMap<(i64, i64), Vec<usize>> = BTreeMap::new();
+    for (group_number, (&(block_i, block_j, _, _), group)) in cells.iter().enumerate() {
+        let spheres: Vec<(DVec4, f64)> = group
+            .iter()
+            .map(|&k| (world.structures[k].centre, world.structures[k].radius))
+            .collect();
+        group_spheres.push(make_bounding_sphere(&spheres, world.r));
+        blocks
+            .entry((block_i, block_j))
+            .or_default()
+            .push(group_number);
+    }
+    let mut first_member: usize = first_header + 2 * (cells.len() + blocks.len());
+    let mut headers: Vec<[f32; 4]> = Vec::new();
+    let mut members: Vec<[f32; 4]> = Vec::new();
+    for (group, &(centre, radius)) in cells.values().zip(&group_spheres) {
+        headers.push(to_f32(centre));
+        headers.push([
+            radius.cosh() as f32,
+            first_member as f32,
+            group.len() as f32,
+            0.0,
+        ]);
+        members.extend(group.iter().map(|&k| [k as f32, 0.0, 0.0, 0.0]));
+        first_member += group.len();
+    }
+    for block in blocks.values() {
+        let spheres: Vec<(DVec4, f64)> = block.iter().map(|&g| group_spheres[g]).collect();
+        let (centre, radius) = make_bounding_sphere(&spheres, world.r);
+        headers.push(to_f32(centre));
+        headers.push([
+            radius.cosh() as f32,
+            block[0] as f32,
+            block.len() as f32,
+            0.0,
+        ]);
+    }
+    lists.extend(headers);
+    lists.extend(members);
+    [
+        cells.len() as i32,
+        first_header as i32,
+        world.static_structure_count as i32,
+        blocks.len() as i32,
+    ]
 }
 
 /// `to_f32` converts a double 4-vector to floats.
@@ -409,8 +593,7 @@ impl VoxelFrame {
         let r: f64 = world.r;
         let mesh_roots: Vec<i32> = get_mesh_roots(&world.meshes);
         let body_first_material: i32 = get_first_materials(&world.meshes)[world.body_mesh];
-        let (avatar_triangles, avatar_nodes, avatar_roots) =
-            pack_avatar_meshes(&world.avatar_meshes, body_first_material);
+        let avatar_roots: Vec<i32> = get_avatar_roots(&world.avatar_meshes);
         let structures: Vec<GpuStructure> = world
             .structures
             .iter()
@@ -487,12 +670,19 @@ impl VoxelFrame {
                 }
             })
             .collect();
+        let structure_groups: [i32; 4] = pack_structure_groups(world, &mut lists);
         let lights: Vec<GpuLight> = world
             .lights
             .iter()
             .map(|&(x, color, radius_m)| GpuLight {
                 position: to_f32(x),
                 color_radius: [color[0], color[1], color[2], radius_m as f32],
+                cutoff: [
+                    (LIGHT_CUTOFF_FRAC * radius_m / r).cosh() as f32,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
             })
             .collect();
         let mut gpu_beams: Vec<GpuBeam> = beams
@@ -501,21 +691,17 @@ impl VoxelFrame {
                 let code: u32 = beam.team + RIFLE_BEAM_CODE * u32::from(beam.is_rifle);
                 clip_beam_to_map(&beam.segments, world.r)
                     .into_iter()
-                    .map(move |s| GpuBeam {
-                        a: to_f32(s.a),
-                        b: to_f32(s.b),
-                        info: [
-                            s.length as f32,
-                            beam.speckle_frac as f32,
-                            BEAM_BRIGHTNESS,
-                            code as f32,
-                        ],
+                    .map(move |s| {
+                        GpuBeam::FromSegment(
+                            &s,
+                            [beam.speckle_frac as f32, BEAM_BRIGHTNESS, code as f32],
+                        )
                     })
             })
             .collect();
         gpu_beams.extend(get_beacon_beams(world));
         let (dust_bursts, dust_particles) = pack_dust(dust);
-        let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
+        let mut zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
             GpuZoneWalls {
                 walls: [[0.0; 4]; MAX_ZONE_WALL_COUNT],
                 look: [0.0; 4],
@@ -524,6 +710,7 @@ impl VoxelFrame {
             },
             |walls| walls.to_gpu(r),
         );
+        zone_walls.look[3] = get_shimmer_clock_s(world.sky_time_s);
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
         let (planet, e1, e2) = match world.planet {
             Some((d, radius_rad)) => {
@@ -593,6 +780,9 @@ impl VoxelFrame {
                 ]
                 .map(|x| x as f32)
             }),
+            height_grid: get_height_grid(&world.terrain).map_or([0.0; 4], |g| {
+                [g.origin_m[0], g.origin_m[1], 1.0 / g.cell_m, 1.0].map(|x| x as f32)
+            }),
             flashlight_position: world
                 .flashlight_eye
                 .map_or([0.0, 0.0, 0.0, 1.0], |eye| to_f32(eye.col(AXIS_W))),
@@ -610,6 +800,7 @@ impl VoxelFrame {
             }),
             spaceships: get_spaceships(world.sky_time_s),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
+            structure_groups,
             beam_speckle: [
                 ((world.sky_time_s * MS_PER_S) as u64 % BEAM_SEED_PERIOD_MS) as f32,
                 world.settings.beam_speckle.black_frac as f32,
@@ -625,6 +816,7 @@ impl VoxelFrame {
             milky_way_core: world
                 .milky_way
                 .map_or([0.0; 4], |(_, core)| core.as_vec3().extend(0.0).to_array()),
+            fovea: ALL_SHARP.get_fovea((size_px.0 as usize, size_px.1 as usize)),
         };
         assert_eq!(
             world.palette.len(),
@@ -661,11 +853,13 @@ impl VoxelFrame {
             clearance: Arc::clone(&world.clearance),
             surfaces: world.surfaces.clone(),
             mound_grid: get_mound_grid(&world.terrain).cloned(),
+            height_grid: get_height_grid(&world.terrain).cloned(),
             dust_bursts,
             dust_particles,
             meshes: Arc::clone(&world.meshes),
-            avatar_triangles,
-            avatar_nodes,
+            avatar_meshes: world.avatar_meshes.clone(),
+            avatar_first_material: body_first_material,
+            visuals: GpuPlayerVisuals::IDENTITY,
         }
     }
 
@@ -678,6 +872,22 @@ impl VoxelFrame {
             self.uniforms.height_px as usize,
         )
     }
+
+    /// `set_sharp_centre` sets how much of the frame is drawn sharp (W-136, sharp centre, soft
+    /// edges); a frame starts with `ALL_SHARP`.
+    ///
+    /// Example: `frame.set_sharp_centre(DEFAULT_SHARP_CENTRE);`
+    pub fn set_sharp_centre(&mut self, sharp_centre: SharpCentre) {
+        self.uniforms.fovea = sharp_centre.get_fovea(self.get_render_size());
+    }
+
+    /// `set_visuals` sets the player's brightness, contrast, saturation and gamma, which the tone
+    /// map applies to the finished picture (W-51, basic visuals); a frame starts with the identity.
+    ///
+    /// Example: `frame.set_visuals(mine.visuals.to_gpu());`
+    pub fn set_visuals(&mut self, visuals: GpuPlayerVisuals) {
+        self.visuals = visuals;
+    }
 }
 
 /// `GrowableBuffer` is a shared GPU buffer rewritten each frame, grown when its contents outgrow it.
@@ -686,15 +896,16 @@ struct GrowableBuffer {
 }
 
 impl GrowableBuffer {
-    /// `write` copies `bytes` into the buffer (making a bigger one first if needed) and returns it.
+    /// `reserve` returns the buffer with room for `byte_count` bytes (making a bigger one first
+    /// if needed), whatever it holds.
     ///
-    /// Example: `let buffer = self.voxels.write(device, &frame.voxels)?;`
-    fn write(
+    /// Example: `let buffer = self.voxels.reserve(device, byte_count)?;`
+    fn reserve(
         &mut self,
         device: &ProtocolObject<dyn MTLDevice>,
-        bytes: &[u8],
+        byte_count: usize,
     ) -> Result<&ProtocolObject<dyn MTLBuffer>> {
-        let needed: usize = bytes.len().max(MIN_BUFFER_BYTES);
+        let needed: usize = byte_count.max(MIN_BUFFER_BYTES);
         if self.buffer.as_ref().is_none_or(|b| b.length() < needed) {
             self.buffer = Some(
                 device
@@ -705,8 +916,18 @@ impl GrowableBuffer {
                     .ok_or("Metal: no memory for a voxel buffer")?,
             );
         }
-        let buffer: &ProtocolObject<dyn MTLBuffer> =
-            self.buffer.as_ref().expect("the buffer was just made");
+        Ok(self.buffer.as_ref().expect("the buffer was just made"))
+    }
+
+    /// `write` copies `bytes` into the buffer (making a bigger one first if needed) and returns it.
+    ///
+    /// Example: `let buffer = self.voxels.write(device, &frame.voxels)?;`
+    fn write(
+        &mut self,
+        device: &ProtocolObject<dyn MTLDevice>,
+        bytes: &[u8],
+    ) -> Result<&ProtocolObject<dyn MTLBuffer>> {
+        let buffer: &ProtocolObject<dyn MTLBuffer> = self.reserve(device, bytes.len())?;
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A WRITE PAST THE BUFFER WILL HAPPEN
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -732,10 +953,11 @@ fn as_bytes<T: Copy>(values: &[T]) -> &[u8] {
 /// `Texture` is a Metal texture.
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 
-/// `PostTextures` is the HDR image the rays are traced into, and its bloom chain (each level half
-/// the last).
+/// `PostTextures` is the HDR image the rays are traced into, its bloom chain (each level half
+/// the last), and the tone-mapped image `fxaa_voxel` anti-aliases into the target.
 struct PostTextures {
     hdr: Texture,
+    ldr: Texture,
     bloom: Vec<Texture>,
 }
 
@@ -760,6 +982,168 @@ fn make_hdr_texture(
     Ok(device
         .newTextureWithDescriptor(&descriptor)
         .ok_or("Metal: no memory for the HDR texture")?)
+}
+
+/// `make_library` compiles `render_voxel.metal` on `device`, with the sizes and colours this
+/// file and its neighbours set filled in.
+///
+/// Example: `let library = make_library(&device)?;`
+fn make_library(
+    device: &ProtocolObject<dyn MTLDevice>,
+) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
+    let source: String =
+        format!("{BOUNDARY_PLANES_METAL}\n{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}")
+            .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
+            .replace(
+                "__BYTES_PER_RAY_END__",
+                &VOXEL_BYTES_PER_RAY_END.to_string(),
+            )
+            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
+            .replace(
+                "__TERRAIN_CEILING_CELLS__",
+                &TERRAIN_CEILING_CELLS.to_string(),
+            )
+            .replace("__LIGHT_CUTOFF_FRAC__", &format!("{LIGHT_CUTOFF_FRAC:?}"))
+            .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+            .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
+            .replace(
+                "__BYTES_PER_VOXEL_UNIFORMS__",
+                &std::mem::size_of::<VoxelUniforms>().to_string(),
+            )
+            .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
+            .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
+            .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR));
+    Ok(device
+        .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
+        .map_err(|error| {
+            format!(
+                "Metal: the voxel shader didn't compile: {}",
+                error.localizedDescription()
+            )
+        })?)
+}
+
+/// `make_height_texture` puts a baked height grid in a one-channel float texture, a texel per
+/// point (u along x), which the shader reads texel by texel; without a grid, one texel of 0.
+///
+/// Example: `let texture = make_height_texture(device, Some(&grid))?;`
+fn make_height_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    grid: Option<&HeightGrid>,
+) -> Result<Texture> {
+    let (size, heights): ([usize; 2], &[f32]) =
+        grid.map_or(([1, 1], &NO_MOUNDS[..]), |g| (g.size, &g.heights[..]));
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+    let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::R32Float,
+            size[0],
+            size[1],
+            false,
+        )
+    };
+    descriptor.setUsage(MTLTextureUsage::ShaderRead);
+    descriptor.setStorageMode(MTLStorageMode::Shared);
+    let texture: Texture = device
+        .newTextureWithDescriptor(&descriptor)
+        .ok_or("Metal: no memory for the terrain's heights")?;
+    let region: MTLRegion = MTLRegion {
+        origin: MTLOrigin { x: 0, y: 0, z: 0 },
+        size: MTLSize {
+            width: size[0],
+            height: size[1],
+            depth: 1,
+        },
+    };
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE HEIGHTS WILL HAPPEN
+    unsafe {
+        texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+            region,
+            0,
+            NonNull::new(heights.as_ptr() as *mut std::ffi::c_void).expect("the heights"),
+            size[0] * BYTES_PER_FLOAT,
+        )
+    };
+    Ok(texture)
+}
+
+/// `make_slope_bound_grid` gives, for each block of `TERRAIN_CEILING_CELLS` x
+/// `TERRAIN_CEILING_CELLS` cells of the baked `grid`, a bound on the ground's slope over that block
+/// and the eight around it: the steepest rise between neighbouring baked points there, along u or
+/// v, times the square root of 2 (a bilinear cell's slope in any direction is at most that), on a
+/// grid with the same origin.
+///
+/// Example: `let slopes = make_slope_bound_grid(&grid);`
+fn make_slope_bound_grid(grid: &HeightGrid) -> HeightGrid {
+    let n: usize = TERRAIN_CEILING_CELLS;
+    let size: [usize; 2] = [0, 1].map(|a| (grid.size[a] - 1).div_ceil(n));
+    let at = |i: usize, j: usize| grid.heights[i + grid.size[0] * j];
+    let block_slope = |bi: usize, bj: usize| -> f32 {
+        let mut steepest: f32 = 0.0;
+        let (i_end, j_end) = (
+            ((bi + 1) * n).min(grid.size[0] - 1),
+            ((bj + 1) * n).min(grid.size[1] - 1),
+        );
+        for j in bj * n..=j_end {
+            for i in bi * n..=i_end {
+                if i < i_end {
+                    steepest = steepest.max((at(i + 1, j) - at(i, j)).abs());
+                }
+                if j < j_end {
+                    steepest = steepest.max((at(i, j + 1) - at(i, j)).abs());
+                }
+            }
+        }
+        steepest * std::f32::consts::SQRT_2 / grid.cell_m as f32
+    };
+    let blocks: Vec<f32> = (0..size[1])
+        .flat_map(|j| (0..size[0]).map(move |i| (i, j)))
+        .map(|(i, j)| block_slope(i, j))
+        .collect();
+    let heights: Vec<f32> = (0..size[1])
+        .flat_map(|j| (0..size[0]).map(move |i| (i, j)))
+        .map(|(i, j)| {
+            let mut steepest: f32 = 0.0;
+            for nj in j.saturating_sub(1)..=(j + 1).min(size[1] - 1) {
+                for ni in i.saturating_sub(1)..=(i + 1).min(size[0] - 1) {
+                    steepest = steepest.max(blocks[ni + size[0] * nj]);
+                }
+            }
+            steepest
+        })
+        .collect();
+    HeightGrid {
+        origin_m: grid.origin_m,
+        cell_m: grid.cell_m * n as f64,
+        size,
+        heights,
+    }
+}
+
+/// `make_slope_texture` makes the texture `bake_terrain_slopes` fills with the terrain's slopes
+/// along u and v at each point of a baked height grid (one texel without a grid), which the shader
+/// reads bilinearly.
+///
+/// Example: `let texture = make_slope_texture(device, Some(&grid))?;`
+fn make_slope_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    grid: Option<&HeightGrid>,
+) -> Result<Texture> {
+    let size: [usize; 2] = grid.map_or([1, 1], |g| g.size);
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+    let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::RG16Float,
+            size[0],
+            size[1],
+            false,
+        )
+    };
+    descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite);
+    descriptor.setStorageMode(MTLStorageMode::Private);
+    Ok(device
+        .newTextureWithDescriptor(&descriptor)
+        .ok_or("Metal: no memory for the terrain's slopes")?)
 }
 
 /// `dispatch` runs a kernel over a size, one thread per pixel.
@@ -795,10 +1179,16 @@ pub struct VoxelGpu {
     adaptive: AdaptivePipelines,
     bloom_down: Pipeline,
     tonemap: Pipeline,
+    fxaa: Pipeline,
     bake_milky_way: Pipeline,
+    bake_terrain_slopes: Pipeline,
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
     meshes: Option<(*const Vec<MeshModel>, MeshGpu)>,
+    terrain_heights: (*const HeightGrid, Texture),
+    terrain_slope_bounds: Texture,
+    terrain_slopes: Texture,
+    are_slopes_baked: bool,
     post: Option<PostTextures>,
     milky_way: Texture,
     is_milky_way_baked: bool,
@@ -813,30 +1203,7 @@ impl VoxelGpu {
         device: &ProtocolObject<dyn MTLDevice>,
         textures: SurfaceTextures,
     ) -> Result<VoxelGpu> {
-        let source: String = SHADER_SOURCE
-            .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
-            .replace(
-                "__BYTES_PER_RAY_END__",
-                &VOXEL_BYTES_PER_RAY_END.to_string(),
-            )
-            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
-            .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
-            .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
-            .replace(
-                "__BYTES_PER_VOXEL_UNIFORMS__",
-                &std::mem::size_of::<VoxelUniforms>().to_string(),
-            )
-            .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
-            .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
-            .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR));
-        let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
-            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
-            .map_err(|error| {
-                format!(
-                    "Metal: the voxel shader didn't compile: {}",
-                    error.localizedDescription()
-                )
-            })?;
+        let library: Retained<ProtocolObject<dyn MTLLibrary>> = make_library(device)?;
         Ok(VoxelGpu {
             trace_pixels: make_pipeline(device, &library, KERNEL_NAME)?,
             probe_hand_light: make_pipeline(device, &library, "probe_hand_light")?,
@@ -849,7 +1216,9 @@ impl VoxelGpu {
             adaptive: AdaptivePipelines::FromLibrary(device, &library)?,
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
+            fxaa: make_pipeline(device, &library, "fxaa_voxel")?,
             bake_milky_way: make_pipeline(device, &library, "bake_milky_way")?,
+            bake_terrain_slopes: make_pipeline(device, &library, "bake_terrain_slopes")?,
             buffers: (0..SCENE_BUFFER_COUNT
                 + DUST_BUFFER_INDICES.len()
                 + AVATAR_BUFFER_INDICES.len())
@@ -857,6 +1226,10 @@ impl VoxelGpu {
                 .collect(),
             textures,
             meshes: None,
+            terrain_heights: (std::ptr::null(), make_height_texture(device, None)?),
+            terrain_slope_bounds: make_height_texture(device, None)?,
+            terrain_slopes: make_slope_texture(device, None)?,
+            are_slopes_baked: false,
             post: None,
             milky_way: make_hdr_texture(device, MILKY_WAY_TEXTURE_PX)?,
             is_milky_way_baked: false,
@@ -873,7 +1246,7 @@ impl VoxelGpu {
 
     /// `encode` uploads a frame, probes the light at the eye for the held gun, and traces it into
     /// the HDR texture (with `samples`, by adaptive sampling into those buffers, otherwise one ray
-    /// per pixel), then blooms, grades and tone maps it into `target`. The first call bakes the
+    /// per pixel), then blooms, grades and tone maps it, and anti-aliases it into `target` (FXAA). The first call bakes the
     /// Milky Way into its texture first; later frames only read it.
     ///
     /// Example: `gpu.encode(&device, &encoder, &frame, None, &render_texture)?;`
@@ -933,6 +1306,24 @@ impl VoxelGpu {
             .expect("the meshes were just uploaded")
             .1
             .bind(encoder);
+        let grid: Option<&HeightGrid> = frame.height_grid.as_deref();
+        let grid_key: *const HeightGrid = grid.map_or(std::ptr::null(), std::ptr::from_ref);
+        if self.terrain_heights.0 != grid_key {
+            self.terrain_heights = (grid_key, make_height_texture(device, grid)?);
+            self.terrain_slope_bounds =
+                make_height_texture(device, grid.map(make_slope_bound_grid).as_ref())?;
+            self.terrain_slopes = make_slope_texture(device, grid)?;
+            self.are_slopes_baked = false;
+        }
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURE WILL HAPPEN
+        unsafe {
+            encoder
+                .setTexture_atIndex(Some(&self.terrain_heights.1), TERRAIN_HEIGHTS_TEXTURE_INDEX);
+            encoder.setTexture_atIndex(
+                Some(&self.terrain_slope_bounds),
+                TERRAIN_SLOPE_BOUNDS_TEXTURE_INDEX,
+            );
+        };
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
         unsafe {
@@ -959,16 +1350,27 @@ impl VoxelGpu {
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
             unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, DUST_BUFFER_INDICES[k]) };
         }
-        let avatars: [&[u8]; AVATAR_BUFFER_INDICES.len()] = [
-            as_bytes(&frame.avatar_triangles),
-            as_bytes(&frame.avatar_nodes),
-        ];
-        for (k, bytes) in avatars.iter().enumerate() {
-            let slot: usize = SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len() + k;
-            let buffer: &ProtocolObject<dyn MTLBuffer> = self.buffers[slot].write(device, bytes)?;
+        let avatar_slot: usize = SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len();
+        let avatar_bytes: [usize; AVATAR_BUFFER_INDICES.len()] =
+            get_avatar_bytes(&frame.avatar_meshes);
+        for (k, byte_count) in avatar_bytes.into_iter().enumerate() {
+            let buffer: &ProtocolObject<dyn MTLBuffer> =
+                self.buffers[avatar_slot + k].reserve(device, byte_count)?;
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
             unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, AVATAR_BUFFER_INDICES[k]) };
         }
+        let [triangles_device, nodes_device] = [0, 1].map(|k| {
+            self.buffers[avatar_slot + k]
+                .buffer
+                .as_deref()
+                .expect("the bodies' buffers were just reserved")
+        });
+        write_avatar_buffers(
+            &frame.avatar_meshes,
+            frame.avatar_first_material,
+            triangles_device,
+            nodes_device,
+        );
         let (width, height) = frame.get_render_size();
         if self
             .post
@@ -977,6 +1379,7 @@ impl VoxelGpu {
         {
             self.post = Some(PostTextures {
                 hdr: make_hdr_texture(device, (width, height))?,
+                ldr: make_hdr_texture(device, (width, height))?,
                 bloom: (1..=BLOOM_LEVELS)
                     .map(|k| make_hdr_texture(device, (width >> k, height >> k)))
                     .collect::<Result<_>>()?,
@@ -986,6 +1389,23 @@ impl VoxelGpu {
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG BUFFER WILL HAPPEN
         unsafe {
             encoder.setBuffer_offset_atIndex(Some(&self.hand_light), 0, HAND_LIGHT_BUFFER_INDEX)
+        };
+        if !self.are_slopes_baked {
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE BAKE WRITING THE WRONG TEXTURE WILL HAPPEN
+            unsafe {
+                encoder.setTexture_atIndex(Some(&self.terrain_slopes), BAKE_TARGET_TEXTURE_INDEX);
+                encoder.setTexture_atIndex(
+                    Some(&self.terrain_heights.1),
+                    TERRAIN_SLOPES_TEXTURE_INDEX,
+                );
+            }
+            let size: (usize, usize) = (self.terrain_slopes.width(), self.terrain_slopes.height());
+            dispatch(encoder, &self.bake_terrain_slopes, size);
+            self.are_slopes_baked = true;
+        }
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURE WILL HAPPEN
+        unsafe {
+            encoder.setTexture_atIndex(Some(&self.terrain_slopes), TERRAIN_SLOPES_TEXTURE_INDEX)
         };
         dispatch(encoder, &self.probe_hand_light, HAND_LIGHT_GRID);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
@@ -1017,16 +1437,31 @@ impl VoxelGpu {
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN TONE MAPPING THE WRONG TEXTURE WILL HAPPEN
         unsafe {
             encoder.setTexture_atIndex(Some(&post.hdr), 1);
-            encoder.setTexture_atIndex(Some(target), 0);
+            encoder.setTexture_atIndex(Some(&post.ldr), 0);
+        }
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE TONE MAP READING THE WRONG VISUALS WILL HAPPEN
+        unsafe {
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&frame.visuals).cast(),
+                std::mem::size_of::<GpuPlayerVisuals>(),
+                VISUALS_BUFFER_INDEX,
+            );
         }
         dispatch(encoder, &self.tonemap, (width, height));
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN ANTI-ALIASING THE WRONG TEXTURE WILL HAPPEN
+        unsafe {
+            encoder.setTexture_atIndex(Some(&post.ldr), 1);
+            encoder.setTexture_atIndex(Some(target), 0);
+        }
+        dispatch(encoder, &self.fxaa, (width, height));
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    //! Tests of packing a frame's laser beams and the beacons' beams for the shader.
+    //! Tests of packing a frame's laser beams and the beacons' beams for the shader, and of the
+    //! shader's ground against the CPU's.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -1034,14 +1469,191 @@ mod tests {
     //! | Team | blue, red | `beams_carry_their_gun_team_and_speckle` |
     //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
     //! | A beacon's console | on (its beam is bright), off (its beam goes, the others stay) | `beacon_beams_go_with_their_consoles` |
+    //! | Where on Lunar Surface's crater | floor, wall, rim, outer flank | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+    //! | Mounds | on a mound, off the mounds | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+    //! | Where in a grid cell | at a grid point, inside a cell | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+    //! | Baked grid | inside it, just inside its edge, past its edge along u and along v (the shape's height) | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+    //! | Sharp centre | all sharp, the default, sharp wider than the half-resolution circle (fails) | `sharp_centre_radii_follow_the_width`, `sharp_centre_wider_than_half_fails` |
+
+    use objc2_metal::{
+        MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCreateSystemDefaultDevice,
+    };
 
     use super::*;
     use crate::map::{Map, get_map_folder};
     use crate::net::MAX_CONSOLE_COUNT;
+    use crate::terrain::Terrain;
     use crate::voxel_world::{Shot, VoxelPlayer, VoxelWorld};
 
     const SPECKLE_FRAC: f64 = 0.4;
     const RENDER_PX: (u32, u32) = (64, 40);
+    const POINTS_BUFFER_INDEX: usize = 2;
+    const HEIGHTS_BUFFER_INDEX: usize = 3;
+    const MOUNDS_BUFFER_INDEX: usize = 26;
+    const GROUND_MATCH_M: f64 = 0.001;
+    const FAR_GRID_POINT: [f64; 2] = [1200.0, 1000.0];
+    const IN_CELL_FRAC: [f64; 2] = [0.37, 0.61];
+    const PAST_EDGE_M: f64 = 3.0;
+    const BEFORE_EDGE_M: f64 = 0.1;
+
+    #[test]
+    fn sharp_centre_radii_follow_the_width() {
+        let width_px: usize = 3440;
+        let fovea: [f32; 4] = DEFAULT_SHARP_CENTRE.get_fovea((width_px, 1440));
+        let expected_px: f64 = DEFAULT_SHARP_CENTRE.sharp_width_frac * 0.5 * width_px as f64;
+        assert!(
+            (f64::from(fovea[0]) - expected_px).abs() < 0.01,
+            "{fovea:?}"
+        );
+        assert!(fovea[1] >= fovea[0], "{fovea:?}");
+        let all_sharp: [f32; 4] = ALL_SHARP.get_fovea((width_px, 1440));
+        assert!(
+            all_sharp[0].is_infinite() && all_sharp[1].is_infinite(),
+            "{all_sharp:?}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "SharpCentre")]
+    fn sharp_centre_wider_than_half_fails() {
+        let sharp_centre: SharpCentre = SharpCentre {
+            sharp_width_frac: 0.8,
+            half_width_frac: 0.5,
+        };
+        sharp_centre.get_fovea((2560, 1440));
+    }
+
+    /// `measure_ground_on_gpu` runs the shader's `measure_terrain_heights` on `world`'s frame at
+    /// `points` (Fermi u, v in meters) and gives the heights it draws there.
+    ///
+    /// Example: `let heights_m = measure_ground_on_gpu(&world, &[[0.0, 0.0]]);`
+    fn measure_ground_on_gpu(world: &VoxelWorld, points: &[[f32; 2]]) -> Vec<f32> {
+        let device = MTLCreateSystemDefaultDevice().expect("a Metal GPU");
+        let library = make_library(&device).expect("the voxel shader");
+        let pipeline: Pipeline =
+            make_pipeline(&device, &library, "measure_terrain_heights").expect("the kernel");
+        let camera: DMat4 = VoxelPlayer::AtSpawn(world, 0).get_camera_frame(world);
+        let frame: VoxelFrame = VoxelFrame::Build(world, camera, &[], None, &[], RENDER_PX);
+        let mounds: &[f32] = frame
+            .mound_grid
+            .as_ref()
+            .map_or(&NO_MOUNDS[..], |g| &g.heights);
+        let make_buffer = |bytes: &[u8]| {
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A COPY PAST THE BYTES WILL HAPPEN
+            unsafe {
+                device.newBufferWithBytes_length_options(
+                    NonNull::new(bytes.as_ptr().cast_mut().cast()).expect("a slice isn't null"),
+                    bytes.len(),
+                    MTLResourceOptions::StorageModeShared,
+                )
+            }
+            .expect("a buffer")
+        };
+        let heights = make_buffer(as_bytes(&vec![0.0_f32; points.len()]));
+        let texture: Texture =
+            make_height_texture(&device, frame.height_grid.as_deref()).expect("the heights");
+        let queue = device.newCommandQueue().expect("a command queue");
+        let command_buffer = queue.commandBuffer().expect("a command buffer");
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .expect("a compute encoder");
+        encoder.setComputePipelineState(&pipeline);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE KERNEL READING THE WRONG BUFFERS WILL HAPPEN
+        unsafe {
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&frame.uniforms).cast(),
+                std::mem::size_of::<VoxelUniforms>(),
+                UNIFORMS_BUFFER_INDEX,
+            );
+            encoder.setBuffer_offset_atIndex(
+                Some(&make_buffer(as_bytes(mounds))),
+                0,
+                MOUNDS_BUFFER_INDEX,
+            );
+            encoder.setTexture_atIndex(Some(&texture), TERRAIN_HEIGHTS_TEXTURE_INDEX);
+            encoder.setBuffer_offset_atIndex(
+                Some(&make_buffer(as_bytes(points))),
+                0,
+                POINTS_BUFFER_INDEX,
+            );
+            encoder.setBuffer_offset_atIndex(Some(&heights), 0, HEIGHTS_BUFFER_INDEX);
+        }
+        encoder.dispatchThreads_threadsPerThreadgroup(
+            MTLSize {
+                width: points.len(),
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: points.len(),
+                height: 1,
+                depth: 1,
+            },
+        );
+        encoder.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE HEIGHTS WILL HAPPEN
+        unsafe {
+            std::slice::from_raw_parts(heights.contents().as_ptr().cast::<f32>(), points.len())
+        }
+        .to_vec()
+    }
+
+    #[test]
+    fn the_shader_draws_the_ground_the_cpu_walks_and_hits_on() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let terrain: &Terrain = world.terrain.as_ref().expect("Lunar Surface's terrain");
+        let grid: &HeightGrid = terrain
+            .height_grid
+            .as_ref()
+            .expect("Lunar Surface's baked heights");
+        let mound = &map
+            .ground
+            .terrain
+            .as_ref()
+            .expect("Lunar Surface's terrain")
+            .mounds[0];
+        let corner_m: [f64; 2] = [0, 1].map(|a| grid.origin_m[a] + FAR_GRID_POINT[a] * grid.cell_m);
+        let end_m: [f64; 2] =
+            [0, 1].map(|a| grid.origin_m[a] + (grid.size[a] - 1) as f64 * grid.cell_m);
+        let points: Vec<[f32; 2]> = [
+            ("crater floor", [20.0, -25.0]),
+            ("blue spawn", [-107.0, 0.0]),
+            ("crater wall", [0.0, -75.0]),
+            ("rim", [0.0, 88.0]),
+            ("outer flank, off the mounds", [-230.0, 0.0]),
+            ("on a mound", [mound.u_m, mound.v_m]),
+            ("at a grid point", corner_m),
+            (
+                "inside a cell",
+                [0, 1].map(|a| corner_m[a] + IN_CELL_FRAC[a] * grid.cell_m),
+            ),
+            (
+                "just inside the grid's edge",
+                [end_m[0] - BEFORE_EDGE_M, 0.0],
+            ),
+            (
+                "past the grid's edge along u",
+                [end_m[0] + PAST_EDGE_M, 0.0],
+            ),
+            (
+                "past the grid's edge along v",
+                [0.0, end_m[1] + PAST_EDGE_M],
+            ),
+        ]
+        .map(|(_, [u_m, v_m])| [u_m as f32, v_m as f32])
+        .to_vec();
+        let gpu_heights_m: Vec<f32> = measure_ground_on_gpu(&world, &points);
+        for ([u_m, v_m], gpu_m) in points.iter().zip(&gpu_heights_m) {
+            let cpu_m: f64 = terrain.get_height_m(f64::from(*u_m), f64::from(*v_m));
+            assert!(
+                (f64::from(*gpu_m) - cpu_m).abs() < GROUND_MATCH_M,
+                "at ({u_m}, {v_m}) m the shader draws the ground at {gpu_m} m and the CPU at {cpu_m} m"
+            );
+        }
+    }
 
     #[test]
     fn beams_carry_their_gun_team_and_speckle() {

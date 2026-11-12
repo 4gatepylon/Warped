@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/4gatepylon/Warped/common/maps/level.schema.json",
+  "title": "Warped level",
+  "description": "A level's rules, settings and presentation, beside its map.json; see common/maps/LEVELS.md.",
+  "type": "object",
+  "required": ["format", "version", "name", "title", "engine"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {"const": "warped-level"},
+    "version": {"const": 1},
+    "name": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "title": {"type": "string", "minLength": 1},
+    "engine": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "laser_color": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 3, "maxItems": 3},
+    "black_hole_growth": {
+      "type": "object",
+      "required": ["warp"],
+      "additionalProperties": false,
+      "properties": {"warp": {"type": "string"}}
+    },
+    "map_picture": {"type": "string", "pattern": "^[a-z0-9_]+\\.png$"},
+    "server_settings": {
+      "type": "object",
+      "additionalProperties": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number"}}
+    },
+    "credits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["asset", "author", "license", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "asset": {"type": "string"},
+          "author": {"type": "string"},
+          "license": {"type": "string"},
+          "url": {"type": "string"}
+        }
+      }
+    }
+  }
+}

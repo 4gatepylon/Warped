@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warped</title>
+<link rel="icon" href="app_icon.png">
+<style>
+  :root { --bg: #f4f1ea; --card: #fffdf8; --text: #1d1b18; --muted: #5d5850; --accent: #2f6fdb; --code: #ece7dc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d0f14; --card: #161a22; --text: #eef1f6; --muted: #9aa3b2; --accent: #7fb0ff; --code: #0b0d12; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 48px 16px 64px; }
+  header { display: flex; gap: 20px; align-items: center; margin-bottom: 32px; }
+  header img { width: 112px; height: 112px; }
+  h1 { margin: 0; font-size: 44px; letter-spacing: -0.02em; }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  section { background: var(--card); border-radius: 14px; padding: 20px 22px; margin-bottom: 18px; }
+  h2 { margin: 0 0 10px; font-size: 19px; }
+  .command { display: flex; gap: 8px; align-items: stretch; }
+  code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: var(--code); border-radius: 8px; padding: 10px 12px; font: 14px/1.4 ui-monospace, Menlo, monospace; }
+  button { border: 0; border-radius: 8px; padding: 0 16px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  a { color: var(--accent); }
+  ol, ul { margin: 8px 0 0; padding-left: 22px; }
+  .muted { color: var(--muted); font-size: 15px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="app_icon.png" alt="">
+    <div>
+      <h1>Warped</h1>
+      <p>A multiplayer shooter in curved space, with wormholes and black holes.</p>
+    </div>
+  </header>
+  <section>
+    <h2>Install</h2>
+    <p>Open Terminal (in Applications, Utilities), paste this line and press Return:</p>
+    <div class="command">
+      <code id="install-command">curl -fsSL @SITE_URL@/install.sh | bash</code>
+      <button type="button" id="copy-button">Copy</button>
+    </div>
+    <p class="muted">It puts Warped in Applications and opens it. Or <a href="Warped.zip">download the zip</a>
+      and follow its note: the first time, macOS asks you to allow the app in System Settings, Privacy &amp;
+      Security, Open Anyway.</p>
+  </section>
+  <section>
+    <h2>Play</h2>
+    <ol>
+      <li>On the title screen, pick a game with Up and Down and press Return.</li>
+      <li>For a game on a server, pick its name, or "Join a server by its address" and type the IP and port
+        you were given (such as 34.1.2.3:47810), then the game's password: ask whoever invited you.</li>
+      <li>Click to capture the mouse. W A S D walk, Space jumps, the mouse button shoots, Tab opens the menu,
+        Esc frees the mouse (twice quits).</li>
+    </ol>
+  </section>
+  <section>
+    <h2>Needs</h2>
+    <ul>
+      <li>A Mac with Apple silicon (M1 or later) and macOS 13 or later.</li>
+    </ul>
+  </section>
+  <p class="muted">Credits: the revolver is <a href="https://sketchfab.com/3d-models/sci-fi-revolver-f6bd1cbad4174048bcf02f8e52771adb">"Sci-fi revolver"</a>
+    by <a href="https://sketchfab.com/Ramhat">Ramhat</a> (Sketchfab Standard license); the surface textures are from
+    <a href="https://polyhaven.com">Poly Haven</a> (CC0).</p>
+</main>
+<script>
+  document.getElementById("copy-button").addEventListener("click", async function () {
+    await navigator.clipboard.writeText(document.getElementById("install-command").textContent);
+    this.textContent = "Copied";
+  });
+</script>
+</body>
+</html>

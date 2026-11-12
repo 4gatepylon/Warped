@@ -18,11 +18,9 @@ use glam::{DMat4, DVec3, DVec4};
 
 use crate::avatar_model::AvatarClip;
 use crate::black_hole_growth::BlackHoleGrowth;
+use crate::console_bot::{FightStep, Fighter, find_enemy_hit, find_warp_dangers};
 use crate::dust::DustCloud;
-use crate::geometry::{
-    AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
-    normalize_tangent,
-};
+use crate::geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use crate::minimap::TEAM_COLORS;
 use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
@@ -31,9 +29,11 @@ use crate::scene_data::{Beam, SceneData};
 use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
-    LOOK_RAD_PER_PX, MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
+    AvatarBody, MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
 };
 use crate::world::{Color, EYE_HEIGHT_M, World};
+use warped_shared::movement::get_crouched_height_frac;
+use warped_shared::shot_gate::{ShotGate, ShotMoves};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -47,22 +47,22 @@ const BOT_HITS_TO_KILL: u8 = 1;
 const BOT_RANGE_M: f64 = 12.0;
 const BOT_WANDER_PX_PER_S: f64 = 120.0;
 const BOT_REJOIN_S: f64 = 2.0;
-const BOT_STUCK_FRAC: f64 = 0.5;
 const BOT_VIEW_PX: (u32, u32) = (1280, 800);
-const VOXEL_SPAWN_RING_M: f64 = 3.0;
-const SPAWN_SLOT_COUNT: u32 = 16;
-const VOXEL_BOT_LASER_RANGE_M: f64 = 120.0;
+const SPAWN_SLOTS_PER_RING: u32 = 8;
+const SPAWN_RING_COUNT: u32 = 3;
+const SPAWN_RING_STEP_M: f64 = 2.0;
 
-/// `get_spawn_player` makes player `id`'s starting player on the house: on a ring around spawn,
-/// facing the middle, at the first bearing (starting from the id's own) at least
-/// `MIN_SPAWN_GAP_M` from every eye in `others`, or the last one tried.
+/// `get_spawn_player` makes player `id`'s starting player on the house: on rings around spawn
+/// `SPAWN_RING_STEP_M` apart from `SPAWN_RING_M`, facing the middle, at the first slot (starting
+/// from the id's own bearing, `SPAWN_SLOTS_PER_RING` a ring) at least `MIN_SPAWN_GAP_M` from every
+/// eye in `others`, or the last one tried.
 ///
 /// Example: `let player = multiplayer::get_spawn_player(&world, 3, &other_eyes);`
 pub fn get_spawn_player(world: &World, id: u32, others: &[DVec4]) -> Player {
     let mut player: Player = Player::AtSpawn(world);
-    for k in 0..SPAWN_SLOT_COUNT {
-        player.frame = world
-            .make_frame_from_spawn(f64::from(id + k) * SPAWN_TURN_RAD, SPAWN_RING_M)
+    for k in 0..SPAWN_SLOTS_PER_RING * SPAWN_RING_COUNT {
+        let ring_m: f64 = SPAWN_RING_M + SPAWN_RING_STEP_M * f64::from(k / SPAWN_SLOTS_PER_RING);
+        player.frame = world.make_frame_from_spawn(f64::from(id + k) * SPAWN_TURN_RAD, ring_m)
             * make_boost(AXIS_Y, EYE_HEIGHT_M / world.curvature_radius_m)
             * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
         let eye: DVec4 = player.frame.col(AXIS_W);
@@ -114,10 +114,10 @@ fn get_team_colors() -> Vec<Color> {
 /// index of its colour in `get_team_colors`, which is its team.
 ///
 /// Example: `let bodies = get_avatar_bodies(&world, &players);`
-fn get_avatar_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> Vec<(DMat4, usize)> {
+fn get_avatar_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> Vec<AvatarBody> {
     players
         .iter()
-        .map(|p| get_body(world, p.frame, p.team))
+        .map(|p| get_body(world, p.frame, p.crouch_frac, p.team))
         .collect()
 }
 
@@ -234,6 +234,7 @@ pub fn run_bot(
                     victim_id,
                     shooter_id,
                     is_self,
+                    ..
                 } => {
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {
@@ -291,6 +292,7 @@ pub fn run_bot(
                 None,
                 0.0,
                 PlayerWormholes::default(),
+                0.0,
             )?;
         } else {
             client.keep_joining()?;
@@ -320,14 +322,19 @@ pub struct Tracers<'a> {
     pub dust: &'a [DustCloud],
 }
 
-/// `get_body` gives the body drawn for a player of `team` whose eye frame is `eye`: its feet frame
-/// and the index of its colour in `get_team_colors`, which is its team, as every window draws them.
+/// `get_body` gives the body drawn for a player of `team` whose eye frame is `eye` and who is
+/// `crouch_frac` of the way down a crouch: its feet frame on the ground (under the eye raised by
+/// the crouch's drop, W-137 (crouched robots sink)), the index of its colour in
+/// `get_team_colors`, which is its team, and its height as a share of standing, as every window
+/// draws them.
 ///
-/// Example: `let body = multiplayer::get_body(&world, player.frame, player.team);`
-pub fn get_body(world: &VoxelWorld, eye: DMat4, team: u32) -> (DMat4, usize) {
+/// Example: `let body = multiplayer::get_body(&world, player.frame, player.crouch_frac, player.team);`
+pub fn get_body(world: &VoxelWorld, eye: DMat4, crouch_frac: f64, team: u32) -> AvatarBody {
+    let standing_eye: DMat4 = world.raise_crouched_eye(eye, crouch_frac);
     (
-        VoxelPlayer::FromEye(world, eye).get_feet_frame(world),
+        VoxelPlayer::FromEye(world, standing_eye).get_feet_frame(world),
         team as usize,
+        get_crouched_height_frac(crouch_frac, &world.settings.movement),
     )
 }
 
@@ -348,8 +355,8 @@ pub fn with_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> VoxelWorld {
 fn trace_other_voxel_lasers(
     world: &VoxelWorld,
     players: &[RemotePlayer],
-    bodies: &[(DMat4, usize)],
-    own_body: Option<(DMat4, usize)>,
+    bodies: &[AvatarBody],
+    own_body: Option<AvatarBody>,
     colors: &[[f32; 3]],
 ) -> Vec<(u32, Shot)> {
     players
@@ -357,7 +364,7 @@ fn trace_other_voxel_lasers(
         .enumerate()
         .filter(|(_, player)| player.is_laser_on)
         .map(|(i, player)| {
-            let others: Vec<(DMat4, usize)> = bodies
+            let others: Vec<AvatarBody> = bodies
                 .iter()
                 .enumerate()
                 .filter(|&(j, _)| j != i)
@@ -395,14 +402,14 @@ pub fn pack_shared_voxel_view(
     players: &[RemotePlayer],
     poses: &[(AvatarClip, f64)],
     markers: &[Marker],
-    own_body: Option<(DMat4, usize)>,
+    own_body: Option<AvatarBody>,
     corpses: &[(DMat4, usize, (AvatarClip, f64))],
     tracers: Option<Tracers>,
     render_px: (u32, u32),
 ) -> SharedVoxelView {
     let colors: Vec<[f32; 3]> = get_team_colors();
-    let bodies: Vec<(DMat4, usize)> = get_avatar_bodies(world, players);
-    let own_bodies: Vec<(DMat4, usize)> = own_body.into_iter().collect();
+    let bodies: Vec<AvatarBody> = get_avatar_bodies(world, players);
+    let own_bodies: Vec<AvatarBody> = own_body.into_iter().collect();
     assert_eq!(
         poses.len(),
         bodies.len() + own_bodies.len(),
@@ -513,11 +520,15 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
     }
 }
 
-/// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
-/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
-/// view) and rejoins `BOT_REJOIN_S` after being hit. The black hole grows with the server's
-/// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. It returns how many players it hit and how often it was hit,
-/// and fails if the server curves space other than the built-in settings (`check_bot_space`).
+/// `run_voxel_bot` is `run_bot` on a voxel map: it walks after the nearest enemy around blocks and
+/// dangers and, once it sees them, faces them and fires (`console_bot::Fighter`) when moving lets
+/// it (`ShotGate`, by the server's `shooting` rules, as for players), reports hits on enemies only
+/// (`find_enemy_hit`; it steps out from behind a teammate its laser meets)
+/// (handing `save_view` its view, which it may save on another thread) and rejoins the server
+/// server's respawn wait after being hit (the one its elimination carries).
+/// The black hole grows with the server's consoles, or to `black_hole_strength` when given, and the
+/// bot's own time slows near it. It returns how many players it hit and how often it was hit, and
+/// fails if the server curves space other than the built-in settings (`check_bot_space`).
 ///
 /// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, |frame, id| Ok(()))?;`
 pub fn run_voxel_bot(
@@ -525,7 +536,7 @@ pub fn run_voxel_bot(
     client: &mut Client,
     duration_s: f64,
     black_hole_strength: Option<f64>,
-    mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
+    mut save_view: impl FnMut(VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
     let (mut grown_world, mut black_hole_growth) =
         (world.clone(), BlackHoleGrowth::New(black_hole_strength));
@@ -534,7 +545,8 @@ pub fn run_voxel_bot(
     let (mut hit_count, mut eliminated_count) = (0, 0);
     let mut rejoin_at: Option<Instant> = None;
     let mut last_victim: Option<u32> = None;
-    let mut is_stuck: bool = false;
+    let mut fighter: Fighter = Fighter::New(find_warp_dangers(world));
+    let mut shot_gate: ShotGate = ShotGate::New();
     while start.elapsed().as_secs_f64() < duration_s {
         let tick: Instant = Instant::now();
         let now_s: f64 = start.elapsed().as_secs_f64();
@@ -549,16 +561,18 @@ pub fn run_voxel_bot(
                     check_bot_space(client)?;
                     player = VoxelPlayer::NearSpawn(world, team, id, &others);
                     println!("bot joined as player {id}");
+                    fighter.restart();
                 }
                 NetEvent::Eliminated {
                     victim_id,
                     shooter_id,
                     is_self,
+                    respawn_wait_s,
                 } => {
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {
                         eliminated_count += 1;
-                        rejoin_at = Some(Instant::now() + Duration::from_secs_f64(BOT_REJOIN_S));
+                        rejoin_at = Some(Instant::now() + Duration::from_secs_f64(respawn_wait_s));
                     }
                 }
             }
@@ -568,38 +582,31 @@ pub fn run_voxel_bot(
                 rejoin_at = None;
                 client.rejoin()?;
             }
-        } else if client.id.is_some() {
-            let camera: DMat4 = player.get_camera_frame(world);
-            let eye: DVec4 = camera.col(AXIS_W);
-            let target: Option<(&RemotePlayer, f64)> = client
+        } else if let Some(own_id) = client.id {
+            let team: u32 = client.team.expect("a welcome brings the team");
+            let enemies: Vec<(u32, DVec4)> = client
                 .players
                 .iter()
-                .map(|other| (other, get_distance(eye, other.frame.col(AXIS_W)) * world.r))
-                .min_by(|a, b| a.1.total_cmp(&b.1));
-            let mut input: Input = Input::default();
-            let mut is_laser_on: bool = false;
-            if let Some((other, distance_m)) = target {
-                let local: DVec3 =
-                    get_local_direction(camera, normalize_tangent(eye, other.frame.col(AXIS_W)));
-                player.look(
-                    local.x.atan2(-local.z) / LOOK_RAD_PER_PX,
-                    -local.y.clamp(-1.0, 1.0).asin() / LOOK_RAD_PER_PX,
-                );
-                input.forward = distance_m > VOXEL_SPAWN_RING_M * 2.0;
-                is_laser_on = distance_m < VOXEL_BOT_LASER_RANGE_M;
-            } else {
-                input.forward = true;
-                player.look(BOT_WANDER_PX_PER_S * BOT_STEP_S, 0.0);
-            }
-            input.up = input.forward && is_stuck;
-            let before: DVec4 = player.body.col(AXIS_W);
-            let team: u32 = client.team.unwrap_or(0);
+                .filter(|other| other.team != team)
+                .map(|other| (other.id, other.frame.col(AXIS_W)))
+                .collect();
             let own_step_s: f64 =
                 BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
-            player.step(world, &input, own_step_s, team as usize);
-            is_stuck = input.forward
-                && get_distance(before, player.body.col(AXIS_W)) * world.r
-                    < BOT_STUCK_FRAC * world.player.walk_m_per_s * own_step_s;
+            let fight: FightStep = fighter.step(world, &mut player, &enemies, now_s, own_step_s);
+            let input: &Input = &fight.input;
+            let shot_moves: ShotMoves = ShotMoves {
+                is_jumping: input.up,
+                is_walking_upright: (input.forward || input.back || input.left || input.right)
+                    && !input.crouch,
+                is_sprinting: player.is_sprinting,
+            };
+            let settings: &ServerSettings = client
+                .settings
+                .as_ref()
+                .expect("a welcome brings the settings");
+            shot_gate.note_moves(&shot_moves, &settings.shooting, own_step_s);
+            let is_laser_on: bool = fight.is_laser_on && shot_gate.is_open(&settings.movement);
+            player.step(world, &fight.input, own_step_s, team as usize);
             let camera: DMat4 = player.get_camera_frame(world);
             let view: SharedVoxelView = pack_shared_voxel_view(
                 world,
@@ -614,15 +621,20 @@ pub fn run_voxel_bot(
                 None,
                 BOT_VIEW_PX,
             );
-            if let Some(victim_id) = view.hit_player_id {
+            let victim: Option<u32> = find_enemy_hit(view.hit_player_id, &enemies);
+            if view.hit_player_id.is_some() && victim.is_none() {
+                fighter.note_teammate_hit(own_id, now_s);
+            }
+            if let Some(victim_id) = victim {
                 client.send_hit(victim_id, BOT_HITS_TO_KILL)?;
                 if last_victim != Some(victim_id) {
                     hit_count += 1;
                     println!("bot hit player {victim_id}");
-                    save_view(&view.frame, victim_id)?;
+                    save_view(view.frame, victim_id)?;
                 }
             }
-            last_victim = view.hit_player_id;
+            last_victim = victim;
+            fighter.note_shot(victim.is_some(), own_step_s);
             client.send_state(
                 camera,
                 is_laser_on,
@@ -630,6 +642,7 @@ pub fn run_voxel_bot(
                 None,
                 0.0,
                 PlayerWormholes::default(),
+                0.0,
             )?;
         } else {
             client.keep_joining()?;
@@ -653,6 +666,7 @@ mod tests {
     //! | Body colour | players of both teams, with ids whose old per-id colours differ from their team's | `players_are_drawn_in_their_teams_colours` |
     //! | Whose laser | this player's, another player's on Lunar Surface (drawn from their gun, out of their own body; strayed as in its shooter's window) | the tests above, `other_players_lasers_leave_their_bodies`, `a_strayed_shot_misses_alike_in_both_windows` |
     //! | This player's own body | not drawn (first person), drawn (third person: others' lasers stop at it, this player's own passes it) | `an_own_body_stops_others_lasers_only` |
+    //! | Another player's crouch (W-137 (crouched robots sink)) | standing (hit in the head at standing head height), crouched (feet where they stand; a shot at standing head height passes over, one at the squashed head hits it) | `a_crouched_player_stands_on_the_ground_and_is_hit_lower` |
 
     use super::*;
     use crate::net::MAX_PLAYER_COUNT;
@@ -669,6 +683,7 @@ mod tests {
         direction_rad: -std::f64::consts::FRAC_PI_4,
     };
     const SAME_SPOT_M: f64 = 1e-6;
+    const STANDING_HEAD_M: f64 = 1.75;
 
     #[test]
     fn spawn_points_are_apart_and_clear_of_mouths() {
@@ -705,6 +720,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let view: SharedView =
@@ -769,6 +785,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
@@ -813,6 +830,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let target_camera: DMat4 = target.get_camera_frame(&world);
@@ -855,6 +873,74 @@ mod tests {
     }
 
     #[test]
+    fn a_crouched_player_stands_on_the_ground_and_is_hit_lower() {
+        let map: crate::map::Map =
+            crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
+                .expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let standing: VoxelPlayer =
+            VoxelPlayer::AtView(&world, LUNAR_TARGET_M, LUNAR_SHOOTER_M, None, 0.0);
+        let crouched: VoxelPlayer = VoxelPlayer {
+            crouch_frac: 1.0,
+            ..standing
+        };
+        let (feet, _, height_frac) = get_body(&world, crouched.get_camera_frame(&world), 1.0, 0);
+        let standing_feet: DMat4 = standing.get_feet_frame(&world);
+        assert!(get_distance(feet.col(AXIS_W), standing_feet.col(AXIS_W)) * world.r < SAME_SPOT_M);
+        assert_eq!(height_frac, world.settings.movement.crouch_eye_height_frac);
+        let floor_m: f64 = standing.h_m - world.player.eye_height_m;
+        let crouched_head_m: f64 = STANDING_HEAD_M * height_frac;
+        for (crouch_frac, aim_m, is_hit_and_head) in [
+            (0.0, STANDING_HEAD_M, (true, true)),
+            (1.0, STANDING_HEAD_M, (false, false)),
+            (1.0, crouched_head_m, (true, true)),
+        ] {
+            let body: VoxelPlayer = VoxelPlayer {
+                crouch_frac,
+                ..standing
+            };
+            let target: RemotePlayer = RemotePlayer {
+                id: 2,
+                frame: body.get_camera_frame(&world),
+                is_laser_on: false,
+                is_rifle: false,
+                team: 0,
+                disabling_console: None,
+                disabling_frac: 0.0,
+                beam_speckle_frac: 0.0,
+                wormholes: PlayerWormholes::default(),
+                crouch_frac,
+            };
+            let camera: DMat4 = VoxelPlayer::AtView(
+                &world,
+                LUNAR_SHOOTER_M,
+                LUNAR_TARGET_M,
+                Some(floor_m + aim_m),
+                0.0,
+            )
+            .get_camera_frame(&world);
+            let view: SharedVoxelView = pack_shared_voxel_view(
+                &world,
+                camera,
+                Some(camera),
+                1,
+                &[target],
+                &[IDLE_POSE],
+                &[],
+                None,
+                &[],
+                None,
+                (64, 40),
+            );
+            assert_eq!(
+                (view.hit_player_id.is_some(), view.is_head_hit),
+                is_hit_and_head,
+                "crouched {crouch_frac}, aimed {aim_m} m up"
+            );
+        }
+    }
+
+    #[test]
     fn other_players_lasers_leave_their_bodies() {
         let map: crate::map::Map =
             crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
@@ -871,9 +957,10 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
-        let bodies: Vec<(DMat4, usize)> = get_avatar_bodies(&world, std::slice::from_ref(&firing));
+        let bodies: Vec<AvatarBody> = get_avatar_bodies(&world, std::slice::from_ref(&firing));
         let shots = trace_other_voxel_lasers(&world, &[firing], &bodies, None, &get_team_colors());
         assert!(shots[0].1.length_m > MIN_OTHER_BEAM_M);
     }
@@ -898,11 +985,13 @@ mod tests {
                 disabling_console: None,
                 disabling_frac: 0.0,
                 beam_speckle_frac: 0.0,
+                crouch_frac: 0.0,
                 wormholes: PlayerWormholes::default(),
             })
             .to_vec();
         let colors: Vec<Color> = get_team_colors();
-        for (player, (_, color_index)) in players.iter().zip(get_avatar_bodies(&world, &players)) {
+        for (player, (_, color_index, _)) in players.iter().zip(get_avatar_bodies(&world, &players))
+        {
             let [r, g, b, _] = TEAM_COLORS[player.team as usize];
             assert_eq!(colors[color_index], [r, g, b], "player {}", player.id);
         }
@@ -927,9 +1016,10 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
-        let pack = |own_body: Option<(DMat4, usize)>| -> SharedVoxelView {
+        let pack = |own_body: Option<AvatarBody>| -> SharedVoxelView {
             pack_shared_voxel_view(
                 &world,
                 eye,
@@ -945,7 +1035,7 @@ mod tests {
             )
         };
         let first_person: SharedVoxelView = pack(None);
-        let third_person: SharedVoxelView = pack(Some(get_body(&world, eye, OWN_TEAM)));
+        let third_person: SharedVoxelView = pack(Some(get_body(&world, eye, 0.0, OWN_TEAM)));
         assert_eq!(
             third_person.frame.uniforms.structure_count,
             first_person.frame.uniforms.structure_count + 1,

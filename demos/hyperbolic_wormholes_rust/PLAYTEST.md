@@ -3,6 +3,19 @@
 How to get a few people into one game of the Rust wormholes demo, and what is known to be rough. Report anything
 else you notice.
 
+## Play from the app (no terminal)
+
+Players who only want to play don't need the repository: `make package-mac-app` builds `.build/Warped.zip`, which
+holds `Warped.app` and a note, `How to open Warped.txt`.
+
+- Unzip it and drag `Warped.app` into Applications. The first time, macOS can't check the app (it isn't notarized):
+  click Done, then System Settings → Privacy & Security → Open Anyway. The download page's install command skips
+  this step.
+- The app opens on a main menu: online games (with the game's password, asked once), hosting or joining on this
+  Wi-Fi, or playing alone. Logs go to `~/Library/Logs/Warped/`, and a failure shows in a pop-up.
+- The app carries the surface textures from `demos/fps_demo/assets/`, and the revolver is built into the game
+  itself (so the zip is about 110 MB); it runs on a Mac without the repository.
+
 ## Set up each Mac (once)
 
 You need a Mac with Apple silicon (the game draws with Metal and upscales with MetalFX).
@@ -50,10 +63,10 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   Everyone who joins plays by the server's settings.
 - Your own choices (keys, mouse speed, head bob, how far the gun in hand sways with your steps, motion blur, how a hit
   looks) are in `player_settings.yaml`. The
-  easiest way to change them is in the game: press `Tab` for the menu, `Up`/`Down` to pick a row, `Return` and then
+  easiest way to change them is in the game: press `Esc` for the menu, `Up`/`Down` to pick a row, `Return` and then
   a key, button or the wheel to rebind an action, `Left`/`Right` to change a number, and `Return` on its last row
   to save. Saved choices go to `~/.config/warped/player_settings.yaml`, which every later game on that computer
-  loads. `Esc` or `Tab` closes the menu. You can also copy the file, change it, and add `PLAYER_SETTINGS=mine.yaml`
+  loads. `Esc` closes the menu. You can also copy the file, change it, and add `PLAYER_SETTINGS=mine.yaml`
   to `make join-game`.
 - `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
   within a few seconds, use the address the server printed. When several servers announce themselves, it joins the
@@ -66,7 +79,7 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
     every window from the same commit.
   - **THE GAME IS FULL:** the server already has 8 players.
   - **JOINING THE GAME:** you pressed `1` or `2`, and the server hasn't let you in yet.
-- You can't shoot until the server has let you into the game (not from the team screen, nor while joining).
+- You can't shoot until the server has let you into the game (not from the lobby, nor while joining).
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
   connections. Without that, nobody can reach the game.
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
@@ -150,7 +163,7 @@ dim it or turn it off, lower `milky way 0-1` on the menu's settings page (or `vi
 your `player_settings.yaml`).
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
-`PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting; once you let go of `Shift` it refills in 7.5 s crouched (`Ctrl`) or 15 s walking or standing),
+`PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` opens the menu and frees it, `Esc` again closes the menu; the menu's QUIT page leaves the game with `Return` or `Y`), hold `Tab` to see the whole map over the game while you keep playing. `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting; once you let go of `Shift` it refills in 7.5 s crouched (`Ctrl`) or 15 s walking or standing),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `V` switches to a third-person view from 3 m behind and a little above your character and back (it pulls in when a wall or the ground is behind you; shots still leave your head toward the crosshair, and aiming looks from your eye again), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (once no movement key has been held for a quarter of a second: walking crouched is fine,
 and so is falling or floating in the air with no key held; not while walking upright, running or holding `Space`), the mouse wheel or
@@ -164,9 +177,9 @@ beam also flickers: each frame random pixels of it turn black, white or drop out
 a random share for each sniper shot (0.2 on average, at most half) and more and more as the rifle heats up, from none
 to half the beam (D99). A shot into the ground, from either gun and anyone, throws up dust and a puff
 of mist that fade within 2 s. `E` (held)
-turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu on SCORES: how
+turns off one of the other team's consoles, `-` and `=` change the render resolution, `Esc` opens the menu on SCORES: how
 many players there are and each one's team, kills and deaths in this game (`Q`/`E` turn to your settings, a map of the
-whole level with you on it, and CREDITS: where the game's assets come from). There is no key to respawn:
+whole level with you on it, CREDITS: where the game's assets come from, and QUIT). There is no key to respawn:
 players come back only after being eliminated.
 
 ## Known caveats

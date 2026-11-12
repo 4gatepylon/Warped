@@ -3,6 +3,39 @@
 A multiplayer first-person shooter set in curved space: rooms can be spherical or hyperbolic, and
 players can place objects such as black holes that bend the space around them.
 
+## The official game
+
+> NOTE: If this section is outdated (the official game moved, a folder below was replaced, or a command
+> no longer works), ask the user to help you update it, so that the next agent isn't misled.
+
+The official game so far is [`demos/warped_mvp_rust/`](demos/warped_mvp_rust/README.md): the whole game in
+one window, with a main menu (games on the network, hosting, playing alone or against bots, the five-level
+match or any one level), a map menu, and each round's level. It lives under `demos/` for historical
+reasons; it is the game, not an experiment.
+
+To play it, on a Mac with Rust installed through Homebrew:
+
+```bash
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+make -C demos/warped_mvp_rust run-warped
+```
+
+The first run builds the match server and the five levels, which takes a while, then opens the game. To
+play with others, host a game from the main menu or pick one on your Wi-Fi. `make -C demos/warped_mvp_rust
+package-mac-app` builds `Warped.app`; the folder's README has the rest.
+
+### The other folders
+
+| Folder | Status | What it is |
+| --- | --- | --- |
+| `demos/warped_mvp_rust/` | official | the one-window game |
+| `demos/warped_match_rust/`, `demos/warped_shared_rust/` | part of the official game | the match server and bots, and the library the levels share |
+| `demos/hyperbolic_wormholes_rust/` (Lunar Surface), `demos/dust_rust/`, `demos/snow_planet_rust/`, `demos/city_sphere_rust/`, `demos/dark_forest_rust/` | part of the official game | the five levels it plays; each also runs alone as a demo |
+| `infra/`, `common/maps/` | supports the official game | the Rust game's cloud deploy and download page, and the portable map format its levels' layouts follow |
+| `clients/starter/`, `game_server/`, `management_server/`, `common/protocol/` | historical, to be replaced soon | the starter 2D square game, below, and the specs behind it |
+| `common/physics/`, `clients/mac/` | planned, unused so far | folders that hold only a README (a physics spec and a macOS client plan); nothing in the official game refers to them yet |
+| `demos/levels/`, `demos/fps_demo/`, `demos/hyperbolic_wormholes/`, `demos/three_js_vibecode_demo/`, `demos/warp_pull_js/`, `demos/laser_gravity_demo/`, `demos/gluebox/`, `demos/mirror_sphere/`, `demos/mirror_sphere_v2/` | historical | earlier experiments that decided what to build ([`demos/README.md`](demos/README.md)) |
+
 ## Layout
 
 ```
@@ -12,12 +45,13 @@ game_server/        # runs one room in real time; the authority on its state
 common/protocol/    # every message and API between components
 common/physics/     # the physics spec and the test cases every implementation passes
 demos/              # experiments that de-risk mechanics, weapons and physics before we build them
+infra/              # the Rust demo's cloud deploy on Google Cloud (Terraform) and its download page
 notes/              # notes to keep for future reference: knowledge, thoughts, background reading
 ```
 
 Components may use different languages, so `common/` holds specifications, not shared code.
 
-## Play the starter game on your Wi-Fi
+## Play the old starter game on your Wi-Fi (historical)
 
 On one Mac, start the servers; the first line it prints is the management server's URL:
 

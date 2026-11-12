@@ -1,0 +1,290 @@
+level: Dark Forest
+root: Dark Forest
+zones:
+  Dark Forest:
+    shape: {kind: rect, min_px: [240.0, 240.0], max_px: [1440.0, 2480.0]}
+    description: The forest inside the soft level edge, 112 m long and 60 m wide.
+    zones:
+      - blue zone
+      - middle zone
+      - red zone
+  blue zone:
+    shape: {kind: rect, min_px: [240.0, 240.0], max_px: [1440.0, 880]}
+    description: "Blue's end of the level: everything more than 24 m from the middle on blue's side."
+    objects:
+      - blue spawn
+      - blue palisade
+      - blue left pylon
+      - blue treehouse
+      - blue right pylon
+      - blue treehouse ladder
+      - blue home bridge
+      - blue home gate, mouth A
+      - blue home gate, mouth B
+      - mid gate, blue mouth
+      - blue rock 2
+      - blue rock 3
+  middle zone:
+    shape: {kind: rect, min_px: [240.0, 880], max_px: [1440.0, 1840]}
+    description: The 48 m band across the middle of the level, between the team zones.
+    objects:
+      - great tree
+      - great tree deck
+      - blue lookout
+      - red lookout
+      - blue lookout ladder
+      - red lookout ladder
+      - blue centre ladder
+      - red centre ladder
+      - blue middle deck
+      - red middle deck
+      - blue middle ladder
+      - red middle ladder
+      - blue flank bridge
+      - red flank bridge
+      - blue flank deck
+      - red flank deck
+      - blue flank ladder
+      - red flank ladder
+      - blue centre bridge
+      - red centre bridge
+      - cross gate A, blue-side mouth
+      - cross gate A, red-side mouth
+      - cross gate B, blue-side mouth
+      - cross gate B, red-side mouth
+      - blue rock 0
+      - blue rock 1
+      - red rock 0
+      - red rock 1
+  red zone:
+    shape: {kind: rect, min_px: [240.0, 1840], max_px: [1440.0, 2480.0]}
+    description: "Red's end of the level: everything more than 24 m from the middle on red's side."
+    objects:
+      - red spawn
+      - red palisade
+      - red right pylon
+      - red treehouse
+      - red left pylon
+      - red treehouse ladder
+      - red home bridge
+      - red home gate, mouth A
+      - red home gate, mouth B
+      - mid gate, red mouth
+      - red rock 2
+      - red rock 3
+objects:
+  blue spawn:
+    shape: {kind: polygon, points_px: [[700.0, 300.0], [744.7, 241.6], [889.0, 237.4], [929.0, 237.4],
+      [980.0, 300.0], [980.0, 340.0], [700.0, 340.0]]}
+    description: "Where blue's players enter the level: six spawn points."
+    layout_name: blue spawn
+  blue palisade:
+    shape: {kind: polygon, points_px: [[1040.0, 400.0], [1200.0, 400.0], [1200.0, 560.0], [1040.0, 560.0]]}
+    description: The square fence around blue's left pylon.
+    layout_name: blue palisade
+  blue left pylon:
+    shape: {kind: circle, centre_px: [1120.0, 480.0], radius_px: 20}
+    description: Blue's pylon inside the palisade, on blue's left.
+    layout_name: blue pylon 0
+  blue treehouse:
+    shape: {kind: polygon, points_px: [[458.0, 456.0], [460.0, 420.0], [660.0, 420.0], [660.0, 620.0],
+      [460.0, 620.0], [458.0, 584.0]]}
+    description: The treehouse on blue's right, which holds blue's right pylon.
+    layout_name: blue treehouse
+  blue right pylon:
+    shape: {kind: circle, centre_px: [486.0, 520.0], radius_px: 20}
+    description: Blue's pylon in the treehouse.
+    layout_name: blue pylon 1
+  blue treehouse ladder:
+    shape: {kind: circle, centre_px: [620.0, 414.0], radius_px: 20}
+    description: The rope ladder up to the treehouse.
+    layout_name: blue treehouse ladder
+  blue home bridge:
+    shape: {kind: polygon, points_px: [[538.0, 618.8], [582.0, 618.8], [582.0, 851.2], [538.0, 851.2]]}
+    description: The bridge from the treehouse toward the middle, to the blue middle deck.
+    layout_name: blue home bridge
+  blue home gate, mouth A:
+    shape: {kind: circle, centre_px: [920.0, 640.0], radius_px: 48.0}
+    description: One of the two mouths of the wormhole inside the blue zone; it leads to mouth B.
+    layout_name: gate 4 mouth 0
+  blue home gate, mouth B:
+    shape: {kind: circle, centre_px: [634.0, 584.0], radius_px: 48.0}
+    description: One of the two mouths of the wormhole inside the blue zone; it leads to mouth A.
+    layout_name: gate 4 mouth 1
+  mid gate, blue mouth:
+    shape: {kind: circle, centre_px: [880.0, 880.0], radius_px: 64.0}
+    description: The blue end of the wormhole that joins the two team zones, on the blue zone's edge.
+    layout_name: gate 2 mouth 1
+  blue rock 2:
+    shape: {kind: polygon, points_px: [[1260.3, 771.2], [1316.3, 771.2], [1316.3, 816.0], [1260.3, 816.0]]}
+    description: One of the two rocks of the blue zone.
+    layout_name: blue rock 2
+  blue rock 3:
+    shape: {kind: polygon, points_px: [[748.7, 587.2], [784.7, 587.2], [784.7, 616.0], [748.7, 616.0]]}
+    description: One of the two rocks of the blue zone.
+    layout_name: blue rock 3
+  great tree:
+    shape: {kind: polygon, points_px: [[796.0, 1360.0], [797.0, 1354.9], [812.4, 1328.3], [815.3, 1324.0],
+      [819.5, 1321.1], [824.6, 1320.1], [855.4, 1320.1], [860.5, 1321.1], [864.7, 1324.0], [867.6, 1328.3],
+      [883.0, 1354.9], [884.0, 1360.0], [883.0, 1365.1], [867.6, 1391.7], [864.7, 1396.0], [860.5, 1398.9],
+      [855.4, 1399.9], [824.6, 1399.9], [819.5, 1398.9], [815.3, 1396.0], [812.4, 1391.7], [797.0, 1365.1]]}
+    description: The great tree in the centre of the level.
+    layout_name: the great tree
+  great tree deck:
+    shape: {kind: polygon, points_px: [[750.0, 1270.0], [930.0, 1270.0], [930.0, 1450.0], [750.0, 1450.0]]}
+    description: The deck in the great tree, where the high route crosses the centre.
+    layout_name: the great tree deck
+  blue lookout:
+    shape: {kind: polygon, points_px: [[790.0, 1266.0], [890.0, 1266.0], [890.0, 1314.0], [790.0, 1314.0]]}
+    description: The lookout 5 m above the great tree deck, on blue's side.
+    layout_name: blue lookout
+  red lookout:
+    shape: {kind: polygon, points_px: [[790.0, 1406.0], [890.0, 1406.0], [890.0, 1454.0], [790.0, 1454.0]]}
+    description: The lookout 5 m above the great tree deck, on red's side.
+    layout_name: red lookout
+  blue lookout ladder:
+    shape: {kind: circle, centre_px: [784.0, 1290.0], radius_px: 20}
+    description: The rope ladder from the great tree deck up to the blue lookout.
+    layout_name: blue lookout ladder
+  red lookout ladder:
+    shape: {kind: circle, centre_px: [896.0, 1430.0], radius_px: 20}
+    description: The rope ladder from the great tree deck up to the red lookout.
+    layout_name: red lookout ladder
+  blue centre ladder:
+    shape: {kind: circle, centre_px: [890.0, 1264.0], radius_px: 20}
+    description: The rope ladder from the ground up to the great tree deck, on blue's side.
+    layout_name: blue centre ladder
+  red centre ladder:
+    shape: {kind: circle, centre_px: [790.0, 1456.0], radius_px: 20}
+    description: The rope ladder from the ground up to the great tree deck, on red's side.
+    layout_name: red centre ladder
+  blue middle deck:
+    shape: {kind: polygon, points_px: [[490.0, 850.0], [630.0, 850.0], [630.0, 990.0], [490.0, 990.0]]}
+    description: The deck at blue's end of the high route, where the blue home bridge arrives.
+    layout_name: blue middle deck
+  red middle deck:
+    shape: {kind: polygon, points_px: [[1050.0, 1730.0], [1190.0, 1730.0], [1190.0, 1870.0], [1050.0, 1870.0]]}
+    description: The deck at red's end of the high route, where the red home bridge arrives.
+    layout_name: red middle deck
+  blue middle ladder:
+    shape: {kind: circle, centre_px: [636.0, 920.0], radius_px: 20}
+    description: The rope ladder up to the blue middle deck.
+    layout_name: blue middle ladder
+  red middle ladder:
+    shape: {kind: circle, centre_px: [1044.0, 1800.0], radius_px: 20}
+    description: The rope ladder up to the red middle deck.
+    layout_name: red middle ladder
+  blue flank bridge:
+    shape: {kind: polygon, points_px: [[538.0, 988.8], [582.0, 988.8], [582.0, 1301.2], [538.0, 1301.2]]}
+    description: The bridge from the blue middle deck to the blue flank deck.
+    layout_name: blue flank bridge
+  red flank bridge:
+    shape: {kind: polygon, points_px: [[1098.0, 1418.8], [1142.0, 1418.8], [1142.0, 1731.2], [1098.0, 1731.2]]}
+    description: The bridge from the red middle deck to the red flank deck.
+    layout_name: red flank bridge
+  blue flank deck:
+    shape: {kind: polygon, points_px: [[500.0, 1300.0], [620.0, 1300.0], [620.0, 1420.0], [500.0, 1420.0]]}
+    description: The deck halfway along at blue's side of the centre.
+    layout_name: blue flank deck
+  red flank deck:
+    shape: {kind: polygon, points_px: [[1060.0, 1300.0], [1180.0, 1300.0], [1180.0, 1420.0], [1060.0, 1420.0]]}
+    description: The deck halfway along at red's side of the centre.
+    layout_name: red flank deck
+  blue flank ladder:
+    shape: {kind: circle, centre_px: [494.0, 1360.0], radius_px: 20}
+    description: The rope ladder up to the blue flank deck.
+    layout_name: blue flank ladder
+  red flank ladder:
+    shape: {kind: circle, centre_px: [1186.0, 1360.0], radius_px: 20}
+    description: The rope ladder up to the red flank deck.
+    layout_name: red flank ladder
+  blue centre bridge:
+    shape: {kind: polygon, points_px: [[618.8, 1338.0], [751.2, 1338.0], [751.2, 1382.0], [618.8, 1382.0]]}
+    description: The bridge from the blue flank deck to the great tree deck.
+    layout_name: blue centre bridge
+  red centre bridge:
+    shape: {kind: polygon, points_px: [[928.8, 1338.0], [1061.2, 1338.0], [1061.2, 1382.0], [928.8, 1382.0]]}
+    description: The bridge from the red flank deck to the great tree deck.
+    layout_name: red centre bridge
+  cross gate A, blue-side mouth:
+    shape: {kind: circle, centre_px: [1280.0, 1200.0], radius_px: 64.0}
+    description: The blue-side mouth of a wormhole that crosses the middle zone; it leads to cross gate A's red-side mouth.
+    layout_name: gate 0 mouth 1
+  cross gate A, red-side mouth:
+    shape: {kind: circle, centre_px: [400.0, 1760.0], radius_px: 64.0}
+    description: The red-side mouth of a wormhole that crosses the middle zone; it leads to cross gate A's blue-side mouth.
+    layout_name: gate 0 mouth 0
+  cross gate B, blue-side mouth:
+    shape: {kind: circle, centre_px: [1280.0, 960.0], radius_px: 64.0}
+    description: The blue-side mouth of the other wormhole that crosses the middle zone; it leads to cross gate B's red-side mouth.
+    layout_name: gate 1 mouth 0
+  cross gate B, red-side mouth:
+    shape: {kind: circle, centre_px: [400.0, 1520.0], radius_px: 64.0}
+    description: The red-side mouth of the other wormhole that crosses the middle zone; it leads to cross gate B's blue-side mouth.
+    layout_name: gate 1 mouth 1
+  blue rock 0:
+    shape: {kind: polygon, points_px: [[965.3, 941.4], [1013.3, 941.4], [1013.3, 979.8], [965.3, 979.8]]}
+    description: One of the two rocks of the middle zone on blue's side.
+    layout_name: blue rock 0
+  blue rock 1:
+    shape: {kind: polygon, points_px: [[385.1, 1102.8], [425.1, 1102.8], [425.1, 1134.8], [385.1, 1134.8]]}
+    description: One of the two rocks of the middle zone on blue's side.
+    layout_name: blue rock 1
+  red rock 0:
+    shape: {kind: polygon, points_px: [[666.7, 1740.2], [714.7, 1740.2], [714.7, 1778.6], [666.7, 1778.6]]}
+    description: One of the two rocks of the middle zone on red's side.
+    layout_name: red rock 0
+  red rock 1:
+    shape: {kind: polygon, points_px: [[1254.9, 1585.2], [1294.9, 1585.2], [1294.9, 1617.2], [1254.9, 1617.2]]}
+    description: One of the two rocks of the middle zone on red's side.
+    layout_name: red rock 1
+  red spawn:
+    shape: {kind: polygon, points_px: [[700.0, 2380.0], [980.0, 2380.0], [980.0, 2420.0], [935.3, 2478.4],
+      [791.0, 2482.6], [751.0, 2482.6], [700.0, 2420.0]]}
+    description: "Where red's players enter the level: six spawn points."
+    layout_name: red spawn
+  red palisade:
+    shape: {kind: polygon, points_px: [[480.0, 2160.0], [640.0, 2160.0], [640.0, 2320.0], [480.0, 2320.0]]}
+    description: The square fence around the red right pylon.
+    layout_name: red palisade
+  red right pylon:
+    shape: {kind: circle, centre_px: [560.0, 2240.0], radius_px: 20}
+    description: Red's pylon inside the palisade, on blue's right.
+    layout_name: red pylon 0
+  red treehouse:
+    shape: {kind: polygon, points_px: [[1020.0, 2100.0], [1220.0, 2100.0], [1222.0, 2136.0], [1222.0, 2264.0],
+      [1220.0, 2300.0], [1020.0, 2300.0]]}
+    description: The treehouse on blue's left, which holds the red left pylon.
+    layout_name: red treehouse
+  red left pylon:
+    shape: {kind: circle, centre_px: [1194.0, 2200.0], radius_px: 20}
+    description: Red's pylon in the treehouse.
+    layout_name: red pylon 1
+  red treehouse ladder:
+    shape: {kind: circle, centre_px: [1060.0, 2306.0], radius_px: 20}
+    description: The rope ladder up to the treehouse.
+    layout_name: red treehouse ladder
+  red home bridge:
+    shape: {kind: polygon, points_px: [[1098.0, 1868.8], [1142.0, 1868.8], [1142.0, 2101.2], [1098.0, 2101.2]]}
+    description: The bridge from the treehouse toward the middle, to the red middle deck.
+    layout_name: red home bridge
+  red home gate, mouth A:
+    shape: {kind: circle, centre_px: [760.0, 2080.0], radius_px: 48.0}
+    description: One of the two mouths of the wormhole inside the red zone; it leads to mouth B.
+    layout_name: gate 3 mouth 0
+  red home gate, mouth B:
+    shape: {kind: circle, centre_px: [1046.0, 2136.0], radius_px: 48.0}
+    description: One of the two mouths of the wormhole inside the red zone; it leads to mouth A.
+    layout_name: gate 3 mouth 1
+  mid gate, red mouth:
+    shape: {kind: circle, centre_px: [800.0, 1840.0], radius_px: 64.0}
+    description: The red end of the wormhole that joins the two team zones, on the red zone's edge.
+    layout_name: gate 2 mouth 0
+  red rock 2:
+    shape: {kind: polygon, points_px: [[363.7, 1904.0], [419.7, 1904.0], [419.7, 1948.8], [363.7, 1948.8]]}
+    description: One of the two rocks of the red zone.
+    layout_name: red rock 2
+  red rock 3:
+    shape: {kind: polygon, points_px: [[895.3, 2104.0], [931.3, 2104.0], [931.3, 2132.8], [895.3, 2132.8]]}
+    description: One of the two rocks of the red zone.
+    layout_name: red rock 3

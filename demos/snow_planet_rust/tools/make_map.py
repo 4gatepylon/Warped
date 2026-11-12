@@ -1,0 +1,287 @@
+"""`make_map.py` writes Snow Planet's map, `common/maps/snow_planet/map.json`, from the layout below.
+
+The map is plain Euclidean (E³, x right, y up, z back), without a torus (W-145, no walls at map edges): past the
+boundary ellipse a band `SOFT_EDGE_M` wide slows players without end instead of a wall. It is drawn in Fermi coordinates: u runs along -z (the teams' axis: blue at u < 0, red at u > 0) and v along +x. The red
+half is the blue half turned half a turn about the vertical through the origin, so the teams' sides match.
+
+Example: `python3 tools/make_map.py` (or `make map`) from the demo's folder.
+"""
+
+import json
+import math
+import random
+from pathlib import Path
+
+MAP_PATH: Path = Path(__file__).resolve().parents[3] / "common" / "maps" / "snow_planet" / "map.json"
+EYE_HEIGHT_M: float = 1.6
+PYLON_HEIGHT_M: float = 12.0
+PYLON_RADIUS_M: float = 1.35
+PYLON_CORE_M: float = 5.654
+ICE, SNOW, PACKED, ROCK, METAL = 3, 1, 2, 4, 5
+BLUE_PAINT, RED_PAINT = 6, 7
+CONSOLES: dict[str, list[int]] = {"blue": [11, 12], "red": [13, 14]}
+TEAM_LIGHT: dict[str, list[float]] = {"blue": [0.3, 0.65, 1.0], "red": [1.0, 0.28, 0.18]}
+
+
+def make_frame(u_m: float, v_m: float, h_m: float = 0.0, yaw_rad: float = 0.0) -> list[float]:
+    """`make_frame` gives a frame's 16 numbers (column-major) at Fermi (u, v, h), turned `yaw_rad` to the left.
+
+    Example:
+        >>> make_frame(0.0, 0.0)[12:]
+        [0.0, 0.0, -0.0, 1.0]
+    """
+    c, s = math.cos(yaw_rad), math.sin(yaw_rad)
+    return [c, 0.0, -s, 0.0, 0.0, 1.0, 0.0, 0.0, s, 0.0, c, 0.0, v_m, h_m, -u_m, 1.0]
+
+
+def make_box(name: str, u_m: float, v_m: float, half_m: list[float], material: int, yaw_rad: float = 0.0,
+             kind: str = "box", round_m: "float | None" = None) -> dict:
+    """`make_box` gives a structure of one shape standing on the ground at (u, v).
+
+    Example:
+        >>> make_box("bank", 1.0, 2.0, [1.0, 0.5, 1.0], 2)["shapes"][0]["centre_m"]
+        [0.0, 0.5, 0.0]
+    """
+    shape: dict = {"kind": kind, "centre_m": [0.0, half_m[1], 0.0], "half_m": half_m, "material": material}
+    if kind == "box":
+        shape["round_m"] = min(0.25, min(half_m) / 2) if round_m is None else round_m
+    if kind == "cylinder":
+        shape["axis"] = 1
+    return {"name": name, "frame": make_frame(u_m, v_m, 0.0, yaw_rad), "shapes": [shape]}
+
+
+# The whole map's light snowfall (flakes per cubic meter) and fog (meters to fade by 1/e).
+SNOW_PER_M3: float = 0.04
+# Everyone's lasers on Snow Planet are this green, whatever their team.
+LASER_COLOR: list[float] = [0.35, 1.0, 0.45]
+FOG_M: float = 75.0
+# The only cover, few because the warps and blizzards shape play: blue's rounded snow mounds (u, v, half sizes,
+# yaw); red's are the same turned half a turn.
+BLUE_MOUNDS: list[tuple] = [
+    (-26.0, 7.0, [1.8, 0.9, 1.4], 0.3),
+    (-12.0, -31.0, [2.0, 1.0, 1.2], -0.5),
+    (-42.0, 27.0, [1.6, 0.8, 1.6], 0.9),
+]
+MOUND_ROUND_M: float = 0.7
+# Five black holes placed by hand, then scattered by SCATTER_SEED so they look natural (not in rows): three north of the white-out, two south of it, offset (u, v).
+BLACK_HOLES: list[tuple] = [
+    ("black hole north-west", -22.0, 20.0),
+    ("black hole north", 0.0, 27.0),
+    ("black hole north-east", 21.0, 19.0),
+    ("black hole south-west", -6.0, -21.0),
+    ("black hole south-east", 19.0, -27.0),
+]
+BLIZZARDS: list[dict] = [
+    {"name": "white-out", "u_m": 0.0, "v_m": 0.0, "radius_m": 10.0},
+]
+BLIZZARD_NUMBERS: dict = {
+    "height_m": 16.0,
+    "speed_frac": 0.5,
+    "freeze_health_per_s": 0.08,
+    "shot_reach_m": 8.0,
+    "fog_per_m": 0.3,
+    "snow_per_m3": 1.0,
+}
+
+
+# The seed of the natural scatter of the black holes and mounds; the map's `source` names it.
+SCATTER_SEED: int = 7
+HOLE_JITTER_M: float = 2.5
+MOUND_JITTER_M: float = 2.0
+MOUND_JITTER_RAD: float = 0.3
+MIN_HOLE_GAP_M: float = 22.0
+MIN_HOLE_CLEARANCE_M: float = 12.0
+MIN_HOLE_TO_MOUTH_M: float = 20.0
+MIN_HOLE_TO_CENTRE_M: float = 21.0
+BOUNDARY_U_M: float = 60.0
+BOUNDARY_V_M: float = 40.0
+SOFT_EDGE_M: float = 12.0
+PYLON_SPOTS: list[tuple[float, float]] = [(-34.0, 16.0), (-34.0, -16.0), (34.0, 16.0), (34.0, -16.0)]
+# Mouth A stands by blue's south pylon, well inside the boundary ellipse (a mouth on its edge trapped walkers, W-126),
+# moved up to MOUTH_JITTER_M by MOUTH_SEED; mouth B is A turned half a turn about the middle.
+MOUTH_A_SPOT: tuple[float, float] = (-45.0, -21.0)
+MOUTH_JITTER_M: float = 1.0
+MOUTH_SEED: int = SCATTER_SEED + 1
+MAX_MOUTH_BOUNDARY_FRAC: float = 0.85
+MIN_MOUTH_TO_PYLON_M: float = 10.0
+MAX_SCATTER_TRY_COUNT: int = 1000
+
+
+def scatter_mounds(rng: random.Random) -> list[tuple]:
+    """`scatter_mounds` gives blue's mounds moved up to MOUND_JITTER_M and turned up to MOUND_JITTER_RAD at random.
+
+    Example:
+        >>> len(scatter_mounds(random.Random(SCATTER_SEED)))
+        3
+    """
+    return [(u_m + rng.uniform(-MOUND_JITTER_M, MOUND_JITTER_M), v_m + rng.uniform(-MOUND_JITTER_M, MOUND_JITTER_M),
+             half_m, yaw_rad + rng.uniform(-MOUND_JITTER_RAD, MOUND_JITTER_RAD))
+            for u_m, v_m, half_m, yaw_rad in BLUE_MOUNDS]
+
+
+def scatter_mouths() -> list[tuple[float, float]]:
+    """`scatter_mouths` gives mouth A's spot, MOUTH_A_SPOT moved up to MOUTH_JITTER_M by MOUTH_SEED, and mouth B's, A
+    turned half a turn about the middle, each checked to stand well inside the boundary and clear of the pylons.
+
+    Example:
+        >>> len(scatter_mouths())
+        2
+    """
+    rng: random.Random = random.Random(MOUTH_SEED)
+    a: tuple[float, float] = (MOUTH_A_SPOT[0] + rng.uniform(-MOUTH_JITTER_M, MOUTH_JITTER_M),
+                              MOUTH_A_SPOT[1] + rng.uniform(-MOUTH_JITTER_M, MOUTH_JITTER_M))
+    spots: list[tuple[float, float]] = [a, (-a[0], -a[1])]
+    for u_m, v_m in spots:
+        boundary_frac: float = (u_m / BOUNDARY_U_M) ** 2 + (v_m / BOUNDARY_V_M) ** 2
+        if boundary_frac > MAX_MOUTH_BOUNDARY_FRAC:
+            raise ValueError(f"a mouth at ({u_m}, {v_m}) is {boundary_frac} of the way to the boundary")
+        if min(math.dist((u_m, v_m), pylon) for pylon in PYLON_SPOTS) < MIN_MOUTH_TO_PYLON_M:
+            raise ValueError(f"a mouth at ({u_m}, {v_m}) is nearer than {MIN_MOUTH_TO_PYLON_M} m to a pylon")
+    return spots
+
+
+def scatter_black_holes(rng: random.Random, mound_spots: list[tuple[float, float]],
+                        mouth_spots: list[tuple[float, float]]) -> list[tuple]:
+    """`scatter_black_holes` gives BLACK_HOLES each moved up to HOLE_JITTER_M at random, drawn again until no two
+    reaches overlap and every hole keeps clear of the pylons, mounds, wormhole mouths and the white-out.
+
+    Example:
+        >>> len(scatter_black_holes(random.Random(SCATTER_SEED), [], scatter_mouths()))
+        5
+    """
+    for _ in range(MAX_SCATTER_TRY_COUNT):
+        holes: list[tuple] = [(name, u_m + rng.uniform(-HOLE_JITTER_M, HOLE_JITTER_M),
+                               v_m + rng.uniform(-HOLE_JITTER_M, HOLE_JITTER_M)) for name, u_m, v_m in BLACK_HOLES]
+        spots: list[tuple[float, float]] = [(u_m, v_m) for _, u_m, v_m in holes]
+        is_clear: bool = all(
+            math.dist(a, b) >= MIN_HOLE_GAP_M for i, a in enumerate(spots) for b in spots[i + 1:]
+        ) and all(
+            math.dist(a, b) >= MIN_HOLE_CLEARANCE_M for a in spots for b in PYLON_SPOTS + mound_spots
+        ) and all(
+            math.dist(a, b) >= MIN_HOLE_TO_MOUTH_M for a in spots for b in mouth_spots
+        ) and all(math.hypot(*a) >= MIN_HOLE_TO_CENTRE_M for a in spots)
+        if is_clear:
+            return holes
+    raise ValueError(f"no clear scatter of BLACK_HOLES in {MAX_SCATTER_TRY_COUNT} tries with seed {SCATTER_SEED}")
+
+
+def mirror(u_m: float, v_m: float, yaw_rad: float) -> tuple[float, float, float]:
+    """`mirror` turns a place on blue's half into red's: half a turn about the origin's vertical.
+
+    Example:
+        >>> mirror(1.0, 2.0, 0.0)
+        (-1.0, -2.0, 3.141592653589793)
+    """
+    return -u_m, -v_m, yaw_rad + math.pi
+
+
+def make_pylon(team: str, index: int, u_m: float, v_m: float) -> dict:
+    """`make_pylon` gives a team's pylon `index` (its console's material) at (u, v): the beacon model on a cylinder.
+
+    Example:
+        >>> make_pylon("blue", 0, -34.0, 16.0)["shapes"][0]["material"]
+        11
+    """
+    return {
+        "name": f"{team} pylon",
+        "frame": make_frame(u_m, v_m),
+        "mesh": {"model": "scifi_beacon", "height_m": PYLON_HEIGHT_M},
+        "shapes": [{"kind": "cylinder", "centre_m": [0.0, PYLON_CORE_M, 0.0],
+                    "half_m": [PYLON_RADIUS_M, PYLON_HEIGHT_M - PYLON_CORE_M, PYLON_RADIUS_M], "round_m": 0.0,
+                    "axis": 1, "material": CONSOLES[team][index]}],
+    }
+
+
+def make_map() -> dict:
+    """`make_map` gives the whole manifest.
+
+    Example:
+        >>> make_map()["space"]["kind"]
+        'euclidean'
+    """
+    structures: list[dict] = []
+    rng: random.Random = random.Random(SCATTER_SEED)
+    blue_mounds: list[tuple] = scatter_mounds(rng)
+    mound_spots: list[tuple[float, float]] = []
+    for u_m, v_m, half_m, yaw_rad in blue_mounds:
+        structures.append(make_box("blue snow mound", u_m, v_m, half_m, PACKED, yaw_rad, "box", MOUND_ROUND_M))
+        ru, rv, ryaw = mirror(u_m, v_m, yaw_rad)
+        mound_spots += [(u_m, v_m), (ru, rv)]
+        structures.append(make_box("red snow mound", ru, rv, half_m, PACKED, ryaw, "box", MOUND_ROUND_M))
+    lights: list[dict] = []
+    for team, sign in (("blue", -1.0), ("red", 1.0)):
+        for index, v_m in enumerate((16.0, -16.0)):
+            u_m = sign * 34.0
+            structures.append(make_pylon(team, index, u_m, sign * v_m))
+            lights.append({"position": [sign * v_m, 8.0, -u_m, 1.0], "color": TEAM_LIGHT[team], "radius_m": 8.0})
+    warps: list[dict] = []
+    mouth_spots: list[tuple[float, float]] = scatter_mouths()
+    for name, u_m, v_m in scatter_black_holes(rng, mound_spots, mouth_spots):
+        warps.append({"kind": "black_hole", "name": name, "frame": make_frame(u_m, v_m, 6.0),
+                      "law": "isotropic_schwarzschild", "schwarzschild_radius_m": 1.1, "radial_coordinate": "distance",
+                      "reach_m": 11.0, "falloff": "taper"})
+    mouth_a_index: int = len(warps)
+    for name, (u_m, v_m), yaw_rad, partner in (("wormhole mouth A", mouth_spots[0], 0.0, mouth_a_index + 1),
+                                               ("wormhole mouth B", mouth_spots[1], math.pi, mouth_a_index)):
+        warps.append({"kind": "wormhole_mouth", "name": name, "frame": make_frame(u_m, v_m, EYE_HEIGHT_M, yaw_rad),
+                      "law": "foil", "schwarzschild_radius_m": 1.6, "lambda_squared": 0.25,
+                      "radial_coordinate": "distance", "reach_m": 9.0, "falloff": "taper", "partner": partner})
+    materials: list[dict] = [
+        {"id": 0, "name": "air", "color": [0, 0, 0], "kind": "empty"},
+        {"id": SNOW, "name": "snow", "color": [0.86, 0.9, 0.95], "kind": "solid"},
+        {"id": PACKED, "name": "packed snow", "color": [0.78, 0.83, 0.9], "kind": "solid"},
+        {"id": ICE, "name": "ice", "color": [0.62, 0.82, 0.95], "kind": "glass"},
+        {"id": ROCK, "name": "rock", "color": [0.32, 0.33, 0.36], "kind": "solid"},
+        {"id": METAL, "name": "metal", "color": [0.46, 0.48, 0.52], "kind": "solid"},
+        {"id": BLUE_PAINT, "name": "blue paint", "color": [0.14, 0.3, 0.74], "kind": "solid"},
+        {"id": RED_PAINT, "name": "red paint", "color": [0.72, 0.12, 0.1], "kind": "solid"},
+        {"id": 8, "name": "blue light", "color": [0.25, 0.55, 1.0], "kind": "light"},
+        {"id": 9, "name": "red light", "color": [1.0, 0.16, 0.1], "kind": "light"},
+        {"id": 10, "name": "white light", "color": [1.0, 0.94, 0.82], "kind": "light"},
+    ]
+    for team, ids in CONSOLES.items():
+        for index, material in enumerate(ids):
+            materials.append({"id": material, "name": f"{team} console {index + 1}", "color": TEAM_LIGHT[team],
+                              "kind": "light"})
+    sun: list[float] = [-0.55, 0.42, 0.72]
+    norm: float = math.sqrt(sum(c * c for c in sun))
+    return {
+        "format": "warped-map",
+        "version": 1,
+        "name": "snow_planet",
+        "description": "A snow field in flat space, slowing players without end past its edge: two pylons a team, five black holes, a wormhole pair, "
+        "open snow with six rounded mounds, light snowfall and fog, and one tall blizzard.",
+        "source": f"demos/snow_planet_rust/tools/make_map.py, scatter seed {SCATTER_SEED} "
+                  "(after demos/levels/snow_planet/index.html)",
+        "space": {"kind": "euclidean"},
+        "gravity_m_per_s2": 9.81,
+        "player": {"eye_height_m": EYE_HEIGHT_M, "walk_m_per_s": 5.0, "sprint_m_per_s": 9.0, "jump_m_per_s": 5.2,
+                   "fly_m_per_s": 14.0},
+        "materials": materials,
+        "ground": {"material": SNOW},
+        "structures": structures,
+        "warps": warps,
+        "lights": lights,
+        "sky": {"transport": "parallel", "sun": {"direction": [c / norm for c in sun], "color": [1.0, 0.95, 0.88]},
+                "stars": False, "clouds": True, "zenith_color": [0.42, 0.56, 0.74],
+                "horizon_color": [0.82, 0.87, 0.93], "fog_m": FOG_M, "snow_per_m3": SNOW_PER_M3},
+        "spawns": [{"team": "blue", "frame": make_frame(-48.0, 0.0)},
+                   {"team": "red", "frame": make_frame(48.0, 0.0, 0.0, math.pi)}],
+        "regions": {
+            "zones": [{"team": "blue", "u_min_m": None, "u_max_m": -20.0},
+                      {"team": "middle", "u_min_m": -20.0, "u_max_m": 20.0},
+                      {"team": "red", "u_min_m": 20.0, "u_max_m": None}],
+            "boundary": {"kind": "fermi_ellipse", "u_m": BOUNDARY_U_M, "v_m": BOUNDARY_V_M,
+                         "soft_edge_m": SOFT_EDGE_M},
+            "zone_walls": {"height_m": 6.0, "thickness_m": 0.6, "opacity_frac": 0.25},
+            "blizzards": [{**blizzard, **BLIZZARD_NUMBERS} for blizzard in BLIZZARDS],
+        },
+        "appearance": {"style": "snow", "laser_color": LASER_COLOR, "lighting": {"model": "lunar_lambert", "lommel_seeliger_frac": 0.2,
+                                                     "ambient": 0.3, "earthshine": 0.0, "sun_intensity": 1.2,
+                                                     "shadows": True}},
+    }
+
+
+if __name__ == "__main__":
+    MAP_PATH.write_text(json.dumps(make_map(), indent=1) + "\n")
+    print(f"Wrote {MAP_PATH}")
