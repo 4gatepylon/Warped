@@ -14,7 +14,10 @@ description: Split a change into stacked pull requests and manage the stack with
 - By default, stack with GitHub's native stacked PRs, using the `gh stack` CLI extension
   (`gh extension install github/gh-stack`). It needs Git 2.36 or later, and stacked PRs must be
   enabled for the repository.
-  - `gh stack init <branch>` starts the stack with its first branch. Commit the first piece there.
+  - `gh stack` switches branches, so run it only in a worktree of your own, NEVER in the user's
+    checkout (the `managing-agents` skill).
+  - `gh stack init --base staging/user-<username> <branch>` starts the stack on your user's
+    staging branch (see the `merging-to-staging` skill) with its first branch. Commit the first piece there.
     If `<branch>` already exists (e.g. the branch of the worktree you are in), `gh stack init`
     adopts it instead of creating a new one.
   - `gh stack add <branch>` adds a branch on top of the stack. Commit the next piece there, and
@@ -23,8 +26,10 @@ description: Split a change into stacked pull requests and manage the stack with
   - To change a lower piece (e.g. after review), switch to its branch with
     `gh stack checkout <branch>` or `gh stack down`, and commit there rather than in a higher layer.
     Then run `gh stack rebase --upstack` and `gh stack push`.
-  - PRs merge bottom-up, with `gh stack merge` or from the merge box on GitHub. Afterwards,
-    `gh stack sync --prune` rebases the remaining branches onto `main` and removes merged ones.
+  - PRs merge bottom-up into `staging/user-<username>`, with `gh stack merge` or from the merge
+    box on GitHub; agents may do this themselves. Afterwards, `gh stack sync --prune` rebases the
+    remaining branches onto it and removes merged ones. Agents merge into `staging/global` or
+    `main` only with the user's explicit permission for that merge.
 - If `gh stack` can't be used (the extension is missing, Git is older than 2.36, or it exits with
   code 9 because stacked PRs aren't enabled), tell the user and ask before falling back to stacking
   by hand: open the PRs with `gh pr create --base <branch below>`, then link them into a stack on

@@ -19,9 +19,11 @@ first try at the README checklist's first item for this level; the layout is a p
      and cover. A covered walkway from the dome into the crater's left entrance connects it to the crater route.
   3. **Ridge route** (right): boulders along the foot of a ridge whose crest has long sight lines over the crater, and
      wormhole mouth A, which leads to the red landing pad 30 m from the red pylon.
-- **Blue zone:** the blue lander (spawn), the blue pylon on a deployed pad, crates, a solar array and a relay mast.
+- **Blue zone:** the blue lander (spawn), three blue pylons on deployed pads (one by the lander, one on each flank),
+  crates, a solar array and a relay mast.
 - **Red zone** (the most defensible): a barrier line with gaps, a red habitat module, the red dome, a watchtower over
-  the landing pad where the wormhole comes out, and the red pylon in front of the red spawn hangar, all red-lit.
+  the landing pad where the wormhole comes out, and three red pylons (one in front of the red spawn hangar, one on
+  each flank), all red-lit.
 
 ## What to try
 
@@ -38,7 +40,8 @@ first try at the README checklist's first item for this level; the layout is a p
 - **Long range** (`9`, the ridge crest): things shrink with distance by R·sinh(d/R)/d more than in flat space (2.4
   times at 100 m). A level shot rises away from the curving ground: 100 m out it passes 10 m up, so aim low.
 - **Harsh light:** the sun is 17° high everywhere on the level, so shadows are 3.3 times as long as things are tall.
-- **Consoles** (`8`): hold `E` within 3 m of a red console, facing the pylon, for 10 s. `T` switches team.
+- **Consoles** (`8`): each pylon has one console. Hold `E` within 3 m of a red console, facing its pylon, for 10 s;
+  red loses when all three are off. `T` switches team.
 
 ## Controls
 
@@ -50,7 +53,7 @@ first try at the README checklist's first item for this level; the layout is a p
 | `Space` | jump; in fly mode, up |
 | `C` | in fly mode, down |
 | `H` | toggle fly mode (at most 400 m from the centre) |
-| `E` (hold) | deactivate a console of the other team's pylon |
+| `E` (hold) | deactivate a console of one of the other team's pylons |
 | Click (captured) or `R` | fire the laser |
 | `T` | play as the other team (moves you to its spawn) |
 | `1`–`9` | viewpoints |
@@ -126,8 +129,12 @@ node demos/levels/lunar_surface/export_map.mjs
 ```
 
 writes the level's layout (structures, black hole, wormhole, lamps, sky, spawns) to `common/maps/lunar_surface/` in the
-portable map format (`common/maps/README.md`), by running this page's own layout code in Node. Rerun it after changing
-the layout, then `make -C common/maps validate-maps`.
+portable map format (`common/maps/README.md`), by running this page's own layout code in Node. `shape_builders.js` turns
+the blue lander into the Stekelvarken kazemat (6 m tall), the red hangar into the desert bunker garage (9 m), the
+derelict habitat modules into WW2 field bunkers (5.5 m), the pylons into sci-fi beacons (12 m tall), each its pylon's
+console, and the red barriers into rows of Hesco blocks, with seven more rows on the blue side. Each is drawn as its
+Sketchfab model (`common/maps/models/`, credits there), whose triangles stop players, so the bunkers can be walked into;
+the red spawn is inside the garage. Rerun it after changing the layout, then `make -C common/maps validate-maps`.
 
 ## Known limitations
 
@@ -139,4 +146,4 @@ the layout, then `make -C common/maps validate-maps`.
 - Light bends only inside the reach spheres; between 10 m and 24 m from the black hole the bending is weaker than a
   real black hole's, and beyond 24 m there is none.
 - The sky is a parallel-transported skybox rather than the sphere at infinity, so it barely moves as you walk.
-- Glass is see-through and stops the laser but doesn't refract. The laser has no gravity drop. No damage model.
+- Glass lets light and the laser through but doesn't refract; it stops players. The laser has no gravity drop. No damage model.

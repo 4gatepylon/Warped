@@ -6,13 +6,12 @@ once and drawn and simulated the same way everywhere. Gameplay that changes duri
 state) is not part of a map.
 
 A map is a folder `common/maps/<name>/` holding `map.json`, a JSON manifest that [`map.schema.json`](map.schema.json)
-describes, and, if the map has voxel structures, `voxels.bin`, their cells. `validate_map.py` checks a map against
-this page (`make validate-maps`).
+describes. `validate_map.py` checks a map against this page (`make validate-maps`).
 
 | Map | Made by | What it is |
 | --- | --- | --- |
 | [`house_demo/`](house_demo/) | `demos/hyperbolic_wormholes_rust` (`--export-map`) | the Rust wormholes demo's house, rails and pylons in H³ (R = 8 m), three wormholes |
-| [`lunar_surface/`](lunar_surface/) | `demos/levels/lunar_surface/export_map.mjs` | the Lunar Surface level in H³ (R = 40 m), 53 voxel structures, a black hole and a wormhole |
+| [`lunar_surface/`](lunar_surface/) | `demos/levels/lunar_surface/export_map.mjs` | the Lunar Surface level in H³ (R = 40 m), a crater, 25 smooth-shape structures, a black hole and a wormhole |
 
 Both are exported from the programs that first built them; the map files are what other programs read.
 
@@ -30,8 +29,8 @@ Both are exported from the programs that first built them; the map files are wha
   every local frame +y is up, −z is forward and +x is right.
 - **Local coordinates** of a local point p are its projective coordinates, scaled to meters at the origin:
   q = R · (p_x, p_y, p_z) / p_w (Klein coordinates in H³, gnomonic in S³), or q = (p_x, p_y, p_z) in E³. In all three
-  spaces geodesics are straight lines in q and geodesic planes are planes, so a voxel's faces are geodesic planes and a
-  ray crosses a structure as a straight line (a plain voxel walk). The map from q back to p is
+  spaces geodesics are straight lines in q and geodesic planes are planes, so a ray crosses a structure as a straight
+  line in q. The map from q back to p is
   p = (q/R, 1)/√(1 − |q/R|²) in H³ and (q/R, 1)/√(1 + |q/R|²) in S³.
 - **The ground** is the geodesic plane y = 0 of the world frame; the world origin (0, 0, 0, 1) is on it, and "up" at
   any point is the unit normal away from that plane.
@@ -54,8 +53,8 @@ Both are exported from the programs that first built them; the map files are wha
 | `gravity_m_per_s2` | the acceleration toward the ground |
 | `player` | `{"eye_height_m", "walk_m_per_s", "sprint_m_per_s", "jump_m_per_s", "fly_m_per_s"}` |
 | `materials` | the palette (below); material 0 is always empty space |
-| `ground` | `{"material": id, "tiling": {...}}` (optional `tiling`, below) |
-| `structures` | voxel structures (below), optional |
+| `ground` | `{"material": id, "tiling": {...}, "terrain": {...}}` (optional `tiling` and `terrain`, below) |
+| `structures` | structures of smooth shapes, optionally drawn as a model (below), optional |
 | `boxes` | boxes (below), optional |
 | `warps` | black holes and wormhole mouths (below), optional |
 | `lights` | lamps (below), optional |
@@ -67,18 +66,25 @@ Both are exported from the programs that first built them; the map files are wha
 ### Materials
 
 `{"id", "name", "color": [r, g, b], "kind"}`, ids from 0 to 255, each once. `kind` is `empty` (id 0 only), `solid`,
-`glass` (see-through for light, stops lasers and players) or `light` (solid and glowing in its own colour, unlit).
+`glass` (see-through for light and lasers; stops players) or `light` (solid and glowing in its own colour, unlit).
 
-### Voxel structures
+### Structures
 
-`{"name", "frame", "voxels": {"size": [n_x, n_y, n_z], "cell_m", "origin": [o_x, o_y, o_z], "offset_bytes"}}`.
+`{"name", "frame", "shapes": [...]}`: a solid made of smooth shapes, each
+`{"kind", "centre_m": [c_x, c_y, c_z], "half_m": [h_x, h_y, h_z], "round_m", "axis", "material"}` in the frame's local
+coordinates q (meters):
 
-- Cell (i, j, k) is the region of local coordinates (i − o_x, j − o_y, k − o_z) · c ≤ q < (i − o_x + 1, …) · c, with
-  c = `cell_m` (so a cell is `cell_m` wide at the frame's origin, and grows slowly away from it in H³).
-- Its material is byte i + n_x (j + n_y k) of `voxels.bin`, counted from `offset_bytes`; the structure's
-  n_x · n_y · n_z bytes are contiguous, structures may come in any order, and together they fill the file exactly
-  once.
-- A ray or a player meets the structure where it enters a cell whose material isn't empty.
+- `box`: the box |q − c| ≤ h per axis, its edges and corners rounded by `round_m` (default 0, at most the smallest
+  half size).
+- `cylinder`: a cylinder along local axis `axis` (0 = x, 1 = y, 2 = z; default 1), half length h along it and radius
+  the next axis's h, its rims rounded by `round_m`.
+- `ellipsoid`: the ellipsoid with semi-axes h centred at c.
+- A ray or a player meets the structure where it enters any shape. `demos/hyperbolic_wormholes_rust/src/shapes.rs`
+  defines the shapes' distance bounds exactly.
+- `mesh` (optional): `{"model", "height_m"}` draws the glTF model `models/<model>/scene.gltf` (see Models) instead of
+  the shapes, scaled evenly to `height_m` tall, with the bottom centre of its bounding box at the local origin, its
+  +y up and its −z forward. Its triangles stop light and lasers; the shapes then only stop players, and a renderer
+  that doesn't draw models draws them instead.
 
 ### Boxes
 
@@ -124,8 +130,8 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
 
 ### Sky
 
-`{"transport", "sun": {"direction": [x, y, z], "color": [r, g, b]}, "planet": {...}, "stars": bool, "clouds": bool,
-"zenith_color", "horizon_color", "fog_m"}`:
+`{"transport", "sun": {"direction": [x, y, z], "color": [r, g, b]}, "planet": {...}, "milky_way": {...}, "stars": bool,
+"clouds": bool, "zenith_color", "horizon_color", "fog_m"}`:
 
 - `transport` is how a ray that escapes finds its direction in the sky: `parallel` (the sky is fixed at the world
   origin like a skybox: the ray's last direction is carried by parallel transport along the geodesic to the eye, then
@@ -133,6 +139,10 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
   (the ray's direction at infinity, where its geodesic meets the sphere at infinity, read in the world frame).
 - `sun.direction` is a unit direction in the world origin's local frame.
 - `planet` (optional): `{"direction": [x, y, z], "angular_radius_rad"}`, another body in the sky.
+- `milky_way` (optional): `{"pole_direction": [x, y, z], "core_direction": [x, y, z]}`, where the galaxy's band lies:
+  along the great circle 90° from `pole_direction`, brightest and widest at `core_direction`, a direction on that
+  circle. Both are unit directions in the world origin's local frame, perpendicular to each other. How the band looks
+  (brightness, colour, dust) is the appearance style's.
 - `fog_m` (optional): a surface d meters away keeps e^(−d/`fog_m`) of its colour, and the rest is `horizon_color`.
 
 ### Spawns
@@ -142,14 +152,30 @@ ground or on a structure) and their eye `player.eye_height_m` above it, facing t
 
 ### Regions
 
-`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"}}`, in the world's
-Fermi coordinates: a team's zone is a band of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"},
+"zone_walls": {"height_m", "thickness_m", "opacity_frac"}}`, in the world's Fermi coordinates: a team's zone is a band
+of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+
+`zone_walls` (optional) marks each finite edge (`u_min_m` or `u_max_m`) of each blue or red zone with a wall in the
+team's colour that stops neither players nor lasers. Its middle is the points straight above the edge (Fermi u equal to
+the edge's, any v and h), from the ground (the terrain's height H(u, v), or h = 0 without terrain) up to `height_m`
+above it, within the boundary when there is one. The edge is a geodesic of the ground, so in H³ (and S³) that middle is
+part of a geodesic plane, and the wall is the slab of points within `thickness_m` / 2 of it. Seen straight through
+its thickness, it is `opacity_frac` opaque at the ground (0 < `opacity_frac` < 1) and fades out toward its top;
+renderers choose the fade and the glow.
 
 ### Ground tiling and appearance
 
 - `ground.tiling` (optional): `{"kind": "square_order_5", "cells_per_side": N}` in H³: the ground is tiled by squares
   with 72° corners (five at each vertex), the world origin at a tile's centre and its edges along x and z, each tile
   split into N × N cells for texture.
+- `ground.terrain` (optional; without it the ground is flat): `{"kind": "crater", "rim_u_m", "rim_v_m", "wall_m",
+  "rim_height_m", "relief_m", "relief_wavelength_m", "seed", "mounds"}` raises the ground at Fermi (u, v) to height H(u, v) above
+  h = 0: a crater wall rising over `wall_m` inward of the rim ellipse (semi-axes `rim_u_m`, `rim_v_m`; inward measured as
+  (1 − e) · `rim_v_m`, e the ellipse's radius) to about `rim_height_m`, falling away outside, plus value-noise relief of
+  up to `relief_m` at `relief_wavelength_m`, plus `mounds` (optional, at most 64): hills
+  `{"u_m", "v_m", "radius_m", "height_m"}`, each adding `height_m` · (1 − d²)² where d < 1 is the distance from
+  (`u_m`, `v_m`) over `radius_m`. `demos/hyperbolic_wormholes_rust/src/terrain.rs` defines H exactly.
 - `appearance.style` names how a renderer details surfaces and the sky beyond what the map fixes: noise on blocks,
   craterlets, star fields, clouds. Renderers implement each style they support and draw any other plainly with the
   materials' colours. Defined styles: `meadow` (the house demo's grass, roads and block textures) and `lunar` (Lunar
@@ -157,6 +183,33 @@ Fermi coordinates: a team's zone is a band of u, and the playable area is (u/u_m
   `{"model": "ambient_sun", "ambient", "sun"}` (a constant plus Lambert sunlight) or
   `{"model": "lunar_lambert", "lommel_seeliger_frac", "ambient", "earthshine", "sun_intensity", "shadows": bool}`
   (that mix of Lommel–Seeliger and Lambert reflectance, with straight shadow rays toward the sun if `shadows`).
+
+## Models
+
+`models/<name>/` holds glTF models that maps draw (`scene.gltf`, `scene.bin`, `textures/`, `license.txt`), small
+copies that `prepare_models.py` writes from Sketchfab downloads: same geometry, textures shrunk to 1024 px, spec-gloss
+materials turned into metallic-roughness. It downloads into the git-ignored `.build/sketchfab/` and needs
+`SKETCHFAB_API_TOKEN` only for models not downloaded yet:
+
+```bash
+SKETCHFAB_API_TOKEN=... uv run python prepare_models.py
+```
+
+All are licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) and need their authors credited:
+
+| Folder | Model | Author |
+| --- | --- | --- |
+| `stekelvarken_kazemat/` | ["'Stekelvarken S3' Kazemat (Dutch WWII bunker)"](https://sketchfab.com/3d-models/stekelvarken-s3-kazemat-dutch-wwii-bunker-f409a77deaaf4e3888d47f76ec48dbdd) | [Sjoerd van Riel](https://sketchfab.com/sjoerdnijkerk) |
+| `desert_bunker_garage/` | ["Desert Planet Bunker Garage Thing"](https://sketchfab.com/3d-models/desert-planet-bunker-garage-thing-ebe3177a1c7947b98328d8cab6aa8600) | [Santeri Riikonen](https://sketchfab.com/eKross) |
+| `ww2_field_bunker/` | ["WW2 Field Bunker"](https://sketchfab.com/3d-models/ww2-field-bunker-6ea5cebdaa82455aa3aad26baa6e0375) | [Golden](https://sketchfab.com/goldenblack4) |
+| `scifi_beacon/` | ["Sci-Fi Beacon/Way Point Marker Free Model"](https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f) | [AMMediaGames](https://sketchfab.com/AMMediaGames) |
+| `hesco_barrier/` | ["Hesco Barrier PBR"](https://sketchfab.com/3d-models/hesco-barrier-pbr-ab21217481094e9a84f989e71fd56a59) | [polbrainstorm](https://sketchfab.com/polbrainstorm) |
+
+`teal_robot/` is the players' body, not part of any map: ["Teal V.2"](https://sketchfab.com/3d-models/teal-v2-d6a54ff9468c451bbdbd879afa03f20a)
+by [Lagst](https://sketchfab.com/Lagst), under the [Sketchfab Standard](https://sketchfab.com/licenses) license (use
+in any project, no redistribution of the model on its own; the repository is private). `prepare_models.py` runs
+`animate_teal_blender.py` in Blender on it first (`--blender-path`), which gives it a clean rig and the clips `Idle`,
+`Walk`, `Run`, `Jump` and `Death`.
 
 ## Checking a map
 

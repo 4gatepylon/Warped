@@ -10,6 +10,8 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 glam = "0.34"
+gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_materials_transmission"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 objc2 = "0.6"
 objc2-core-foundation = "0.3"
 objc2-foundation = "0.3"
@@ -21,3 +23,4 @@ rayon = "1.12"
 sdl3 = { version = "0.22", features = ["build-from-source-static"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+serde_yaml = "0.9"

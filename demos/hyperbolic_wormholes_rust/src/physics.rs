@@ -3,7 +3,7 @@
 //! It also aims through a mouth and traces the laser, whose path is a light ray.
 //!
 //! Interface: `Player`, `Input`, `update_player`, `look_around`, `level_out`, `aim_through_mouth`,
-//! `find_aimed_mouth`, `trace_laser`, `LaserReport`.
+//! `trace_laser`, `LaserReport`.
 //!
 //! Example: `let messages = update_player(&world, &mut player, &input, 1.0 / 60.0);`
 //!
@@ -44,7 +44,6 @@ const AIM_MAX_TURN: f64 = 0.2;
 const AIM_MAX_STEP_COUNT: usize = 4000;
 const AIM_MAX_TRAVEL_M: f64 = 120.0;
 const AIM_GIVE_UP_PAST_CLOSEST_M: f64 = 1.0;
-const SHADOW_PER_HORIZON: f64 = 2.598_076_211_353_316;
 const HAND_OFFSET_M: DVec3 = DVec3::new(0.25, -0.22, -0.35);
 const LASER_FOCUS_M: f64 = 10.0;
 const LASER_MAX_M: f64 = 150.0;
@@ -70,13 +69,15 @@ pub struct Input {
     pub up: bool,
     pub down: bool,
     pub sprint: bool,
+    pub crouch: bool,
 }
 
-/// `LaserReport` describes the laser's path: how many wormholes it went through, what it hit and
-/// how long it is.
+/// `LaserReport` describes the laser's path: how many wormholes it went through (and the index of
+/// each mouth it went into), what it hit and how long it is.
 #[derive(Clone, Default)]
 pub struct LaserReport {
     pub wormhole_count: usize,
+    pub mouths_entered: Vec<usize>,
     pub hit: Option<String>,
     pub hit_box: Option<usize>,
     pub length_m: f64,
@@ -207,6 +208,9 @@ pub fn get_up_local(frame: DMat4) -> DVec3 {
 ///
 /// Example: `messages.push(format_crossing(&world, mouth));`
 fn format_crossing(world: &World, mouth: &Mouth) -> String {
+    if mouth.color.is_some() {
+        return format!("Through {}", mouth.name);
+    }
     format!(
         "Through wormhole {}: out of mouth {}",
         mouth.pair_index + 1,
@@ -621,41 +625,16 @@ pub fn aim_through_mouth(world: &World, frame: &mut DMat4, target: &Mouth) {
     );
 }
 
-/// `find_aimed_mouth` finds the mouth whose dark disk is closest to the crosshair: the angle to
-/// its centre less the disk's apparent radius is smallest.
-///
-/// Example: `if let Some(k) = find_aimed_mouth(&world, player.frame) { aim(k); }`
-pub fn find_aimed_mouth(world: &World, frame: DMat4) -> Option<usize> {
-    let x: DVec4 = frame.col(AXIS_W);
-    let mut best: Option<(usize, f64)> = None;
-    for (k, mouth) in world.mouths.iter().enumerate() {
-        let distance: f64 = get_distance(x, mouth.center);
-        if distance < 1e-9 {
-            continue;
-        }
-        let local: DVec3 =
-            get_local_direction(frame, normalize_tangent(x, mouth.center)).normalize();
-        let angle_rad: f64 = (-local.z).clamp(-1.0, 1.0).acos();
-        let disk_rad: f64 = (SHADOW_PER_HORIZON * world.get_throat_m()
-            / crate::world::THROAT_PER_HORIZON
-            / (world.curvature_radius_m * distance.sinh()))
-        .atan();
-        if best.is_none_or(|(_, score)| angle_rad - disk_rad < score) {
-            best = Some((k, angle_rad - disk_rad));
-        }
-    }
-    best.map(|(k, _)| k)
-}
-
 /// `trace_laser` traces the laser from the hand toward the point `LASER_FOCUS_M` straight ahead of
 /// the eye (in hyperbolic space a beam parallel to the line of sight would drift away from the
 /// crosshair), as a light ray through the frame's packed scene (so it meets exactly what the
-/// renderer draws), and returns its path in world coordinates and a report.
+/// renderer draws) that passes through glass, and returns its path in world coordinates and a
+/// report.
 ///
 /// Example: `let (beam, report) = trace_laser(&world, &data);`
 pub fn trace_laser(world: &World, data: &SceneData) -> (Beam, LaserReport) {
     let r: f64 = world.curvature_radius_m;
-    let scene: Scene = Scene::New(data);
+    let scene: Scene = Scene::ForLaser(data);
     let hand_distance: f64 = HAND_OFFSET_M.length() / r;
     let hand: DVec4 =
         (HAND_OFFSET_M.normalize() * hand_distance.sinh()).extend(hand_distance.cosh());
@@ -696,6 +675,9 @@ pub fn trace_laser(world: &World, data: &SceneData) -> (Beam, LaserReport) {
             if row != current_row {
                 if current_row != usize::MAX {
                     report.wormhole_count += 1;
+                    report
+                        .mouths_entered
+                        .push(world.mouths[row - 1].partner_index);
                 }
                 beam.runs.push(vec![(a_world, f64::from(t0_m))]);
                 current_row = row;
@@ -737,17 +719,59 @@ pub fn describe_box(world: &World, index: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of moving through the starting wormholes.
+    //! Tests of moving through the starting wormholes, and of the laser at a window.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | How you move | walking, flying | `walking_into_each_entrance_goes_through`, `flying_into_each_entrance_goes_through` |
     //! | Which entrance | near (1A), behind (2A), far left (3A) | both tests above, which try all three |
+    //! | Ray at a house window's glass | the picture's (stops on it), the laser's (passes through, to the wall the glass is laid on) | `the_laser_passes_through_a_house_window` |
 
     use super::*;
+    use crate::geometry::AXIS_Z;
+    use crate::world::MATERIAL_GLASS;
 
     const DT_S: f64 = 1.0 / 60.0;
     const MAX_S: f64 = 10.0;
+    const WINDOW_EYE_M: f64 = 3.0;
+    const RENDER_PX: (u32, u32) = (640, 400);
+
+    /// `the_laser_passes_through_a_house_window` aims at the middle of a window of the house from
+    /// `WINDOW_EYE_M` away: the picture's ray along the crosshair stops on the glass, and the laser
+    /// goes through it to the plank wall it is laid on (W-70).
+    #[test]
+    fn the_laser_passes_through_a_house_window() {
+        let world: World = World::Build(crate::world::DEFAULT_CURVATURE_RADIUS_M);
+        let pane: &crate::world::HyperbolicBox = world
+            .boxes
+            .iter()
+            .find(|b| b.material == MATERIAL_GLASS && b.half_m[2] < b.half_m[0])
+            .expect("a window facing along its frame's z");
+        let pane_frame: DMat4 = DMat4::from_cols(
+            pane.normals[0],
+            pane.normals[1],
+            pane.normals[2],
+            pane.center,
+        );
+        let eye: DMat4 = pane_frame * make_boost(AXIS_Z, WINDOW_EYE_M / world.curvature_radius_m);
+        let data: SceneData = SceneData::Build(&world, eye, &Beam::default(), RENDER_PX, 0.0, true);
+        let picture_end: TraceEnd =
+            trace_ray(&Scene::New(&data), Vec4::W, Vec4::NEG_Z, |_, _, _, _, _| {});
+        assert!(
+            matches!(picture_end, TraceEnd::Surface { index, .. }
+                if index >= 0 && world.boxes[index as usize].material == MATERIAL_GLASS),
+            "the picture's ray along the crosshair stops on the glass"
+        );
+        let (_, report) = trace_laser(&world, &data);
+        let hit_box: usize = report
+            .hit_box
+            .expect("the laser hits the wall behind the glass");
+        assert_ne!(
+            world.boxes[hit_box].material, MATERIAL_GLASS,
+            "the laser stops on the glass of {:?}",
+            report.hit
+        );
+    }
 
     /// `move_into` aims at a mouth from spawn and holds forward until a crossing, returning the
     /// crossing message (or the closest approach in blocks, for the failure message).

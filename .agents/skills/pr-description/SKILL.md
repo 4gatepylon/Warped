@@ -1,6 +1,6 @@
 ---
 name: pr-description
-description: Write or update a pull request description using this repo's standard template. Use whenever you open a PR (gh pr create, gh stack submit), edit a PR's body, or the user asks for a PR description, title or summary. Every PR in this repo uses the same template.
+description: Write or update a pull request description using this repo's standard template, and open every PR against the user's `staging/user-<username>` branch (agents merge into `staging/global` or `main` only with explicit permission). Use whenever you open a PR (gh pr create, gh stack submit), edit a PR's body, or the user asks for a PR description, title or summary. Every PR in this repo uses the same template.
 ---
 
 # PR description
@@ -14,6 +14,15 @@ split and stack PRs is in the `stacked-prs` skill (`.agents/skills/stacked-prs/`
 > the current version. If a PR doesn't fit it (a section makes no sense, or something important
 > has no place), stop and ask the user for guidance rather than improvising a variant. If the
 > template needs to change, change it in this skill in its own PR.
+
+## Base branch
+
+- Open every PR against your user's `staging/user-<username>`, never straight against
+  `staging/global` or `main`. In a stack, layer 1's base is `staging/user-<username>`.
+- Agents may merge PRs into their user's `staging/user-<username>` themselves, once the PR's own
+  tests pass.
+- An agent merges into `staging/global` or `main` only after the user explicitly says yes to that
+  merge. How the branches fit together is in the `merging-to-staging` skill.
 
 ## Template
 
@@ -57,7 +66,8 @@ Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
   otherwise `None.`.
 - **Testing**: report what was actually run and what happened, including failures. Don't claim a
   test passed unless you ran it in this change.
-- **Stack**: link the PR below (and above, once it exists) by number. Layer 1's base is `main`.
+- **Stack**: link the PR below (and above, once it exists) by number. Layer 1's base is
+  `staging/user-<username>`.
 - **Size**: the count of reviewable, hand-written code lines under the PR size rule in the root
   `AGENTS.md` (generated code, lockfiles, verbatim copies and prose don't count).
 - **Attribution**: keep the `🤖 Generated with <agent>` line last, with `<agent>` from the table
