@@ -26,6 +26,7 @@ mod credits;
 pub mod forest_layout;
 mod game;
 pub mod level;
+pub mod main_menu;
 pub mod map;
 mod match_play;
 mod menu;
@@ -40,7 +41,6 @@ mod settings;
 mod text_overlay;
 #[allow(dead_code)]
 mod thrown_wormholes;
-pub mod main_menu;
 
 use std::error::Error;
 

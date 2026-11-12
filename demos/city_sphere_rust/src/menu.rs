@@ -51,8 +51,7 @@ const PAGES: [(Page, &str); 5] = [
     (Page::Credits, "CREDITS"),
     (Page::Quit, "QUIT"),
 ];
-const SATELLITE_MAP_LEGEND: &str =
-    "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
+const SATELLITE_MAP_LEGEND: &str = "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
 const PAPER_MAP_LEGEND: &str = "Squares: consoles  Rings: wormholes  Dashes: zones";
 const SETTINGS_HELP_LINES: [&str; 5] = [
     "",
@@ -88,7 +87,13 @@ const NUMBERS: [(Number, &str, f64, f64, f64); 10] = [
     (Number::HitBlur, "hit blur px", 1.0, 0.0, 20.0),
     (Number::WormholeTint, "wormhole tint 0-1", 0.1, 0.0, 1.0),
     (Number::MilkyWay, "milky way 0-1", 0.1, 0.0, 1.0),
-    (Number::FogOfWarRange, "fog of war range m", 10.0, 20.0, 2000.0),
+    (
+        Number::FogOfWarRange,
+        "fog of war range m",
+        10.0,
+        20.0,
+        2000.0,
+    ),
 ];
 
 /// `Page` is one page of the menu.

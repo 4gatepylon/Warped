@@ -226,10 +226,7 @@ mod tests {
             "34.1.2.3:47810 lunar-surface",
             "34.1.2.3:47810 moon Moon Base",
         ] {
-            let error: String = MainMenu::New(line)
-                .err()
-                .expect("a bad line")
-                .to_string();
+            let error: String = MainMenu::New(line).err().expect("a bad line").to_string();
             assert!(error.contains(line), "{error}");
         }
     }
