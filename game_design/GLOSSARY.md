@@ -214,3 +214,14 @@ player settings
 ```
 
 ![The player settings page, with the row or key that leads to each page marked](pages/player_settings.png)
+
+### The credits page's SWG
+
+```text
+credits
+├── title                                       UIE
+├── credits text                                UIEs
+└── help line                                   UIE
+```
+
+![The credits page, with the row or key that leads to each page marked](pages/credits.png)
