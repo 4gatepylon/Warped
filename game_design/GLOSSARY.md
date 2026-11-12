@@ -260,3 +260,22 @@ game settings
 ```
 
 ![The game settings page, with the row or key that leads to each page marked](pages/game_settings.png)
+
+### The level page's SWG
+
+```text
+level page
+├── scene render                                render
+├── HUD
+│   ├── minimap render                          render
+│   ├── health bar, energy bar, ammo bar        UIEs
+│   └── crosshair, console bar, pylon squares, readouts   UIEs
+├── banner                                      UIE
+└── main map                                    hidden until `Tab`
+```
+
+The 3D world itself (the bots, lasers, pylons, wormholes and the rest) is not in the SWG: the scene render is the
+picture of it. The picture is Dark Forest run as its own program (`game_design/slides/images/forest_hud.jpg`); the
+console bar, the readouts and the banner aren't on it.
+
+![The level page, with the row or key that leads to each page marked](pages/level_page.png)
