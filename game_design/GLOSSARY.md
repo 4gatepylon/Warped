@@ -202,3 +202,15 @@ join by address
 ```
 
 ![The join by address page, with the row or key that leads to each page marked](pages/join_by_address.png)
+
+### The player settings page's SWG
+
+```text
+player settings
+├── title                                       UIE
+├── a row per key or view setting               UIEs
+├── selected-row highlight                      UIE
+└── help line                                   UIE
+```
+
+![The player settings page, with the row or key that leads to each page marked](pages/player_settings.png)
